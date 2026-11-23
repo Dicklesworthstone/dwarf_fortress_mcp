@@ -279,7 +279,10 @@ fn manager_handoff_guidance_exports_then_releases_without_effect_confirmation() 
         let value: Value = serde_json::from_str(&raw).expect("handoff packet");
         spine(&value);
         assert_eq!(value["retained_reference"], reference);
-        assert_eq!(value["agent_turn"]["active_work"]["confirmations"], json!([]));
+        assert_eq!(
+            value["agent_turn"]["active_work"]["confirmations"],
+            json!([])
+        );
         let next = &value["agent_turn"]["recommendations"][0];
         if exported {
             assert_eq!(next["tool"], "fortress_cancel");
@@ -310,8 +313,14 @@ fn failed_manager_handoff_preserves_rejection_floor_without_recommending_transfe
     let value: Value = serde_json::from_str(&raw).expect("failed handoff packet");
     spine(&value);
     assert_eq!(value["retained_reference"], reference);
-    assert_eq!(value["agent_turn"]["active_work"]["confirmations"], json!([]));
-    assert_eq!(value["agent_turn"]["briefing"]["development_commit_available"], false);
+    assert_eq!(
+        value["agent_turn"]["active_work"]["confirmations"],
+        json!([])
+    );
+    assert_eq!(
+        value["agent_turn"]["briefing"]["development_commit_available"],
+        false
+    );
     assert!(value["result"]["production_handoff"].is_null());
     let next = &value["agent_turn"]["recommendations"][0];
     assert_eq!(next["tool"], "fortress_query");

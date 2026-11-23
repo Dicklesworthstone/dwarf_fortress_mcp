@@ -143,6 +143,102 @@ fn commit(runtime: &mut Runtime, prepared: &Value) -> TestResult<Value> {
         .value)
 }
 
+fn no_work_watch(runtime: &mut Runtime, planned: &Value) -> TestResult {
+    let original = runtime
+        .stock_target_no_work
+        .as_ref()
+        .ok_or("no-work owner absent")?
+        .request
+        .clone();
+    let context = runtime.context(false)?;
+    let repeated = runtime.plan_stock_target(original.clone(), &context)?.value;
+    assert_eq!(
+        repeated["no_work_stock_goal"],
+        planned["no_work_stock_goal"]
+    );
+    let mut retargeted = original;
+    retargeted.deadline_tick += 1;
+    let context = runtime.context(false)?;
+    assert!(runtime.plan_stock_target(retargeted, &context).is_err());
+
+    for (phase, samples, proven) in [
+        ("", 0, false),
+        ("goal_first", 1, false),
+        ("goal_first", 1, false),
+        ("goal_second", 2, true),
+    ] {
+        stage(phase)?;
+        let context = runtime.context(false)?;
+        let sampled = runtime.wait(&context)?.value;
+        assert_same_target(&sampled, planned);
+        assert_eq!(sampled["original_goal_proven"], proven);
+        assert_eq!(
+            sampled["no_work_stock_goal"]["original_goal_proven"],
+            proven
+        );
+        assert_eq!(
+            sampled["no_work_stock_goal"]["sample"]["stable_samples_observed"],
+            samples
+        );
+        assert_eq!(
+            sampled["no_work_stock_goal"]["sample"]["current_truth"],
+            "true"
+        );
+        assert_eq!(
+            sampled["no_work_stock_goal"]["native_effect_dispatched"],
+            false
+        );
+        assert!(sampled["original_plan"].is_null());
+        assert!(sampled["frontier"].is_null());
+        assert!(sampled["review"].is_null());
+    }
+
+    // A failed publication withdraws current proof without erasing the fixed
+    // request or its historical achievement. A complete zero count is False.
+    runtime.abandon_preparation();
+    let withdrawn = inspect(runtime)?;
+    assert_eq!(withdrawn["original_goal_proven"], false);
+    assert!(withdrawn["no_work_stock_goal"]["sample"].is_null());
+    assert_same_target(&withdrawn, planned);
+    stage("stock_consumed")?;
+    let context = runtime.context(false)?;
+    let consumed = runtime.wait(&context)?.value;
+    assert_eq!(consumed["original_goal_proven"], false);
+    assert_eq!(
+        consumed["no_work_stock_goal"]["sample"]["current_truth"],
+        "false"
+    );
+    assert_eq!(
+        consumed["no_work_stock_goal"]["sample"]["observed_stack_units"],
+        0
+    );
+    assert!(consumed["no_work_stock_goal"]["sample"]["achieved_at_tick"].is_u64());
+    assert_same_target(&consumed, planned);
+
+    stage("stock_restored")?;
+    let context = runtime.context(false)?;
+    let restored = runtime.observe(ObserveRequest::default(), &context)?.value;
+    assert_eq!(restored["original_goal_proven"], true);
+    assert_same_target(&restored, planned);
+    let reference = runtime.opening_recovery_reference();
+    assert_eq!(reference["original_goal_proven"], false);
+    assert_eq!(
+        reference["no_work_stock_goal"]["original_goal_proven"],
+        false
+    );
+    assert!(reference["no_work_stock_goal"]["sample"].is_null());
+
+    let context = runtime.context(false)?;
+    let cancelled = runtime.cancel(&context)?.value;
+    assert_eq!(cancelled["no_work_stock_goal"]["cancelled"], true);
+    assert_eq!(cancelled["original_goal_proven"], false);
+    assert!(cancelled["no_work_stock_goal"]["sample"].is_null());
+    assert_same_target(&cancelled, planned);
+    assert!(!runtime.config.path("original.plan").exists());
+    assert!(!runtime.config.path("goal.history").exists());
+    output(&cancelled)
+}
+
 fn control(case: &str) -> TestResult {
     if let Some(behavior) = case.strip_prefix("assignment_") {
         return assignment_control(case, behavior);
@@ -198,7 +294,7 @@ fn control(case: &str) -> TestResult {
         assert_eq!(planned["current_state_proven"], false);
         let retained = inspect(&mut runtime)?;
         assert_eq!(retained["stock_target"], planned["stock_target"]);
-        return output(&retained);
+        return no_work_watch(&mut runtime, &planned);
     }
 
     let (baseline, amount) = if case == "fresh" { (4, 2) } else { (2, 4) };
@@ -362,7 +458,10 @@ fn assignment_control(case: &str, behavior: &str) -> TestResult {
         assert_eq!(planned["stock_target"]["labor_assignment_requested"], true);
         assert_eq!(planned["stock_target"]["labor_assignment_planned"], false);
         assert!(planned["stock_target"]["order_step_id"].is_null());
-        assert_eq!(planned["stock_target"]["worker_prerequisite_checked"], false);
+        assert_eq!(
+            planned["stock_target"]["worker_prerequisite_checked"],
+            false
+        );
         return output(&planned);
     }
 
@@ -370,7 +469,10 @@ fn assignment_control(case: &str, behavior: &str) -> TestResult {
     assert_eq!(planned["stock_target"]["labor_assignment_requested"], true);
     assert_eq!(planned["stock_target"]["labor_assignment_planned"], true);
     assert_eq!(planned["stock_target"]["order_step_id"], 1);
-    assert_eq!(planned["stock_target"]["worker_prerequisite_checked"], false);
+    assert_eq!(
+        planned["stock_target"]["worker_prerequisite_checked"],
+        false
+    );
     assert!(text(&planned["original_plan"]["summary"])?.starts_with("Stock target/2 "));
     assert_eq!(planned["original_plan"]["anchor"], observed["anchor"]);
     let steps = planned["original_plan"]["steps"]
@@ -401,7 +503,10 @@ fn assignment_control(case: &str, behavior: &str) -> TestResult {
     let assigned = commit(&mut runtime, &labor)?;
     assert_same_target(&assigned, &planned);
     assert_eq!(assigned["frontier"]["entries"][0]["phase"], "applied");
-    assert_eq!(assigned["frontier"]["entries"][1]["dispatch_attempted"], false);
+    assert_eq!(
+        assigned["frontier"]["entries"][1]["dispatch_attempted"],
+        false
+    );
     assert_eq!(assigned["frontier"]["all_applied"], false);
     assert_eq!(assigned["frontier"]["next_ready"], 1);
     assert_eq!(assigned["original_goal_proven"], false);
@@ -412,7 +517,10 @@ fn assignment_control(case: &str, behavior: &str) -> TestResult {
         let retained = inspect(&mut runtime)?;
         assert_same_target(&retained, &planned);
         assert_eq!(retained["frontier"]["entries"][0]["phase"], "applied");
-        assert_eq!(retained["frontier"]["entries"][1]["dispatch_attempted"], false);
+        assert_eq!(
+            retained["frontier"]["entries"][1]["dispatch_attempted"],
+            false
+        );
         assert_eq!(retained["stock_target"]["revalidation_failed"], true);
         assert!(retained["review"].is_null());
         return output(&retained);
@@ -511,9 +619,7 @@ fn recover(phase: &str, case: &str) -> TestResult {
     );
     if order_index == 1 {
         assert_eq!(recovered["frontier"]["entries"][0]["phase"], "applied");
-        assert!(
-            text(&recovered["original_plan"]["summary"])?.starts_with("Stock target/2 ")
-        );
+        assert!(text(&recovered["original_plan"]["summary"])?.starts_with("Stock target/2 "));
     }
     output(&recovered)
 }

@@ -36,6 +36,28 @@ original order's completion by default, or an explicitly selected inventory
 objective. A separate fresh observation of that goal and current labor can
 establish the complete original parent goal at its exact reported anchor.
 
+## Observe an already-satisfied single stock target
+
+A single `stock_target` that needs no order now retains an immutable
+`no_work_stock_goal` alongside its historical `already_satisfied` assessment.
+`fortress_wait` and default `fortress_observe` take one bounded current sample;
+`fortress_query` only inspects the retained result. The first eligible sample
+is at least one original cadence after the planning census. Repeated ticks
+cannot increase stability, and the original deadline is never renewed.
+
+The separate watch reports qualified count or Unknown, exact anchor and source,
+sample count, timely achievement and current proof. The original no-work census
+continues to report no current proof. False or missing current evidence cannot
+borrow success from historical achievement; later independently qualified True
+evidence may restore current proof after a timely achievement.
+
+No native order, labor effect, preparation, clock run or goal-history sidecar is
+created by this path. Later game ticks must be observed for the cadence to
+advance. Repeat planning with the identical request preserves the watch; cancel
+the goal before changing the request. Failure and cancellation withdraw current
+proof. Recovery retains no current sample or observation streak. The wholly
+satisfied `stock_targets` portfolio retains its existing count-only behavior.
+
 ## Operator configuration
 
 For one session that first completes its own Carpenter workshop, use the

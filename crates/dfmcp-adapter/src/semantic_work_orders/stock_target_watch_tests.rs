@@ -45,11 +45,7 @@ fn raw(tick: u64, beds: Option<u32>) -> LiveOperationsObservation {
     }
 }
 
-fn context(
-    raw: &LiveOperationsObservation,
-    epoch: u64,
-    sequence: u64,
-) -> Result<OperationContext> {
+fn context(raw: &LiveOperationsObservation, epoch: u64, sequence: u64) -> Result<OperationContext> {
     let snapshot = WorldSnapshot::new(
         raw.jobs.fortress_id()?,
         raw.jobs.tick(),
@@ -144,13 +140,22 @@ fn no_work_watch_stability_requires_fresh_distinct_cadenced_samples() -> Result<
     assert!(watch.latest().is_none());
     assert!(!watch.current_goal_proven());
     assert_eq!(watch.high_tick(), GameTick(120));
-    assert_eq!(sample(&mut watch, 120, 8, Some(20))?.stable_samples_observed, 0);
-    assert_eq!(sample(&mut watch, 129, 9, Some(20))?.stable_samples_observed, 0);
+    assert_eq!(
+        sample(&mut watch, 120, 8, Some(20))?.stable_samples_observed,
+        0
+    );
+    assert_eq!(
+        sample(&mut watch, 129, 9, Some(20))?.stable_samples_observed,
+        0
+    );
     let first = sample(&mut watch, 130, 10, Some(20))?;
     assert_eq!(first.stable_samples_observed, 1);
     assert_eq!(first.achieved_at, None);
     assert!(!first.current_goal_proven);
-    assert_eq!(sample(&mut watch, 130, 11, Some(20))?.stable_samples_observed, 1);
+    assert_eq!(
+        sample(&mut watch, 130, 11, Some(20))?.stable_samples_observed,
+        1
+    );
     let complete = sample(&mut watch, 140, 12, Some(20))?;
     assert_eq!(complete.stable_samples_observed, 2);
     assert_eq!(complete.achieved_at, Some(GameTick(140)));
@@ -200,7 +205,10 @@ fn no_work_watch_refuses_positive_work_and_infeasible_timing() -> Result<()> {
 #[test]
 fn no_work_watch_counts_drops_without_sizing_orders_or_excluding_producers() -> Result<()> {
     let (mut watch, _, _) = initial(2, 200)?;
-    assert_eq!(sample(&mut watch, 130, 8, Some(20))?.stable_samples_observed, 1);
+    assert_eq!(
+        sample(&mut watch, 130, 8, Some(20))?.stable_samples_observed,
+        1
+    );
     let mut capture = raw(140, None);
     capture.jobs.jobs.push(LiveJob {
         native_id: 7,
@@ -246,7 +254,10 @@ fn no_work_watch_unknown_is_not_zero_and_interrupts_stability() -> Result<()> {
         assert_eq!(progress.current_truth, PredicateTruth::Unknown);
         assert_eq!(progress.stable_samples_observed, 0);
         assert!(!progress.current_goal_proven);
-        assert_eq!(sample(&mut watch, 150, 10, Some(20))?.stable_samples_observed, 1);
+        assert_eq!(
+            sample(&mut watch, 150, 10, Some(20))?.stable_samples_observed,
+            1
+        );
         assert!(sample(&mut watch, 160, 11, Some(20))?.current_goal_proven);
     }
     Ok(())
@@ -256,9 +267,18 @@ fn no_work_watch_unknown_is_not_zero_and_interrupts_stability() -> Result<()> {
 fn no_work_watch_off_cadence_contradictions_reset_but_never_accelerate_samples() -> Result<()> {
     let (mut watch, _, _) = initial(2, 200)?;
     sample(&mut watch, 130, 8, Some(20))?;
-    assert_eq!(sample(&mut watch, 135, 9, Some(5))?.stable_samples_observed, 0);
-    assert_eq!(sample(&mut watch, 136, 10, Some(20))?.stable_samples_observed, 0);
-    assert_eq!(sample(&mut watch, 140, 11, Some(20))?.stable_samples_observed, 1);
+    assert_eq!(
+        sample(&mut watch, 135, 9, Some(5))?.stable_samples_observed,
+        0
+    );
+    assert_eq!(
+        sample(&mut watch, 136, 10, Some(20))?.stable_samples_observed,
+        0
+    );
+    assert_eq!(
+        sample(&mut watch, 140, 11, Some(20))?.stable_samples_observed,
+        1
+    );
     assert!(sample(&mut watch, 150, 12, Some(20))?.current_goal_proven);
     Ok(())
 }
@@ -269,9 +289,18 @@ fn no_work_watch_exact_replay_and_same_tick_changed_counts_do_not_add_stability(
     let first = sample(&mut watch, 130, 8, Some(20))?;
     let replay = sample(&mut watch, 130, 8, Some(20))?;
     assert_eq!(replay, first);
-    assert_eq!(sample(&mut watch, 130, 8, Some(5))?.stable_samples_observed, 0);
-    assert_eq!(sample(&mut watch, 130, 8, Some(20))?.stable_samples_observed, 0);
-    assert_eq!(sample(&mut watch, 140, 9, Some(20))?.stable_samples_observed, 1);
+    assert_eq!(
+        sample(&mut watch, 130, 8, Some(5))?.stable_samples_observed,
+        0
+    );
+    assert_eq!(
+        sample(&mut watch, 130, 8, Some(20))?.stable_samples_observed,
+        0
+    );
+    assert_eq!(
+        sample(&mut watch, 140, 9, Some(20))?.stable_samples_observed,
+        1
+    );
     assert!(sample(&mut watch, 150, 10, Some(20))?.current_goal_proven);
     Ok(())
 }
@@ -293,7 +322,10 @@ fn no_work_watch_source_gaps_break_unfinished_stability() -> Result<()> {
 #[test]
 fn no_work_watch_deadline_is_fixed_and_missed_completion_cannot_be_resurrected() -> Result<()> {
     let (mut watch, _, _) = initial(2, 140)?;
-    assert_eq!(sample(&mut watch, 135, 8, Some(20))?.stable_samples_observed, 1);
+    assert_eq!(
+        sample(&mut watch, 135, 8, Some(20))?.stable_samples_observed,
+        1
+    );
     let deadline = sample(&mut watch, 140, 9, Some(20))?;
     assert!(deadline.deadline_reached);
     assert!(deadline.expired);
@@ -340,7 +372,9 @@ fn no_work_watch_failed_qualification_withdraws_and_preserves_decoded_floors() -
         let (projection, mut context) = projection(raw(140, Some(20)), 2, 9)?;
         let mut policy = accepted(&projection);
         match cause {
-            0 => context.grants.retain(|grant| grant.capability != Capability::Observe),
+            0 => context
+                .grants
+                .retain(|grant| grant.capability != Capability::Observe),
             1 => context.cancellation_requested = true,
             2 => context.budget.max_bytes = STOCK_TARGET_WATCH_BYTES - 1,
             3 => context.budget.max_entities = 1,
@@ -357,7 +391,10 @@ fn no_work_watch_failed_qualification_withdraws_and_preserves_decoded_floors() -
         assert!(!watch.fenced());
         assert_eq!(watch.high_tick(), GameTick(140));
         assert_eq!(watch.high_cursor().sequence, 9);
-        assert_eq!(sample(&mut watch, 140, 9, Some(20))?.stable_samples_observed, 1);
+        assert_eq!(
+            sample(&mut watch, 140, 9, Some(20))?.stable_samples_observed,
+            1
+        );
         assert!(sample(&mut watch, 150, 10, Some(20))?.current_goal_proven);
     }
     Ok(())
@@ -408,7 +445,11 @@ fn no_work_watch_canonical_epoch_sequence_and_cursor_forks_permanently_fence() -
     for (epoch, sequence) in [(3, 8), (2, 6), (2, 7)] {
         let (mut watch, _, _) = initial(2, 200)?;
         let (projection, context) = projection(raw(130, Some(20)), epoch, sequence)?;
-        assert!(watch.sample(&projection, accepted(&projection), &context).is_err());
+        assert!(
+            watch
+                .sample(&projection, accepted(&projection), &context)
+                .is_err()
+        );
         assert!(watch.fenced());
     }
     let (mut watch, _, _) = initial(2, 200)?;
@@ -417,7 +458,11 @@ fn no_work_watch_canonical_epoch_sequence_and_cursor_forks_permanently_fence() -
     let mut context = context(&capture, 2, 8)?;
     context.anchor.state_hash = Digest32::of_bytes(b"forked citizen anchor");
     let projection = InventoryBaselineProjection::new(context.anchor, capture, &context)?;
-    assert!(watch.sample(&projection, accepted(&projection), &context).is_err());
+    assert!(
+        watch
+            .sample(&projection, accepted(&projection), &context)
+            .is_err()
+    );
     assert!(watch.fenced());
     Ok(())
 }

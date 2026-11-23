@@ -188,9 +188,10 @@ impl StockTargetWatch {
         }
         // The shared helper validates the bounded native source before hashing
         // the exact same fortress identity as the canonical citizen profile.
-        let same_fortress = operations.jobs.fortress_id().is_ok_and(|fortress| {
-            fortress == self.original.original_anchor().fortress_id
-        });
+        let same_fortress = operations
+            .jobs
+            .fortress_id()
+            .is_ok_and(|fortress| fortress == self.original.original_anchor().fortress_id);
         if self.fenced
             || regressed
             || operations.jobs.bridge_generation != self.original.source_generation()
@@ -285,10 +286,8 @@ impl StockTargetWatch {
             if interrupted || current_truth != PredicateTruth::True {
                 count = 0;
             }
-            let cadence_basis = counted_tick.map_or(
-                self.original.original_anchor().tick.get(),
-                GameTick::get,
-            );
+            let cadence_basis =
+                counted_tick.map_or(self.original.original_anchor().tick.get(), GameTick::get);
             if current_truth == PredicateTruth::True
                 && anchor.tick <= self.deadline_tick
                 && anchor.tick.get().saturating_sub(cadence_basis) >= self.poll_interval_ticks

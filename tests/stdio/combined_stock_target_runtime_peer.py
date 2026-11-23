@@ -184,6 +184,13 @@ def run_case(executable, test_name, requested_case):
                 self.order_created = True
                 self.order_sequence += 1
 
+            def advance_stock_tick(self, tick):
+                if case in ("already", "above"):
+                    assert not self.order_created and tick >= self.order_tick
+                    self.order_tick = self.workforce_tick = tick
+                else:
+                    self.goal_tick(tick)
+
             def apply_stage(self):
                 value = stage.read_text() if stage.exists() else ""
                 if value == self.last_stage:
@@ -198,10 +205,16 @@ def run_case(executable, test_name, requested_case):
                         self.operations_capture = inspection.operations_capture
                 elif value in ("goal_first", "goal_second"):
                     self.inventory_stack = 6
-                    self.goal_tick(combined.TICK + (5 if value == "goal_first" else 10))
+                    self.advance_stock_tick(combined.TICK + (5 if value == "goal_first" else 10))
+                elif value in ("stock_consumed", "stock_restored"):
+                    self.inventory_stack = 0 if value == "stock_consumed" else 6
+                    self.advance_stock_tick(combined.TICK + (15 if value == "stock_consumed" else 20))
 
             def reply(self, plugin, operation, request):
                 self.apply_stage()
+                if plugin == "dfmcp_bridge":
+                    return combined.citizen_reply(
+                        operation, request, self.citizen_ids, tick=self.order_tick)
                 if case in ("after_stock", "after_queue") and not self.injected_after_dispatch:
                     if 2 in creation_states(production):
                         self.injected_after_dispatch = True

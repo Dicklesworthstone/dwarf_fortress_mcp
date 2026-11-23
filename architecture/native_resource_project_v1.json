@@ -228,7 +228,11 @@
     "crates/dfmcp-mcp/src/workshop_construction_server/project_template_tests.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/tree_material.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/clock.rs",
-    "crates/dfmcp-adapter/src/workshop_construction/tree_material_tests.rs"
+    "crates/dfmcp-adapter/src/workshop_construction/tree_material_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/stock_target_watch.rs",
+    "crates/dfmcp-mcp/src/live_production_presentation_stock_watch.rs",
+    "crates/dfmcp-adapter/src/semantic_work_orders/stock_target_watch.rs",
+    "crates/dfmcp-adapter/src/semantic_work_orders/stock_target_watch_tests.rs"
   ],
   "qualification": {
     "pre_outage_ledger_component_cases_passed": 17,
@@ -293,5 +297,21 @@
     "native_effect_dispatched": false,
     "tree_custody_frozen_in_later_stages": true,
     "final_stock_goal_proven": false
+  },
+  "no_work_stock_goal": {
+    "schema": "dfmcp.stock-target-watch/1",
+    "consumer": "typed ProjectProductionStatus",
+    "initial_census_proves_stability": false,
+    "immutable_original_deadline": true,
+    "sample_tools": [
+      "fortress_wait",
+      "fortress_observe(default)"
+    ],
+    "no_native_effect_or_time_advance": true,
+    "current_independent_sample_required": true,
+    "process_local_history": true,
+    "recovery_restores_proof": false,
+    "cancelled_or_failed_publication_proof": false,
+    "execution_qualification": "source_review_and_rustfmt_parse_only; Rust typecheck and execution unverified"
   }
 }

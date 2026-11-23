@@ -2,12 +2,12 @@
 use dfmcp_adapter::build_placement::{
     journal::private_file::PrivateBuildFile, rpc::BuildCancellation,
 };
+use dfmcp_adapter::manager_appointment::production_origin::ManagerProductionFloor;
 use dfmcp_adapter::manager_appointment::{
     Capture, FortressIdentity, ManagerProtocol, Plan, Selection,
     journal::{self, Journal, Mode, Original, State},
     rpc::{Binding, CONNECT_BYTES, ManagerRpc},
 };
-use dfmcp_adapter::manager_appointment::production_origin::ManagerProductionFloor;
 #[path = "production_handoff.rs"]
 mod production_handoff;
 use dfmcp_adapter::workshop_construction::{

@@ -72,7 +72,12 @@
       "crates/dfmcp-mcp/src/live_production_runtime/stock_target_request_tests.rs",
       "crates/dfmcp-mcp/src/live_production_runtime/stock_target_tests.rs",
       "crates/dfmcp-mcp/src/live_production_presentation_stock_target_tests.rs",
-      "tests/stdio/combined_stock_target_runtime_peer.py"
+      "tests/stdio/combined_stock_target_runtime_peer.py",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_target_watch.rs",
+      "crates/dfmcp-mcp/src/live_production_presentation_stock_watch.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/project.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/project_tests.rs",
+      "tests/stdio/combined_production.py"
     ],
     "selected_labor": "default: already enabled and eligible; assign_labor=true: separately reviewed enable before the dependent order",
     "no_work_worker_prerequisite_checked": false,
@@ -253,6 +258,20 @@
     "restored_current_proof": false,
     "new_order_or_labor_effect": false,
     "clock_authority": false,
-    "source_status": "implemented; fourteen regression tests authored; execution unverified"
+    "source_status": "source reviewed and rustfmt parsed; fourteen core regressions authored; Rust compilation and test execution unverified",
+    "mcp_field": "no_work_stock_goal",
+    "mcp_sample_tools": [
+      "fortress_wait",
+      "fortress_observe(default)"
+    ],
+    "mcp_query_is_new_sample": false,
+    "repeat_plan_renews_deadline": false,
+    "changed_plan_requires_cancellation": true,
+    "parent_resource_project_consumes_typed_proof": true,
+    "wholly_satisfied_portfolio_supported": false,
+    "sample_byte_work": 204472320,
+    "prepaid_output_byte_work": 268435456,
+    "sample_history_durable": false,
+    "constructor_byte_work": 16777216
   }
 }

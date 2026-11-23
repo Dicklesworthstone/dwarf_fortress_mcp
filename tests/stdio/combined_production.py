@@ -212,7 +212,8 @@ def order_effect(plan, created):
     return raw + proof + text(key)
 
 
-def citizen_reply(op, req, citizen_ids=(42,)):
+def citizen_reply(op, req, citizen_ids=(42,), *, tick=None):
+    tick = TICK if tick is None else tick
     if op == 'Handshake':
         assert req[6] == TOKEN
         return (number(1, 1) + blob(2, b'') + blob(3, b'') + number(4, 1) + number(5, 0)
@@ -228,7 +229,7 @@ def citizen_reply(op, req, citizen_ids=(42,)):
         citizens += blob(19, citizen)
     return (number(1, 1) + blob(2, b'') + blob(3, b'') + number(4, 1) + number(5, 0)
             + blob(6, req[3]) + number(7, GEN) + number(8, 1) + number(9, 1) + number(10, 1)
-            + number(11, 0) + number(12, TICK) + blob(13, b'Routing fixture') + blob(14, b'region1')
+            + number(11, 0) + number(12, tick) + blob(13, b'Routing fixture') + blob(14, b'region1')
             + number(15, SITE * 2) + number(16, len(citizen_ids)) + number(17, req[5])
             + number(18, int(req[5] + len(page) == len(citizen_ids))) + citizens)
 

@@ -322,9 +322,7 @@ impl<S: EffectJournalStorage> WorkshopAcknowledgements<S> {
         context: &OperationContext,
         scope: MapCuboid,
     ) -> Result<()> {
-        check(
-            matches!(self.protocol, Protocol::ManagerV1_23) && self.scope == Some(scope),
-        )?;
+        check(matches!(self.protocol, Protocol::ManagerV1_23) && self.scope == Some(scope))?;
         self.verify(context)
     }
     pub fn acknowledge(&mut self, pin: WorkshopPin, context: &OperationContext) -> Result<()> {

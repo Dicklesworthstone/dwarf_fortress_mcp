@@ -137,11 +137,30 @@ true. This monitor is process-local: reopening restores neither an unfinished
 streak nor current proof. It provides no recurring maintenance, material or
 usability guarantee, and no causal attribution to production.
 
-The adapter and fourteen focused regression tests are present in source.
-Execution of this increment remains unverified because the editing host's
-execution service disconnected before Rust validation completed. MCP consumer
-integration is recorded separately; this reusable type alone adds no runtime
-admission or public tool.
+The combined single-target consumer now retains this watch after a no-work
+Plan. `fortress_wait` or a default `fortress_observe` performs one bounded fresh
+citizen/operations observation and independent qualification. The returned
+`no_work_stock_goal` reports the exact source, anchor, count, cadence progress,
+timely achievement and current proof separately from the unchanged historical
+`stock_target` assessment. Query does not acquire another sample. A repeat of
+the same Plan retains its timing and progress; changed planning is refused until
+the original watch is explicitly cancelled.
+
+This path never dispatches an order, labor change or clock run. The game must
+reach later observed ticks for spaced samples to accumulate. Current proof
+withdraws after failed publication, cancellation, an unsettled clock, or
+contradictory/missing evidence. A later qualified count can restore current
+truth after a timely historical achievement. Recovery output carries the
+original goal identity with no current sample or proof. The resource-project
+parent consumes this typed result, so an initially met single stock target can
+complete under its original deadline without inventing production.
+
+The wholly met `stock_targets` portfolio still returns its existing count-only
+result; this watch is scoped to a single `stock_target`. The pure adapter has
+fourteen focused regression cases, and the runtime/native-peer and presentation
+sources cover no-work sampling, repeated ticks, withdrawal, stock consumption,
+restoration and cancellation. Execution evidence for this increment is recorded
+separately in `IMPLEMENTATION_STATUS.md`; source presence adds no admission.
 
 ## Evidence boundary
 
@@ -184,9 +203,10 @@ dependencies:
 cargo +nightly test --locked --offline -p dfmcp-mcp --lib stock_target -- --nocapture
 ```
 
-Verified focused execution passes all 78 live-production adapter tests and all
-418 Runtime/presentation component tests, including 66 presentation tests and
-all 25 vector Runtime/native-peer cases. Full MCP build/check is still
+The previously recorded focused component run passed 78 live-production
+adapter tests and 418 Runtime/presentation tests, including 66 presentation tests
+and all 25 vector Runtime/native-peer cases. Those historical results do not
+validate the subsequently added no-work watch and consumer. Full MCP build/check is still
 memory-blocked in the unchanged pinned runtime dependency; component execution
 excludes MCP transport/supervision and admission. Execution details and full
 qualification limits are recorded in `IMPLEMENTATION_STATUS.md`. Deterministic native-peer results do not establish

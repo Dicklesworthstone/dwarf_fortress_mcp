@@ -476,6 +476,7 @@ impl Runtime {
     ) -> Result<View> {
         request.validate()?;
         self.check(c, true)?;
+        self.require_no_active_stock_watch()?;
         self.stock_targets_no_work = None;
         self.stock_target_no_work = None;
         self.planning_inspection.withdraw();

@@ -1,6 +1,7 @@
 //! Complete bounded Agent Turns. Evidence chunks are data, never authority.
 use super::runtime::RESPONSE_BYTES;
 use crate::agent_turn::{AgentPhase, AgentTurnBuilder, ContinuityStatus, recommendation};
+use crate::live_production_presentation::stock_watch;
 use dfmcp_core::{Digest32, RequestId, SessionId};
 use fastmcp_rust::{
     CompleteResult, ContentBlock, CoreResult, FinalCallToolResult, FinalCoreResult, ResultMeta,
@@ -126,11 +127,60 @@ fn observed_plan(result: &Value) -> Option<Value> {
     None
 }
 
-fn next_step(result: &Value, reference: &Value, session: SessionId) -> Vec<Value> {
+/// The project and child must name the same original minimum and current
+/// sample. A retained stage checkpoint never supplies temporal evidence.
+fn no_work_stock_goal(result: &Value, reference: &Value) -> Value {
+    let child = &result["child"];
+    let raw = &child["no_work_stock_goal"];
+    let parent = &result["current_stock_goal"];
+    let original = &result["original"]["goal"];
+    let matches_original = [
+        ("recipe", "recipe"),
+        ("target_stack_units", "minimum_stack_units"),
+        ("deadline_tick", "deadline_tick"),
+        ("poll_interval_ticks", "poll_interval_ticks"),
+        ("stable_samples_required", "stable_samples"),
+    ]
+    .into_iter()
+    .all(|(watch, goal)| !raw[watch].is_null() && raw[watch] == original[goal]);
+    let proven = raw["original_goal_proven"] == true;
+    let current = result["ok"] == true
+        && result["stage"] == "production"
+        && result["mode"] != "offline"
+        && result["project_cancelled"] != true
+        && result["session_closed"] != true
+        && reference["controller_fenced"] != true
+        && matches_original
+        && parent["no_work_stock_goal"] == *raw
+        && parent["original_goal_proven"] == proven
+        && result["original_goal_proven"] == proven
+        && (!proven || parent["current_goal_anchor"] == raw["sample"]["anchor"]);
+    stock_watch::summary(child, Some(&child["anchor"]), current)
+}
+
+fn withdraw_retained_stock_goals(reference: &mut Value) {
+    for pointer in [
+        "/child_reference",
+        "/retained_stage/checkpoint/production",
+        "/retained_stage/checkpoint/production_intent/recovery_reference",
+    ] {
+        if let Some(child) = reference.pointer_mut(pointer) {
+            stock_watch::withdraw(child);
+        }
+    }
+}
+
+fn next_step(
+    result: &Value,
+    reference: &Value,
+    session: SessionId,
+    stock_watch_owned: bool,
+) -> Vec<Value> {
     if result["session_closed"] == true {
         return Vec::new();
     }
-    if !publication_pending(reference)
+    if !stock_watch_owned
+        && !publication_pending(reference)
         && let Some(next) = tree::next_step(result, reference, session)
     {
         return next;
@@ -152,6 +202,11 @@ fn next_step(result: &Value, reference: &Value, session: SessionId) -> Vec<Value
         (
             "fortress_query",
             "Inspect the acknowledged production intent and exact existing child files. Reopen in recovery to acknowledge a complete matching original; never initialize, resize or replace an interrupted publication.",
+        )
+    } else if stock_watch_owned && !result["current_stock_goal"]["no_work_stock_goal"].is_object() {
+        (
+            "fortress_explain",
+            "Inspect the retained no-work goal whose current identity could not be verified. Preserve its original target and deadline before further planning.",
         )
     } else if let Some((scope, seal)) = review(result) {
         confirmation = true;
@@ -178,6 +233,26 @@ fn next_step(result: &Value, reference: &Value, session: SessionId) -> Vec<Value
             "fortress_plan",
             "Freshly qualify the completed original Workshop and enter production without dispatching a new native effect.",
         )
+    } else if result["current_stock_goal"]["no_work_stock_goal"].is_object()
+        && result["current_stock_goal"]["no_work_stock_goal"]["cancelled"] != true
+    {
+        let watch = &result["current_stock_goal"]["no_work_stock_goal"];
+        if watch["original_goal_proven"] == true
+            || watch["source_fenced"] == true
+            || watch["sample"]["expired"] == true
+            || result["mode"] == "offline"
+        {
+            (
+                "fortress_explain",
+                "Inspect the unchanged no-work goal and its exact current evidence. Historical counts and a missed deadline cannot supply a new stable proof.",
+            )
+        } else {
+            arguments["scope"] = json!("goal");
+            (
+                "fortress_wait",
+                "Take one fresh inventory sample for the original no-work target. Later game ticks at its fixed cadence are required; wait does not create an order or advance time.",
+            )
+        }
     } else if result["original_goal_proven"] == true
         || result["current_stock_goal"]["already_satisfied"].is_object()
     {
@@ -286,9 +361,44 @@ pub(super) fn packet(
     operation: &str,
     session: Option<SessionId>,
     request: Option<RequestId>,
-    result: Value,
-    reference: Value,
+    mut result: Value,
+    mut reference: Value,
 ) -> Value {
+    let no_work_stock_goal = no_work_stock_goal(&result, &reference);
+    let has_stock_watch = !result["child"]["no_work_stock_goal"].is_null()
+        || !result["current_stock_goal"]["no_work_stock_goal"].is_null();
+    if has_stock_watch {
+        let proven = no_work_stock_goal["original_goal_proven"] == true;
+        if result["child"].is_object() {
+            result["child"]["no_work_stock_goal"] = no_work_stock_goal.clone();
+            result["child"]["original_goal_proven"] = json!(proven);
+            result["child"]["current_state_proven"] = json!(false);
+            // A no-work observation owns no native preparation to confirm.
+            result["child"]["review"] = Value::Null;
+            if result["child"]["frontier"].is_object() {
+                result["child"]["frontier"]["review"] = Value::Null;
+            }
+            for clock in ["clock", "inventory_clock"] {
+                if result["child"][clock].is_object() {
+                    result["child"][clock]["review_available"] = json!(false);
+                    result["child"][clock]["commit_available"] = json!(false);
+                }
+            }
+        }
+        if !result["current_stock_goal"].is_object() {
+            result["current_stock_goal"] = json!({});
+        }
+        result["current_stock_goal"]["no_work_stock_goal"] = no_work_stock_goal.clone();
+        result["current_stock_goal"]["original_goal_proven"] = json!(proven);
+        result["current_stock_goal"]["current_goal_anchor"] = if proven {
+            no_work_stock_goal["sample"]["anchor"].clone()
+        } else {
+            Value::Null
+        };
+        result["original_goal_proven"] = json!(proven);
+        result["current_state_proven"] = json!(false);
+    }
+    withdraw_retained_stock_goals(&mut reference);
     let mut turn = AgentTurnBuilder::new(operation, phase(operation)).continuity(
         ContinuityStatus::Indeterminate,
         None,
@@ -397,7 +507,7 @@ pub(super) fn packet(
         json!({"uncertainty_id":"native_project_scope","epistemic_state":"unknown",
             "statement":"This explicitly unadmitted development owner can retain one original Tree designation and supply handoff before original Workshop construction and one fixed furniture stock target. Each native effect and clock interval has its own review. Manager appointment is not a stage of this project."}),
         json!({"uncertainty_id":"receipt_and_goal","epistemic_state":"unknown",
-            "statement":"Placement, order insertion and clock receipts are historical custody. Only the existing production monitor can prove the original labor and stock goal at its exact observation anchor. An already-satisfied census proves only the count at its recorded anchor, without stability or causal-output proof."}),
+            "statement":"Placement, order insertion and clock receipts are historical custody. Production with an order requires its current labor and stock monitor. An originally satisfied no-work target instead requires fresh qualified inventory samples at its fixed cadence and deadline; its planning census contributes no stability. Neither path proves causal output attribution."}),
         json!({"uncertainty_id":"stop_and_recovery","epistemic_state":"indeterminate",
             "statement":"A project stop prevents new stages and new reviews. It does not undo construction, cancel an already inserted order or prove a clock paused. Preserve all recovery references; independently reconcile or cancel the active clock. Opening markers never grant replayed initialization."}),
     ];
@@ -427,6 +537,7 @@ pub(super) fn packet(
             "runtime_admitted":false, "mutation_admissible":false,
             "stage":stage, "project_cancelled":cancelled,
             "original_goal":goal["goal"],
+            "no_work_stock_goal":no_work_stock_goal,
             "original_goal_proven":result["ok"] == true && *stage == "production"
                 && !cancelled && result["original_goal_proven"] == true,
             "current_goal_anchor":if result["ok"] == true && *stage == "production" && !cancelled {
@@ -448,6 +559,7 @@ pub(super) fn packet(
             "pending_plans":pending.clone().into_iter().collect::<Vec<_>>(),
             "actions":clocks,
             "obligations":obligation.into_iter().collect::<Vec<_>>(),
+            "no_work_stock_goal":no_work_stock_goal,
             "cancellation_drains":if cancelled {
                 vec![json!({"scope":"original_child","native_effects_cancelled":false,
                     "custody_pointer":"/retained_reference"})]
@@ -456,7 +568,9 @@ pub(super) fn packet(
             "publications":publications,
             "confirmations":pending.into_iter().collect::<Vec<_>>(),
         }))
-        .recommendations(session.map_or_else(Vec::new, |id| next_step(&result, &reference, id)))
+        .recommendations(session.map_or_else(Vec::new, |id| {
+            next_step(&result, &reference, id, has_stock_watch)
+        }))
         .uncertainty(uncertainty)
         .coverage(json!({
             "status":"partial",
@@ -840,7 +954,7 @@ mod tests {
         let session = SessionId::new(1);
         let result = json!({"ok":true,"mode":"control","stage":"production","child":{
             "original_plan":{"plan_digest":"original"},"frontier":{"next_ready":2}}});
-        let next = next_step(&result, &Value::Null, session);
+        let next = next_step(&result, &Value::Null, session, false);
         assert_eq!(next[0]["tool"], "fortress_plan");
         let raw = next[0]["arguments"]["request"]
             .as_str()
@@ -848,7 +962,7 @@ mod tests {
         assert_eq!(serde_json::from_str::<Value>(raw)?["kind"], "step");
         let result = json!({"ok":true,"stage":"production","child":{
             "inventory_clock":{"review_available":true,"active_run":{"review_seal":"clock"}}}});
-        let next = next_step(&result, &Value::Null, session);
+        let next = next_step(&result, &Value::Null, session, false);
         assert_eq!(next[0]["tool"], "fortress_commit");
         assert_eq!(next[0]["arguments"]["scope"], "inventory_clock");
         assert_eq!(next[0]["arguments"]["review_seal"], "clock");
@@ -885,5 +999,255 @@ mod tests {
         blocked["child"]["observation"]["workforce_choices"]["existing_labor_options"] = json!([]);
         assert!(observed_plan(&blocked).is_none());
         Ok(())
+    }
+
+    fn no_work_project_fixture() -> Value {
+        let (_, child) = stock_watch::tests::fixture();
+        json!({
+            "ok":true,"mode":"control","stage":"production",
+            "project_cancelled":false,"original_goal_proven":true,
+            "original":{"goal":{
+                "recipe":"wooden_bed","minimum_stack_units":10,
+                "max_order_amount":1,"deadline_tick":200,
+                "poll_interval_ticks":10,"stable_samples":2,"assign_labor":true,
+            }},
+            "current_stock_goal":{
+                "original_goal_proven":true,
+                "current_goal_anchor":child["anchor"],
+                "no_work_stock_goal":child["no_work_stock_goal"],
+                "already_satisfied":{"satisfied_at_anchor":true,"stability_proven":false},
+            },
+            "child":child,
+        })
+    }
+
+    fn refresh_no_work_child(result: &mut Value) {
+        result["current_stock_goal"]["no_work_stock_goal"] =
+            result["child"]["no_work_stock_goal"].clone();
+        let proven = result["child"]["original_goal_proven"] == true;
+        result["current_stock_goal"]["original_goal_proven"] = json!(proven);
+        result["current_stock_goal"]["current_goal_anchor"] = if proven {
+            result["child"]["anchor"].clone()
+        } else {
+            Value::Null
+        };
+        result["original_goal_proven"] = json!(proven);
+    }
+
+    #[test]
+    fn no_work_project_proof_and_wait_follow_the_fixed_inventory_goal() {
+        let result = no_work_project_fixture();
+        let complete = packet(
+            "fortress.wait",
+            Some(SessionId::new(1)),
+            None,
+            result.clone(),
+            Value::Null,
+        );
+        assert_eq!(
+            complete["agent_turn"]["briefing"]["original_goal_proven"],
+            true
+        );
+        assert_eq!(complete["result"]["original_goal_proven"], true);
+        assert_eq!(
+            complete["agent_turn"]["briefing"]["current_goal_anchor"],
+            result["child"]["anchor"]
+        );
+        assert_eq!(
+            complete["agent_turn"]["active_work"]["confirmations"],
+            json!([])
+        );
+        assert_eq!(
+            complete["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_explain"
+        );
+
+        let mut pending = result;
+        stock_watch::tests::pending(&mut pending["child"]);
+        refresh_no_work_child(&mut pending);
+        let waiting = packet(
+            "fortress.plan",
+            Some(SessionId::new(1)),
+            None,
+            pending,
+            Value::Null,
+        );
+        assert_eq!(waiting["result"]["original_goal_proven"], false);
+        assert!(waiting["agent_turn"]["briefing"]["current_goal_anchor"].is_null());
+        assert_eq!(
+            waiting["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_wait"
+        );
+        assert_eq!(
+            waiting["agent_turn"]["recommendations"][0]["arguments"]["scope"],
+            "goal"
+        );
+        assert_eq!(
+            waiting["agent_turn"]["active_work"]["confirmations"],
+            json!([])
+        );
+    }
+
+    #[test]
+    fn no_work_project_rejects_forged_parent_links_and_stale_current_claims() {
+        for cause in 0..8 {
+            let mut result = no_work_project_fixture();
+            match cause {
+                0 => result["current_stock_goal"]["current_goal_anchor"]["tick"] = json!(141),
+                1 => result["original"]["goal"]["minimum_stack_units"] = json!(11),
+                2 => result["original"]["goal"]["deadline_tick"] = json!(210),
+                3 => {
+                    result["current_stock_goal"]["no_work_stock_goal"]["goal_witness"] =
+                        json!("f".repeat(64))
+                }
+                4 => {
+                    result["child"]["no_work_stock_goal"]["sample"]["stable_samples_observed"] =
+                        json!(1)
+                }
+                5 => result["mode"] = json!("offline"),
+                6 => result["project_cancelled"] = json!(true),
+                _ => result["ok"] = json!(false),
+            }
+            let output = packet(
+                "fortress.query",
+                Some(SessionId::new(1)),
+                None,
+                result,
+                Value::Null,
+            );
+            assert_eq!(output["result"]["original_goal_proven"], false, "{cause}");
+            assert_eq!(
+                output["agent_turn"]["briefing"]["original_goal_proven"], false,
+                "{cause}"
+            );
+            assert!(
+                output["result"]["child"]["no_work_stock_goal"]["sample"].is_null(),
+                "{cause}"
+            );
+            assert!(
+                output["result"]["current_stock_goal"]["current_goal_anchor"].is_null(),
+                "{cause}"
+            );
+            assert_eq!(
+                output["agent_turn"]["active_work"]["confirmations"],
+                json!([]),
+                "{cause}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_work_project_later_stock_loss_keeps_read_only_wait_after_achievement() {
+        let mut result = no_work_project_fixture();
+        let child = &mut result["child"];
+        child["anchor"]["tick"] = json!(210);
+        child["anchor"]["sequence"] = json!(10);
+        child["observation_tick_floor"] = json!(210);
+        child["no_work_stock_goal"]["consumed_tick_floor"] = json!(210);
+        child["no_work_stock_goal"]["sample"]["anchor"] = child["anchor"].clone();
+        child["no_work_stock_goal"]["sample"]["observed_stack_units"] = json!(5);
+        child["no_work_stock_goal"]["sample"]["current_truth"] = json!("false");
+        child["no_work_stock_goal"]["sample"]["deadline_reached"] = json!(true);
+        child["no_work_stock_goal"]["original_goal_proven"] = json!(false);
+        child["no_work_stock_goal"]["current_inventory_proven"] = json!(false);
+        child["original_goal_proven"] = json!(false);
+        refresh_no_work_child(&mut result);
+        let output = packet(
+            "fortress.wait",
+            Some(SessionId::new(1)),
+            None,
+            result,
+            Value::Null,
+        );
+        assert_eq!(output["result"]["original_goal_proven"], false);
+        let sample = &output["result"]["current_stock_goal"]["no_work_stock_goal"]["sample"];
+        assert_eq!(sample["achieved_at_tick"], 140);
+        assert_eq!(sample["current_truth"], "false");
+        assert_eq!(sample["expired"], false);
+        assert!(output["agent_turn"]["briefing"]["current_goal_anchor"].is_null());
+        assert_eq!(
+            output["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_wait"
+        );
+        assert_eq!(
+            output["agent_turn"]["active_work"]["confirmations"],
+            json!([])
+        );
+    }
+
+    #[test]
+    fn no_work_project_recovery_references_strip_samples_and_proof() {
+        let result = no_work_project_fixture();
+        let reference = json!({
+            "child_reference":result["child"],
+            "retained_stage":{"stage":"production","checkpoint":{
+                "production":result["child"],
+                "production_intent":{"recovery_reference":result["child"]},
+            }},
+        });
+        let output = packet(
+            "fortress.query",
+            Some(SessionId::new(1)),
+            None,
+            json!({"ok":false,"original_goal_proven":false}),
+            reference,
+        );
+        for pointer in [
+            "/retained_reference/child_reference",
+            "/retained_reference/retained_stage/checkpoint/production",
+            "/retained_reference/retained_stage/checkpoint/production_intent/recovery_reference",
+        ] {
+            let child = output.pointer(pointer).expect("retained child");
+            assert!(child["no_work_stock_goal"]["sample"].is_null());
+            assert_eq!(child["no_work_stock_goal"]["original_goal_proven"], false);
+            assert_eq!(child["original_goal_proven"], false);
+            assert_eq!(
+                child["no_work_stock_goal"]["goal_witness"],
+                result["child"]["no_work_stock_goal"]["goal_witness"]
+            );
+        }
+        assert_eq!(
+            output["agent_turn"]["briefing"]["original_goal_proven"],
+            false
+        );
+        assert!(output["agent_turn"]["briefing"]["no_work_stock_goal"].is_null());
+    }
+
+    #[test]
+    fn invalid_no_work_identity_keeps_ownership_without_a_satisfied_census_hint() {
+        for with_choices in [true, false] {
+            let mut result = no_work_project_fixture();
+            result["current_stock_goal"]["already_satisfied"] = Value::Null;
+            result["child"]["no_work_stock_goal"]["goal_witness"] = json!("invalid");
+            result["current_stock_goal"]["no_work_stock_goal"] =
+                result["child"]["no_work_stock_goal"].clone();
+            if with_choices {
+                result["child"]["observation"] = json!({
+                    "seal":"f".repeat(64),
+                    "workforce_choices":{"options":[{
+                        "labor":"CARPENTER","enable_candidates":["7"]
+                    }]}
+                });
+                assert!(observed_plan(&result).is_some());
+            } else {
+                result["child"]["observation"] = Value::Null;
+            }
+            let output = packet(
+                "fortress.query",
+                Some(SessionId::new(1)),
+                None,
+                result,
+                Value::Null,
+            );
+            assert!(output["result"]["current_stock_goal"]["no_work_stock_goal"].is_null());
+            assert_eq!(output["result"]["original_goal_proven"], false);
+            assert_eq!(
+                output["agent_turn"]["active_work"]["confirmations"],
+                json!([])
+            );
+            let recommendations = &output["agent_turn"]["recommendations"];
+            assert_eq!(recommendations.as_array().map(Vec::len), Some(1));
+            assert_eq!(recommendations[0]["tool"], "fortress_explain");
+        }
     }
 }

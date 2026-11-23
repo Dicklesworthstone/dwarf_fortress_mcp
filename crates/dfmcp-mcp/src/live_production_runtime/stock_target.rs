@@ -4,7 +4,8 @@ use super::stock_target_binding::{self, StockTargetBinding};
 use super::*;
 use dfmcp_adapter::semantic_work_orders::{
     INVENTORY_BASELINE_PROJECTION_BYTES, INVENTORY_BASELINE_QUALIFY_BYTES,
-    InventoryBaselineProjection, OperationsGoalSource, StockTargetAssessment,
+    InventoryBaselineProjection, OperationsGoalSource, STOCK_TARGET_WATCH_BYTES,
+    StockTargetAssessment, StockTargetWatch,
 };
 use dfmcp_adapter::work_orders::{WorkOrderObservation, WorkOrderRecipe};
 use dfmcp_core::{DfmcpError, ErrorCode};
@@ -16,11 +17,44 @@ pub(super) const CENSUS_BYTES: u64 =
     33 * MIB + INVENTORY_BASELINE_PROJECTION_BYTES + INVENTORY_BASELINE_QUALIFY_BYTES;
 pub(super) const CHECK_BYTES: u64 = CENSUS_BYTES + orders::native::STOCK_TARGET_QUEUE_BYTES;
 
-/// Retain the actual qualified no-work census instead of recovering truth from
-/// presentation JSON. The ordinary runtime withdrawal paths clear this value.
+/// Retain the qualified original census and its immutable temporal goal.
+/// Withdrawal invalidates current proof without erasing the original deadline.
 pub(super) struct StockTargetNoWork {
     pub(super) assessment: StockTargetAssessment,
     pub(super) request: StockTargetRequest,
+    pub(super) monitor: StockTargetWatch,
+    pub(super) cancelled: bool,
+}
+
+impl StockTargetNoWork {
+    pub(super) fn new(
+        assessment: StockTargetAssessment,
+        request: StockTargetRequest,
+        context: &OperationContext,
+    ) -> Result<Self> {
+        request.validate()?;
+        if assessment.recipe().as_str() != request.recipe
+            || assessment.target_stack_units() != request.minimum_stack_units
+            || assessment.max_order_amount() != request.max_order_amount
+        {
+            return Err(denied(
+                "no-work stock assessment differs from the original request",
+            ));
+        }
+        let monitor = StockTargetWatch::new(
+            assessment.clone(),
+            GameTick(request.deadline_tick),
+            request.poll_interval_ticks,
+            request.stable_samples,
+            context,
+        )?;
+        Ok(Self {
+            assessment,
+            request,
+            monitor,
+            cancelled: false,
+        })
+    }
 }
 
 fn stale(message: &str) -> DfmcpError {
@@ -359,6 +393,16 @@ impl Runtime {
     ) -> Result<View> {
         request.validate()?;
         self.check(c, true)?;
+        if let Some(goal) = &self.stock_target_no_work
+            && !goal.cancelled
+        {
+            if goal.request != request {
+                return Err(denied(
+                    "cancel the original no-work stock goal before changing its request",
+                ));
+            }
+            return self.view(&mut Work::new(c)?);
+        }
         self.stock_target_no_work = None;
         self.stock_targets_no_work = None;
         self.planning_inspection.withdraw();
@@ -423,10 +467,11 @@ impl Runtime {
             )?,
         )?;
         if assessment.amount().is_none() {
-            self.stock_target_no_work = Some(StockTargetNoWork {
+            self.stock_target_no_work = Some(StockTargetNoWork::new(
                 assessment,
                 request,
-            });
+                &work.take(STOCK_TARGET_WATCH_BYTES)?,
+            )?);
             return self.view(&mut work);
         }
         if request.assign_labor {

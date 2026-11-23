@@ -145,13 +145,14 @@ pub(crate) struct ProjectTargetAlreadySatisfied {
     pub witness: Digest32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ProjectProductionStatus {
     pub original_plan_digest: Option<Digest32>,
     pub original_goal_proven: bool,
     pub current_goal_anchor: Option<StateAnchor>,
     pub clocks_settled: bool,
     pub already_satisfied: Option<ProjectTargetAlreadySatisfied>,
+    pub no_work_stock_goal: serde_json::Value,
 }
 
 impl ProjectProductionStatus {
@@ -161,6 +162,7 @@ impl ProjectProductionStatus {
             "original_goal_proven": self.original_goal_proven,
             "current_goal_anchor": self.current_goal_anchor.map(super::anchor_json),
             "clocks_settled": self.clocks_settled,
+            "no_work_stock_goal": self.no_work_stock_goal,
             "already_satisfied": self.already_satisfied.map(|census| serde_json::json!({
                 "anchor": super::anchor_json(census.anchor),
                 "source_digest": census.source_digest.to_hex(),
@@ -463,10 +465,10 @@ impl Runtime {
             })
             && !self.inactive_clock_may_be_running();
         let original_goal_proven = clocks_settled
-            && self.original.is_some()
             && !self.fenced
             && !self.initialization_failed
-            && self.parent_goal_proven();
+            && ((self.original.is_some() && self.parent_goal_proven())
+                || self.no_work_goal_proven());
         let already_satisfied = if self.original.is_none()
             && clocks_settled
             && !self.clock_withholds_goal()
@@ -475,7 +477,9 @@ impl Runtime {
         {
             self.stock_target_no_work
                 .as_ref()
-                .map(|no_work| satisfied_census(goal, no_work, self.anchor))
+                .map(|no_work| {
+                    satisfied_census(goal, no_work, no_work.assessment.original_anchor())
+                })
                 .transpose()?
         } else {
             None
@@ -487,6 +491,7 @@ impl Runtime {
             current_goal_anchor: original_goal_proven.then_some(self.anchor),
             clocks_settled,
             already_satisfied,
+            no_work_stock_goal: self.no_work_goal_json(),
         })
     }
 }

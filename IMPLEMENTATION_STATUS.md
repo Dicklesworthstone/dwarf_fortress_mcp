@@ -1,5 +1,53 @@
 # Implementation Status
 
+## Unreleased — Complete already-satisfied stock goals through MCP
+
+The existing single-target combined runtime now retains a process-local
+`StockTargetWatch` after a no-work Plan. Wait and default Observe acquire one
+fresh canonical citizen/operations sample and independently qualify its complete
+Item census. Query and repeated identical Plan retain the original target,
+deadline, cadence and progress; changed planning requires explicit cancellation.
+The historical assessment remains separate from the new `no_work_stock_goal`
+current count, stability and timely achievement.
+
+The native resource-project parent consumes this typed proof, allowing an
+initially met furniture goal to complete without inventing an order or labor
+assignment. Failed publication, cancellation, unsettled clocks, incomplete
+evidence and later stock loss withdraw current proof. Recovery never restores
+the sample or observation streak. The watch never advances game time and does
+not add a goal-history sidecar. Wholly met `stock_targets` portfolios retain
+their existing count-only behavior.
+
+Bounded presentation validates exact original assessment, source, anchor and
+timing before displaying proof. Pending goals recommend a read-only Wait;
+retained, stale, uncertain, malformed and overflow responses withhold current
+samples and confirmations. Invalid owned watches preserve ownership in parent
+guidance instead of offering replacement planning.
+
+This session authored 35 Rust regressions: fourteen core stock-watch cases, ten
+Manager handoff cases and eleven presentation cases. Existing Runtime/native-TCP
+and Manager stdio lifecycle tests were also extended. These are test sources,
+not executed test results.
+
+Verification completed:
+
+- independent source reviews and byte-exact GitHub blob readback;
+- official nightly rustfmt parsing/formatting of all 21 changed Rust files;
+- Python AST parsing of all three changed native-peer/stdio fixtures;
+- legacy Manager source inventory (47 files) and Manager 1.23 inventory
+  (66 files), both explicitly static-only.
+
+A bounded actual-source adapter check reached `Checking dfmcp-core` but timed
+out after 90 seconds before adapter checking. No new Rust test ran, no completed
+Rust typecheck is claimed, and no live DFHack or production admission is claimed.
+The full mandatory verifier is also blocked by absent `br`. Earlier entries
+describe the narrower verification available at their individual commits; the
+formatting and static-check results above supersede those temporary limitations.
+
+Owners: `df-native-stock-target-3m9`,
+`df-dfhack-bridge-plane-c-pic.4`, and
+`dfmcp-reality-wiring-proof-4bf.14`.
+
 ## Unreleased — Export the completed Manager into finite production
 
 Manager 1.23 now exports a production handoff through the existing

@@ -74,6 +74,7 @@ mod stock_target_request;
 ))]
 #[path = "live_production_runtime/stock_target_tests.rs"]
 mod stock_target_tests;
+mod stock_target_watch;
 mod stock_targets;
 mod stock_targets_binding;
 mod stock_targets_request;
@@ -1138,7 +1139,9 @@ impl Runtime {
     }
     pub(crate) fn abandon_preparation(&mut self) {
         self.planning_inspection.withdraw();
-        self.stock_target_no_work = None;
+        if let Some(goal) = &mut self.stock_target_no_work {
+            goal.monitor.invalidate_current_sample();
+        }
         self.stock_targets_no_work = None;
         if let Some(input) = &self.input_supply {
             input.withdraw();
@@ -1236,6 +1239,7 @@ impl Runtime {
             "manager_prerequisite":self.manager.as_ref().map(SharedManager::status),
             "input_supply":self.input_supply.as_ref().map(SharedInputSupply::status),
             "stock_target":self.stock_target_json(),
+            "no_work_stock_goal":self.no_work_recovery_json(),
             "stock_targets":self.stock_targets_json(),
             "portfolio":self.portfolio_json(),
             "selected_parent_goal":null,
@@ -1348,6 +1352,7 @@ impl Runtime {
             "manager_prerequisite":self.manager.as_ref().map(SharedManager::status),
             "input_supply":self.input_supply.as_ref().map(SharedInputSupply::status),
             "stock_target":self.stock_target_json(),
+            "no_work_stock_goal":self.no_work_goal_json(),
             "stock_targets":self.stock_targets_json(),
             "portfolio":self.portfolio_json(),
             "selected_parent_goal":if self.portfolio.is_some(){self.selected_parent_goal_json()}else{Value::Null},
@@ -1366,7 +1371,7 @@ impl Runtime {
             "parent_goal_observation_fenced":self.parent_goal_observation_fenced(),
             "recovery":self.recovery_json(),"labor_control_enabled":self.labor_enabled(),"production_control_enabled":self.orders_enabled(),
             "native_custody":{"workforce_journal_id":self.workforce_journal.to_hex(),"order_journal_id":self.order_journal.to_hex()},
-            "current_state_proven":false,"original_goal_proven":self.parent_goal_proven(),"clock_advanced":self.clock_advancement_json(),
+            "current_state_proven":false,"original_goal_proven":self.parent_goal_proven() || self.no_work_goal_proven(),"clock_advanced":self.clock_advancement_json(),
             "clock_advance_evidence_scope":"historical_native_receipts",
             "automatic_redispatch":false,"custody_initialization_may_be_partial":self.initialization_failed,
             "coverage_omissions":self.goal_coverage_omissions()});
@@ -1389,6 +1394,18 @@ impl Runtime {
         c: &OperationContext,
     ) -> Result<View> {
         self.check(c, false)?;
+        if self
+            .stock_target_no_work
+            .as_ref()
+            .is_some_and(|goal| !goal.cancelled)
+        {
+            if request != ObserveRequest::default() {
+                return Err(invalid(
+                    "a retained no-work stock goal accepts only default observation",
+                ));
+            }
+            return self.wait_stock_target(c);
+        }
         self.planning_inspection.withdraw();
         self.stock_target_no_work = None;
         self.stock_targets_no_work = None;
@@ -1728,6 +1745,7 @@ impl Runtime {
         ) -> Result<PreparedPlan>,
     ) -> Result<View> {
         self.check(c, true)?;
+        self.require_no_active_stock_watch()?;
         self.planning_inspection.withdraw();
         self.stock_target_no_work = None;
         self.stock_targets_no_work = None;
@@ -1944,13 +1962,18 @@ impl Runtime {
         })
     }
     pub(crate) fn wait(&mut self, c: &OperationContext) -> Result<View> {
-        if self.portfolio.is_some() {
+        if self.stock_target_no_work.is_some() {
+            self.wait_stock_target(c)
+        } else if self.portfolio.is_some() {
             self.wait_portfolio(c)
         } else {
             self.wait_with_goal(c)
         }
     }
     pub(crate) fn cancel(&mut self, c: &OperationContext) -> Result<View> {
+        if self.stock_target_no_work.is_some() {
+            return self.cancel_stock_target(c);
+        }
         self.check(c, true)?;
         self.delegate(c, false, false, |frontier, execution, c| {
             let step = frontier

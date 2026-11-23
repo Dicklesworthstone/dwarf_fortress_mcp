@@ -317,6 +317,21 @@ order. That result explicitly retains `fresh_for_current_call: false`,
 `current_inventory_proven: false` and `stability_proven: false`. It is not a
 current temporal completion proof or a causal production claim.
 
+The child now retains a separate `no_work_stock_goal`. Use `fortress_wait`
+(or default `fortress_observe`) for one fresh, independently qualified stock
+sample. The planning census contributes zero stability. Only distinct suitably
+spaced observed ticks can prove the original minimum within the fixed deadline.
+When that requirement is met and the current count is still sufficient, the
+typed child result can establish the parent's `original_goal_proven` at its
+exact observation anchor without creating any order or labor effect.
+
+The no-work path does not advance game time. Repeated Plan and Query calls
+cannot renew the deadline or manufacture samples. Failed observations or
+publication withdraw current proof; consumption makes current truth false.
+Explicit goal/project cancellation withdraws the watch. Its sample history is
+process-local and is never restored from the retained census or recovery JSON.
+The parent goal and deadline remain immutable across recovery.
+
 For a positive deficit, the compiler fixes the complete original before any
 child publication. The parent then writes and independently acknowledges a
 `dfmcp.project-production-intent/1` record containing the exact goal, plan and

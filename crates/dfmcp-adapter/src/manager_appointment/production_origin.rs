@@ -445,10 +445,18 @@ impl ManagerProductionOrigin {
             return Err(corrupt());
         }
         let scope = self.binding.read_scope()?;
-        self.verify_ack(acknowledgement, &work.reserve(ACK_WORK_BYTES as usize)?, scope)?;
+        self.verify_ack(
+            acknowledgement,
+            &work.reserve(ACK_WORK_BYTES as usize)?,
+            scope,
+        )?;
         check(acknowledgement.latest() == Some(self.pin))?;
         journal.verify(&work.reserve(JOURNAL_WORK_BYTES)?)?;
-        self.verify_ack(acknowledgement, &work.reserve(ACK_WORK_BYTES as usize)?, scope)?;
+        self.verify_ack(
+            acknowledgement,
+            &work.reserve(ACK_WORK_BYTES as usize)?,
+            scope,
+        )?;
         check(acknowledgement.latest() == Some(self.pin))?;
         self.access(&work.current()?, false)?;
         Ok(())
@@ -706,10 +714,8 @@ impl<S: EffectJournalStorage> Journal<S> {
                 // Reserve canonical decoding before source contact. A returned
                 // capture must raise rejection floors even if authority expires.
                 work.charge(4 * MAX_CAPTURE_BYTES)?;
-                let read_context = origin.access(
-                    &work.reserve(EXPORT_READ_WORK_BYTES as usize)?,
-                    true,
-                )?;
+                let read_context =
+                    origin.access(&work.reserve(EXPORT_READ_WORK_BYTES as usize)?, true)?;
                 let read = source.read_manager(&read_context);
                 let source_state = origin.retain_source_state(source);
                 let captured = match read {
@@ -732,7 +738,9 @@ impl<S: EffectJournalStorage> Journal<S> {
                 source_state?;
                 if regressed || capture != captured {
                     origin.fence();
-                    return Err(stale("Manager handoff capsule or retained frontier changed"));
+                    return Err(stale(
+                        "Manager handoff capsule or retained frontier changed",
+                    ));
                 }
                 // This is a native projection, never a synthetic canonical
                 // world anchor. Only the typed export's capture is published.

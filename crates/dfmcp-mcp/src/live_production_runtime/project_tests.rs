@@ -22,9 +22,11 @@ fn goal(assign_labor: bool) -> ProjectStockGoal {
 #[test]
 fn project_goal_is_closed_and_bounded_before_child_io() -> Result<()> {
     let original = goal(false);
-    let raw = serde_json::to_value(&original).map_err(|_| super::invalid("test goal serialization failed"))?;
+    let raw = serde_json::to_value(&original)
+        .map_err(|_| super::invalid("test goal serialization failed"))?;
     assert_eq!(
-        serde_json::from_value::<ProjectStockGoal>(raw.clone()).map_err(|_| super::invalid("test goal decoding failed"))?,
+        serde_json::from_value::<ProjectStockGoal>(raw.clone())
+            .map_err(|_| super::invalid("test goal decoding failed"))?,
         original
     );
     for (field, value) in [
@@ -130,10 +132,7 @@ fn recovered_project_stock_target_keeps_exact_original_goal_keys_and_workshop() 
         }
         assert!(
             original_goal
-                .validate_original(
-                    &recovered,
-                    Digest32::of_bytes(b"other Workshop original"),
-                )
+                .validate_original(&recovered, Digest32::of_bytes(b"other Workshop original"),)
                 .is_err()
         );
         assert!(
@@ -153,7 +152,11 @@ fn recovered_project_stock_target_keeps_exact_original_goal_keys_and_workshop() 
     }
     let without_donor =
         stock_request(7, 100)?.compile(&assessment, &evidence, &stock_workers()?, &c, None)?;
-    assert!(goal(false).validate_original(&without_donor, origin).is_err());
+    assert!(
+        goal(false)
+            .validate_original(&without_donor, origin)
+            .is_err()
+    );
     Ok(())
 }
 
@@ -161,41 +164,45 @@ fn recovered_project_stock_target_keeps_exact_original_goal_keys_and_workshop() 
 fn no_work_project_uses_qualified_census_at_exact_anchor_without_original_proof() -> Result<()> {
     let (_, c) = stock_fixture()?;
     let request = stock_request(7, 100)?;
-    let retained = StockTargetNoWork {
-        assessment: stock_assessment(&c, 7, 100, 9, 99)?,
-        request: request.clone(),
-    };
+    let retained =
+        StockTargetNoWork::new(stock_assessment(&c, 7, 100, 9, 99)?, request.clone(), &c)?;
     let census = satisfied_census(&goal(false), &retained, c.anchor)?;
     assert_eq!(census.anchor, c.anchor);
     assert_eq!(census.observed_stack_units, 9);
     assert_eq!(census.target_stack_units, 7);
     assert_eq!(census.witness, retained.assessment.witness());
     assert_eq!(census.source_digest, retained.assessment.source_digest());
-    assert_eq!(census.source_counters, retained.assessment.source_counters());
+    assert_eq!(
+        census.source_counters,
+        retained.assessment.source_counters()
+    );
     let mut later = c.anchor;
     later.tick = dfmcp_core::GameTick(later.tick.get() + 1);
     assert!(satisfied_census(&goal(false), &retained, later).is_err());
     assert!(satisfied_census(&goal(true), &retained, c.anchor).is_err());
-    let positive = StockTargetNoWork {
-        assessment: stock_assessment(&c, 7, 100, 5, 99)?,
-        request,
-    };
-    assert!(satisfied_census(&goal(false), &positive, c.anchor).is_err());
+    assert!(StockTargetNoWork::new(stock_assessment(&c, 7, 100, 5, 99)?, request, &c,).is_err());
     let status = ProjectProductionStatus {
         original_plan_digest: None,
         original_goal_proven: false,
         current_goal_anchor: None,
         clocks_settled: true,
         already_satisfied: Some(census),
+        no_work_stock_goal: serde_json::Value::Null,
     }
     .to_json();
     assert_eq!(status["original_goal_proven"], false);
     assert!(status["original_plan_digest"].is_null());
     assert_eq!(status["already_satisfied"]["no_order_required"], true);
-    assert_eq!(status["already_satisfied"]["worker_prerequisite_checked"], false);
+    assert_eq!(
+        status["already_satisfied"]["worker_prerequisite_checked"],
+        false
+    );
     assert_eq!(status["already_satisfied"]["stability_proven"], false);
     assert_eq!(status["already_satisfied"]["satisfied_at_anchor"], true);
     assert_eq!(status["already_satisfied"]["fresh_for_current_call"], false);
-    assert_eq!(status["already_satisfied"]["current_inventory_proven"], false);
+    assert_eq!(
+        status["already_satisfied"]["current_inventory_proven"],
+        false
+    );
     Ok(())
 }

@@ -7,9 +7,10 @@ fn active_handoff_is_read_only_and_matches_later_exact_offline_import() -> Resul
     for mode in [Mode::Control, Mode::Recover] {
         let mut donor = Donor::from_capture(fixture_capture()?, true, mode)?;
         let bytes = donor.bytes()?;
-        donor.context.grants.retain(|grant| {
-            matches!(grant.capability, Capability::Query | Capability::Observe)
-        });
+        donor
+            .context
+            .grants
+            .retain(|grant| matches!(grant.capability, Capability::Query | Capability::Observe));
         let capture = at(donor.after()?, donor.context.anchor.tick.get() + 10)?;
         let mut source = Source::new(donor.binding.clone(), capture.clone());
         let mut retained = None;
@@ -77,12 +78,15 @@ fn handoff_refuses_legacy_offline_and_forged_pending_state_before_source_contact
         let mut source = Source::new(donor.binding.clone(), donor.after()?);
         let mut retained = None;
         assert!(
-            donor.journal.export_production_handoff(
-                &mut donor.ack,
-                &mut source,
-                &mut retained,
-                &donor.context,
-            ).is_err(),
+            donor
+                .journal
+                .export_production_handoff(
+                    &mut donor.ack,
+                    &mut source,
+                    &mut retained,
+                    &donor.context,
+                )
+                .is_err(),
             "case {which}"
         );
         assert_eq!((source.reads, source.fences), (0, 1));
@@ -108,12 +112,15 @@ fn handoff_distinguishes_temporary_unavailability_from_sticky_identity_loss() ->
         let mut source = Source::new(donor.binding.clone(), capture.clone());
         let mut retained = None;
         assert!(
-            donor.journal.export_production_handoff(
-                &mut donor.ack,
-                &mut source,
-                &mut retained,
-                &donor.context,
-            ).is_err()
+            donor
+                .journal
+                .export_production_handoff(
+                    &mut donor.ack,
+                    &mut source,
+                    &mut retained,
+                    &donor.context,
+                )
+                .is_err()
         );
         assert_eq!(source.reads, 1);
         let floor = retained.ok_or_else(corrupt)?;
@@ -157,12 +164,10 @@ fn handoff_retains_all_decoded_floors_after_late_source_or_authority_failure() -
         }
         let mut retained = None;
         assert!(
-            donor.journal.export_production_handoff(
-                &mut donor.ack,
-                &mut source,
-                &mut retained,
-                &context,
-            ).is_err()
+            donor
+                .journal
+                .export_production_handoff(&mut donor.ack, &mut source, &mut retained, &context,)
+                .is_err()
         );
         assert_eq!((source.reads, source.fences), (1, 1));
         let mut floor = retained.ok_or_else(corrupt)?;
@@ -174,12 +179,10 @@ fn handoff_retains_all_decoded_floors_after_late_source_or_authority_failure() -
             at(donor.after()?, expected.tick + 1)?,
         );
         assert!(
-            donor.journal.export_production_handoff(
-                &mut donor.ack,
-                &mut retry,
-                &mut retained,
-                &context,
-            ).is_err()
+            donor
+                .journal
+                .export_production_handoff(&mut donor.ack, &mut retry, &mut retained, &context,)
+                .is_err()
         );
         assert_eq!(retry.reads, 0);
         assert_eq!(donor.bytes()?, bytes);
@@ -232,19 +235,19 @@ fn handoff_authority_scope_budget_and_source_are_checked_before_any_read() -> Re
         let mut source = Source::new(donor.binding.clone(), donor.after()?);
         match which {
             0 => context.budget.max_bytes = EXPORT_WORK_BYTES - 1,
-            1 => context.grants.retain(|grant| grant.capability != Capability::Observe),
+            1 => context
+                .grants
+                .retain(|grant| grant.capability != Capability::Observe),
             2 => context.session_id = SessionId::new(999),
             3 => context.cancellation_requested = true,
             _ => source.binding.source = FortressIdentity::new("foreign-fortress", 2)?,
         }
         let mut retained = None;
         assert!(
-            donor.journal.export_production_handoff(
-                &mut donor.ack,
-                &mut source,
-                &mut retained,
-                &context,
-            ).is_err(),
+            donor
+                .journal
+                .export_production_handoff(&mut donor.ack, &mut source, &mut retained, &context,)
+                .is_err(),
             "case {which}"
         );
         assert_eq!((source.reads, source.fences), (0, 1));
@@ -263,12 +266,10 @@ fn handoff_floor_rejection_never_erases_higher_external_counters_or_fences() -> 
     let mut retained = Some(floor);
     let mut source = Source::new(donor.binding.clone(), donor.after()?);
     assert!(
-        donor.journal.export_production_handoff(
-            &mut donor.ack,
-            &mut source,
-            &mut retained,
-            &donor.context,
-        ).is_err()
+        donor
+            .journal
+            .export_production_handoff(&mut donor.ack, &mut source, &mut retained, &donor.context,)
+            .is_err()
     );
     let saved = retained.ok_or_else(corrupt)?;
     assert!(saved.fenced);

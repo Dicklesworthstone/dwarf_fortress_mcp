@@ -10,6 +10,9 @@ const LABOR_BLOCKER_LIMIT: usize = 8;
 #[path = "live_production_presentation_stock_targets.rs"]
 mod stock_targets;
 
+#[path = "live_production_presentation_stock_watch.rs"]
+pub(crate) mod stock_watch;
+
 #[path = "live_production_presentation_manager.rs"]
 mod manager;
 
@@ -61,6 +64,7 @@ pub(super) fn compact(view: &Value) -> Value {
         "manager_prerequisite":manager::summary(&view["manager_prerequisite"],false),
         "input_supply":input_supply::summary(&view["input_supply"],false),
         "stock_target":stock_target_summary(&view["stock_target"]),
+        "no_work_stock_goal":stock_watch::summary(view,None,false),
         "stock_targets":stock_targets::summary(&view["stock_targets"]),
         "selected_parent_goal":null,
         "production_inspection_source":null,"production_inspection":null,
@@ -669,6 +673,8 @@ fn encode(
     };
     let view = retained.unwrap_or(&Value::Null);
     let stock_target = stock_target_summary(&view["stock_target"]);
+    let stock_watch_owned =
+        !view["no_work_stock_goal"].is_null() && view["no_work_stock_goal"]["cancelled"] != true;
     let stock_targets = stock_targets::summary(&view["stock_targets"]);
     let stock_target_failed = stock_target["revalidation_failed"] == true
         || stock_targets["revalidation_failed"] == true
@@ -711,9 +717,10 @@ fn encode(
         .as_array()
         .cloned()
         .unwrap_or_default();
-    let prerequisite_blocks_review = (prerequisite_fenced || stock_target_failed || input_failed)
-        && !(view["review"]["family"] == "workforce/1.17"
-            && labor_step(view, &view["review"]["step_id"]));
+    let prerequisite_blocks_review = stock_watch_owned
+        || ((prerequisite_fenced || stock_target_failed || input_failed)
+            && !(view["review"]["family"] == "workforce/1.17"
+                && labor_step(view, &view["review"]["step_id"])));
     let review = if verified && !uncertain && !prerequisite_blocks_review {
         view["review"].clone()
     } else {
@@ -756,6 +763,18 @@ fn encode(
     };
     let selected_proven = selected_goal["proven_at_anchor"] == true;
     let parent_fenced = view["parent_goal_observation_fenced"] == true;
+    let no_work_stock_goal = stock_watch::summary(
+        view,
+        anchor.map(anchor_value).as_ref(),
+        verified
+            && !uncertain
+            && result["ok"] == true
+            && result["closed"] != true
+            && !clock_invalidates_goal
+            && !parent_fenced
+            && mode != Some("offline"),
+    );
+    let no_work_proven = no_work_stock_goal["original_goal_proven"] == true;
     // The joined sample has a different state hash from its selected child.
     // Present it only at the exact composite anchor, linked to that child; a
     // retained receipt, inventory achievement or top-level flag cannot fill it.
@@ -813,12 +832,17 @@ fn encode(
     } else {
         joined_goal.clone()
     };
-    let parent_proven = parent_goal["original_goal_proven"] == true;
+    let parent_proven = if view["no_work_stock_goal"].is_null() {
+        parent_goal["original_goal_proven"] == true
+    } else {
+        no_work_proven
+    };
     let parent_truth = parent_goal["current_truth"].as_str();
     let control_available =
         verified && session.is_some() && result["closed"] != true && mode == Some("control");
     let clock_authority = |owner: ClockOwner| {
         control_available
+            && !stock_watch_owned
             && view[owner.authority_field] == true
             && owner.view(view)["mode"] == "control"
     };
@@ -850,6 +874,7 @@ fn encode(
     let current_tick = anchor
         .is_some_and(|a| view["anchor"] == anchor_value(a) && known_tick == Some(a.tick.get()));
     let prepared_review = if control_available
+        && !stock_watch_owned
         && !uncertain
         && current_tick
         && review.is_null()
@@ -862,34 +887,41 @@ fn encode(
             .is_some_and(|(tick, expiry)| tick < expiry)
     {
         let mut active = entries.iter().filter(|entry| {
-            !matches!(entry["phase"].as_str(), Some("pending" | "applied" | "failed" | "cancelled"))
+            !matches!(
+                entry["phase"].as_str(),
+                Some("pending" | "applied" | "failed" | "cancelled")
+            )
         });
         let selected = active.next().filter(|_| active.next().is_none());
-        selected.filter(|entry| {
-            entry["phase"] == "prepared"
-                && entry["dispatch_attempted"] == false
-                && digest(&entry["preparation_digest"]).is_some()
-                && view["original_plan"]["steps"].as_array().is_some_and(|steps| {
-                    steps.iter().any(|step| {
-                        step["step_id"] == entry["step_id"]
-                            && step["key"] == entry["idempotency_key"]
-                            && (step["obligation"].is_null()
-                                || known_tick
-                                    .zip(step["obligation"]["deadline_tick"].as_u64())
-                                    .is_some_and(|(tick, expiry)| tick < expiry))
-                            && if entry["family"] == "workforce/1.17" {
-                                step["action"]["kind"] == "set_labor"
-                                    && view["labor_control_enabled"] == true
-                            } else {
-                                entry["family"] == "work-orders/1.10"
-                                    && step["action"]["kind"] == "create_work_order"
-                                    && view["production_control_enabled"] == true
-                                    && !prerequisite_fenced
-                                    && !input_failed
-                            }
-                    })
-                })
-        }).map(|entry| entry["step_id"].clone())
+        selected
+            .filter(|entry| {
+                entry["phase"] == "prepared"
+                    && entry["dispatch_attempted"] == false
+                    && digest(&entry["preparation_digest"]).is_some()
+                    && view["original_plan"]["steps"]
+                        .as_array()
+                        .is_some_and(|steps| {
+                            steps.iter().any(|step| {
+                                step["step_id"] == entry["step_id"]
+                                    && step["key"] == entry["idempotency_key"]
+                                    && (step["obligation"].is_null()
+                                        || known_tick
+                                            .zip(step["obligation"]["deadline_tick"].as_u64())
+                                            .is_some_and(|(tick, expiry)| tick < expiry))
+                                    && if entry["family"] == "workforce/1.17" {
+                                        step["action"]["kind"] == "set_labor"
+                                            && view["labor_control_enabled"] == true
+                                    } else {
+                                        entry["family"] == "work-orders/1.10"
+                                            && step["action"]["kind"] == "create_work_order"
+                                            && view["production_control_enabled"] == true
+                                            && !prerequisite_fenced
+                                            && !input_failed
+                                    }
+                            })
+                        })
+            })
+            .map(|entry| entry["step_id"].clone())
     } else {
         None
     };
@@ -1110,11 +1142,13 @@ fn encode(
             || (inspection["inspection_scope"] == "preplan_captured_operations"
                 && inspection["canonical_anchor"] == view["anchor"]));
     let preplan_capture_needed = current_inspection_allowed
+        && !stock_watch_owned
         && view["original_plan"].is_null()
         && view["observation"]["paused"] == true
         && digest(&view["observation"]["seal"]).is_some()
         && !preplan_inspection_available;
-    let preplan_diagnosis_needed = preplan_inspection_available && !diagnosis_seen;
+    let preplan_diagnosis_needed =
+        !stock_watch_owned && preplan_inspection_available && !diagnosis_seen;
     let recommendation = if session.is_none() || result["closed"] == true {
         None
     } else if uncertain && mode == Some("offline") {
@@ -1157,6 +1191,28 @@ fn encode(
         ))
     } else if !verified {
         None
+    } else if stock_watch_owned {
+        if no_work_proven
+            || no_work_stock_goal.is_null()
+            || no_work_stock_goal["source_fenced"] == true
+            || mode == Some("offline")
+        {
+            None
+        } else if no_work_stock_goal["sample"]["expired"] == true {
+            Some((
+                "fortress_explain",
+                "Inspect the missed fixed no-work deadline. Cancel this original goal before planning another target; its deadline cannot be renewed.",
+                false,
+                json!({}),
+            ))
+        } else {
+            Some((
+                "fortress_wait",
+                "Take one fresh inventory sample for the unchanged no-work goal. Stability requires later game ticks at the original cadence; wait does not advance time or create an order.",
+                false,
+                json!({}),
+            ))
+        }
     } else if let Some(step) = inactive_pending_order {
         Some((
             "fortress_query",
@@ -1433,6 +1489,7 @@ fn encode(
         && !uncertain
         && mode != Some("offline")
         && view["original_plan"].is_null()
+        && !stock_watch_owned
         && let Some(id) = session
         && view["observation"]["workforce_choices"]["next_observation_request"].is_object()
     {
@@ -1448,6 +1505,7 @@ fn encode(
         && !uncertain
         && mode != Some("offline")
         && view["original_plan"].is_null()
+        && !stock_watch_owned
         && let Some(id) = session
         && view["observation"]["workforce_choices"]["next_existing_labor_observation_request"]
             .is_object()
@@ -1472,6 +1530,9 @@ fn encode(
     }
     if stock_targets.is_object() {
         partial_domains.push("original_stock_target_portfolio");
+    }
+    if no_work_stock_goal.is_object() {
+        partial_domains.push("original_no_work_inventory_goal");
     }
     if preplan_inspection_available {
         partial_domains.push("preplan_captured_operations");
@@ -1548,6 +1609,16 @@ fn encode(
             _ => Vec::new(),
         }
     };
+    if no_work_stock_goal.is_object() && !no_work_proven {
+        uncertainty.push(json!({
+            "scope":"original_no_work_inventory_goal",
+            "epistemic_status":"unknown",
+            "current_truth":no_work_stock_goal["sample"]["current_truth"],
+            "source_fenced":no_work_stock_goal["source_fenced"],
+            "finding":"The original no-work inventory goal has no current stable proof in this packet.",
+            "resolution":"Retain its target and deadline. A qualified foreground sample can advance unfinished stability only at a later eligible game tick; a cancelled or fenced owner cannot restore proof."
+        }));
+    }
     if preplan_inspection_available {
         uncertainty.push(json!({"scope":"preplan_captured_operations","epistemic_status":"unknown",
             "anchor":inspection_source["anchor"],"source_digest":inspection_source["source_digest"],
@@ -1713,6 +1784,16 @@ fn encode(
             result["portfolio"]["complete_original_goal_proven"] = json!(parent_proven);
         }
     }
+    if result.get("no_work_stock_goal").is_some() {
+        result["no_work_stock_goal"] = no_work_stock_goal.clone();
+    }
+    if !view["no_work_stock_goal"].is_null() {
+        result["original_goal_proven"] = json!(no_work_proven);
+        result["current_state_proven"] = json!(false);
+    }
+    if let Some(retained) = result.get_mut("retained_reference") {
+        stock_watch::withdraw(retained);
+    }
     if result.get("stock_target").is_some() {
         result["stock_target"] = stock_target.clone();
     }
@@ -1780,6 +1861,7 @@ fn encode(
             "observed_production_conditions":if diagnosis_seen {Some(&inspection["summary"])} else {None},
             "parent_goal_observation_fenced":parent_fenced,
             "stock_target":stock_target,
+            "no_work_stock_goal":no_work_stock_goal,
             "stock_targets":stock_targets,
             "input_supply":input_supply,
             "workshop_prerequisite":if workshop.is_object() {Some(json!({
@@ -1807,6 +1889,7 @@ fn encode(
             "manager_prerequisite":manager,
             "input_supply":input_supply,
             "stock_target":stock_target,
+            "no_work_stock_goal":no_work_stock_goal,
             "stock_targets":stock_targets,
             "workshop_prerequisite_floor":workshop_floor(&view["recovery"]["workshop_prerequisite_floor"]),
             "manager_prerequisite_floor":manager::floor(&view["recovery"]["manager_prerequisite_floor"]),
@@ -1937,7 +2020,11 @@ mod tests {
         let (anchor, _) = joined_order_goal_view("false", false);
         for (family, action, control) in [
             ("workforce/1.17", "set_labor", "labor_control_enabled"),
-            ("work-orders/1.10", "create_work_order", "production_control_enabled"),
+            (
+                "work-orders/1.10",
+                "create_work_order",
+                "production_control_enabled",
+            ),
         ] {
             let mut view = json!({"anchor":anchor_value(anchor),
                 "observation_tick_floor":anchor.tick.get(),
@@ -1954,22 +2041,37 @@ mod tests {
             let recommendation = &result["agent_turn"]["recommendations"][0];
             assert_eq!(recommendation["tool"], "fortress_plan");
             let request: Value = serde_json::from_str(
-                recommendation["arguments"]["request"].as_str().expect("fresh-review request")
-            ).expect("closed fresh-review JSON");
-            assert_eq!(request, json!({"kind":"review_prepared","original_plan_digest":"a".repeat(64)}));
-            assert_eq!(result["agent_turn"]["active_work"]["confirmations"], json!([]));
-            assert!(result["review"].is_null(), "guidance does not issue a confirmation");
-            let recommends_review = |view: &Value, mode, verified, uncertain| {
-                joined_packet(anchor, view, mode, verified, uncertain)
+                recommendation["arguments"]["request"]
+                    .as_str()
+                    .expect("fresh-review request"),
+            )
+            .expect("closed fresh-review JSON");
+            assert_eq!(
+                request,
+                json!({"kind":"review_prepared","original_plan_digest":"a".repeat(64)})
+            );
+            assert_eq!(
+                result["agent_turn"]["active_work"]["confirmations"],
+                json!([])
+            );
+            assert!(
+                result["review"].is_null(),
+                "guidance does not issue a confirmation"
+            );
+            let recommends_review =
+                |view: &Value, mode, verified, uncertain| {
+                    joined_packet(anchor, view, mode, verified, uncertain)
                     ["agent_turn"]["affordances"]
                     .as_array().is_some_and(|items| items.iter().any(|item| {
                         item["request_kind"] == "review_prepared" && item["enabled"] == true
                     }))
-            };
+                };
             assert!(recommends_review(&view, "control", true, false));
             for (mode, verified, uncertain) in [
-                ("offline", true, false), ("reconcile", true, false),
-                ("control", false, false), ("control", true, true),
+                ("offline", true, false),
+                ("reconcile", true, false),
+                ("control", false, false),
+                ("control", true, true),
             ] {
                 assert!(!recommends_review(&view, mode, verified, uncertain));
             }
@@ -1988,7 +2090,7 @@ mod tests {
             expired["original_plan"]["expires_at_tick"] = json!(anchor.tick.get());
             assert!(!recommends_review(&expired, "control", true, false));
             let mut consumed_future = view.clone();
-            consumed_future["observation_tick_floor"] = json!(anchor.tick.get()+1);
+            consumed_future["observation_tick_floor"] = json!(anchor.tick.get() + 1);
             assert!(!recommends_review(&consumed_future, "control", true, false));
             view[control] = json!(false);
             assert!(!recommends_review(&view, "control", true, false));

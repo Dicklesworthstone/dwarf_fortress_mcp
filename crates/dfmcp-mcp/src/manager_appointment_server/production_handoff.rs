@@ -86,7 +86,10 @@ impl ManagerReadSource for Source {
         }
         self.consumed = true;
         let mut work = TurnWork::new(context, Instant::now())?;
-        match self.config.connect(&work.reserve(context, CONNECT_BYTES)?, Mode::Recover) {
+        match self
+            .config
+            .connect(&work.reserve(context, CONNECT_BYTES)?, Mode::Recover)
+        {
             Ok(rpc) => self.rpc = Some(rpc),
             Err(cause) => {
                 self.failed_generation = cause
@@ -114,10 +117,7 @@ impl ManagerReadSource for Source {
     }
 }
 
-fn handoff_json(
-    directory: &std::path::Path,
-    handoff: &ManagerProductionHandoff,
-) -> Result<Value> {
+fn handoff_json(directory: &std::path::Path, handoff: &ManagerProductionHandoff) -> Result<Value> {
     let directory = directory
         .to_str()
         .ok_or_else(|| denied("Manager handoff path must be UTF-8"))?;
@@ -240,8 +240,8 @@ mod tests {
             .map_err(|_| denied("test floor failed to decode"))?;
         assert!(newer.validate(7).is_err());
         changed["fenced"] = json!(true);
-        let fenced: FloorInput = serde_json::from_value(changed)
-            .map_err(|_| denied("test floor failed to decode"))?;
+        let fenced: FloorInput =
+            serde_json::from_value(changed).map_err(|_| denied("test floor failed to decode"))?;
         fenced.validate(7)?;
         assert!(fenced.floor().fenced);
         Ok(())
