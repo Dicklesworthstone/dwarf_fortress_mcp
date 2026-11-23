@@ -63,18 +63,22 @@ fn stage(name: &str) -> TestResult {
 
 fn no_work_parent_floor(runtime: &mut Runtime, goal: &ProjectStockGoal) -> TestResult {
     let start_tick = runtime.anchor.tick.get();
-    let original = runtime
+    let scalar_request = runtime
         .stock_target_no_work
         .as_ref()
-        .ok_or("missing stock watch")?
-        .request
-        .clone();
-    let witness = runtime
-        .stock_target_no_work
+        .map(|watch| watch.request.clone());
+    let portfolio_request = runtime
+        .stock_targets_no_work
         .as_ref()
-        .ok_or("missing stock watch")?
-        .monitor
-        .witness();
+        .map(|watch| watch.request.clone());
+    assert_eq!(scalar_request.is_some(), !goal.is_portfolio());
+    assert_eq!(portfolio_request.is_some(), goal.is_portfolio());
+    let original_watch = runtime.no_work_goal_json();
+    let witness = original_watch["goal_witness"].clone();
+    assert!(witness.is_string());
+    if goal.is_portfolio() {
+        assert_eq!(original_watch["targets"].as_array().map(Vec::len), Some(3));
+    }
     for (phase, proved) in [("first_sample", false), ("second_sample", true)] {
         stage(phase)?;
         let c = runtime.context(false)?;
@@ -92,13 +96,30 @@ fn no_work_parent_floor(runtime: &mut Runtime, goal: &ProjectStockGoal) -> TestR
     );
     assert_eq!(runtime.authority_tick_floor().get(), floor);
     assert!(!runtime.project_status(goal)?.original_goal_proven);
-    let retained = runtime
-        .stock_target_no_work
-        .as_ref()
-        .ok_or("lost original stock watch")?;
-    assert_eq!(retained.request, original);
-    assert_eq!(retained.monitor.witness(), witness);
-    assert!(retained.monitor.latest().is_none());
+    assert_eq!(
+        runtime
+            .stock_target_no_work
+            .as_ref()
+            .map(|watch| &watch.request),
+        scalar_request.as_ref()
+    );
+    assert_eq!(
+        runtime
+            .stock_targets_no_work
+            .as_ref()
+            .map(|watch| &watch.request),
+        portfolio_request.as_ref()
+    );
+    let retained_watch = runtime.no_work_goal_json();
+    assert_eq!(retained_watch["goal_witness"], witness);
+    assert_eq!(retained_watch["targets"], original_watch["targets"]);
+    assert!(retained_watch["sample"].is_null());
+    if let Some(watch) = &runtime.stock_target_no_work {
+        assert!(watch.monitor.latest().is_none());
+    }
+    if let Some(watch) = &runtime.stock_targets_no_work {
+        assert!(watch.monitor.latest().is_none());
+    }
     assert!(runtime.basis.is_none());
     assert_eq!(
         files,
@@ -194,7 +215,20 @@ fn bind_project(config: &mut Config, goal: &ProjectStockGoal, origin: Digest32) 
     });
 }
 
-fn control(case: &str) -> TestResult {
+fn control(requested_case: &str) -> TestResult {
+    let portfolio = requested_case.starts_with("portfolio_");
+    let case = requested_case
+        .strip_prefix("portfolio_")
+        .unwrap_or(requested_case);
+    let reopening = case == "reopened";
+    let case = if reopening { "published" } else { case };
+    let retained: Option<Value> = if reopening {
+        Some(serde_json::from_slice(&std::fs::read(std::env::var(
+            INPUT,
+        )?)?)?)
+    } else {
+        None
+    };
     let unopened = custody_bytes()?;
     assert!(
         Runtime::open_for_resource_project(
@@ -208,47 +242,92 @@ fn control(case: &str) -> TestResult {
         "a standalone owner cannot use the resource-project opening"
     );
     assert_eq!(custody_bytes()?, unopened);
-    let mut runtime = Runtime::open(
-        Config::from_environment(|| Ok(()))?,
-        Mode::Control,
-        SessionId::new(30_001),
-        budget(),
-    )?;
+    let mut runtime = if let Some(retained) = &retained {
+        let goal: ProjectStockGoal = serde_json::from_value(retained["goal"].clone())?;
+        assert!(goal.is_portfolio());
+        assert!(retained["actual"]["recovery"].is_null());
+        let origin = workforce::digest(
+            retained["actual"]["workshop_prerequisite"]["checkpoint"]["origin_witness"]
+                .as_str()
+                .ok_or("missing pre-plan Workshop origin")?,
+        )?;
+        let mut config = Config::from_environment(|| Ok(()))?;
+        assert!(!config.initialize && config.recovery.is_none());
+        bind_project(&mut config, &goal, origin);
+        config.validate_project_recovery(&retained["actual"])?;
+        let runtime = Runtime::open_for_resource_project(
+            config,
+            Mode::Control,
+            SessionId::new(30_003),
+            budget(),
+            retained["actual"]["observation_tick_floor"]
+                .as_u64()
+                .ok_or("missing pre-plan parent floor")?,
+        )?;
+        assert_eq!(
+            runtime.project_recovery_reference()["native_custody"],
+            retained["actual"]["native_custody"]
+        );
+        assert!(runtime.original.is_none());
+        assert!(
+            runtime.stock_targets_no_work.is_none(),
+            "reopen restored a process-local watch"
+        );
+        runtime
+    } else {
+        Runtime::open(
+            Config::from_environment(|| Ok(()))?,
+            Mode::Control,
+            SessionId::new(30_001),
+            budget(),
+        )?
+    };
     let c = runtime.context(false)?;
     let observed = runtime.observe(ObserveRequest::default(), &c)?.value;
-    let scalar_goal = project_goal::ProjectSingleStockGoal {
-        recipe: "wooden_bed".into(),
-        minimum_stack_units: 6,
-        max_order_amount: 100,
-        deadline_tick: runtime.anchor.tick.get() + 300,
-        poll_interval_ticks: 5,
-        stable_samples: 2,
-        assign_labor: true,
+    let goal: ProjectStockGoal = if let Some(retained) = &retained {
+        serde_json::from_value(retained["goal"].clone())?
+    } else {
+        let mut value = json!({
+            "deadline_tick":runtime.anchor.tick.get() + 300,
+            "poll_interval_ticks":5,"stable_samples":2,"assign_labor":true,
+        });
+        if portfolio {
+            value["targets"] = json!([
+                {"recipe":"wooden_bed","minimum_stack_units":6,"max_order_amount":100},
+                {"recipe":"wooden_chair","minimum_stack_units":2,"max_order_amount":10},
+                {"recipe":"wooden_door","minimum_stack_units":1,"max_order_amount":10}
+            ]);
+        } else {
+            value["recipe"] = json!("wooden_bed");
+            value["minimum_stack_units"] = json!(6);
+            value["max_order_amount"] = json!(100);
+        }
+        serde_json::from_value(value)?
     };
-    let goal = ProjectStockGoal::Single(scalar_goal.clone());
     let origin = runtime
         .workshop
         .as_ref()
         .ok_or("missing Workshop fixture")?
         .witness()?;
     let before_binding = runtime.project_recovery_reference();
-    assert!(
-        runtime
-            .retain_project_authority_tick(runtime.anchor.tick.get() + 1)
-            .is_err()
-    );
-    assert_eq!(runtime.project_recovery_reference(), before_binding);
+    if !reopening {
+        assert!(
+            runtime
+                .retain_project_authority_tick(runtime.anchor.tick.get() + 1)
+                .is_err()
+        );
+        assert_eq!(runtime.project_recovery_reference(), before_binding);
+    }
     bind_project(&mut runtime.config, &goal, origin);
-    let request = StockTargetRequest::parse(
-        &json!({
-            "kind":"stock_target", "expected_observation":observed["observation"]["seal"],
-            "units":["43"], "labor":"CARPENTER", "recipe":scalar_goal.recipe,
-            "minimum_stack_units":scalar_goal.minimum_stack_units,"max_order_amount":scalar_goal.max_order_amount,
-            "deadline_tick":goal.deadline_tick(),"poll_interval_ticks":goal.poll_interval_ticks(),
-            "stable_samples":goal.stable_samples(),"assign_labor":goal.assign_labor(),
-        })
-        .to_string(),
-    )?;
+    let mut request = serde_json::to_value(&goal)?;
+    request["kind"] = json!(if portfolio {
+        "stock_targets"
+    } else {
+        "stock_target"
+    });
+    request["expected_observation"] = observed["observation"]["seal"].clone();
+    request["units"] = json!(["43"]);
+    request["labor"] = json!("CARPENTER");
     let prior = runtime.project_recovery_reference();
     assert!(prior["recovery"].is_null());
     let directory = runtime.config.directory.clone();
@@ -281,14 +360,45 @@ fn control(case: &str) -> TestResult {
         Ok(())
     };
     let c = runtime.context(false)?;
-    let result = runtime.project_plan_stock_target_recorded(&goal, request, &c, &mut record);
+    let result = if portfolio {
+        runtime.project_plan_stock_targets_recorded(
+            &goal,
+            StockTargetsRequest::parse(&request.to_string())?,
+            &c,
+            &mut record,
+        )
+    } else {
+        runtime.project_plan_stock_target_recorded(
+            &goal,
+            StockTargetRequest::parse(&request.to_string())?,
+            &c,
+            &mut record,
+        )
+    };
     match case {
         "no_work" | "no_work_floor" => {
             let view = result?.value;
             assert_eq!(calls, 0);
             assert!(recorded.is_none());
             assert!(view["recovery"].is_null());
-            assert_eq!(view["stock_target"]["work_required"], false);
+            let target_view = if portfolio {
+                &view["stock_targets"]
+            } else {
+                &view["stock_target"]
+            };
+            assert_eq!(target_view["work_required"], false);
+            assert!(!runtime.project_status(&goal)?.original_goal_proven);
+            if portfolio {
+                assert_eq!(target_view["targets"].as_array().map(Vec::len), Some(3));
+                assert_eq!(
+                    view["no_work_stock_goal"]["targets"]
+                        .as_array()
+                        .map(Vec::len),
+                    Some(3)
+                );
+                assert!(runtime.stock_targets_no_work.is_some());
+                assert!(runtime.portfolio.is_none());
+            }
             for name in ORIGINAL_FILES {
                 assert!(!directory.join(name).exists());
             }
@@ -321,6 +431,56 @@ fn control(case: &str) -> TestResult {
                 runtime.project_recovery_reference(),
                 intent.to_json()["recovery_reference"]
             );
+            if portfolio {
+                let layout = runtime
+                    .layout
+                    .as_ref()
+                    .ok_or("missing original portfolio layout")?;
+                assert_eq!(
+                    layout
+                        .order_steps()
+                        .iter()
+                        .map(|step| step.get())
+                        .collect::<Vec<_>>(),
+                    [1, 2]
+                );
+                assert_eq!(
+                    layout.inventory_minima().len(),
+                    3,
+                    "already-met door target was dropped"
+                );
+                let reference = runtime.project_recovery_reference();
+                assert_eq!(
+                    reference["recovery"]["portfolio"].as_array().map(Vec::len),
+                    Some(2)
+                );
+                assert_eq!(
+                    recorded.as_ref().ok_or("missing portfolio intent")?["goal"]["targets"]
+                        .as_array()
+                        .map(Vec::len),
+                    Some(3)
+                );
+                assert!(reference["clock"].is_null() && reference["inventory_clock"].is_null());
+                let c = runtime.context(false)?;
+                runtime.select_order(Some(2), &c)?;
+                assert_eq!(
+                    runtime.project_recovery_reference(),
+                    reference,
+                    "selecting an inactive leaf changed original custody"
+                );
+                runtime.validate_project_publication(&goal, &intent)?;
+                assert!(!runtime.project_status(&goal)?.original_goal_proven);
+                for entry in reference["recovery"]["portfolio"]
+                    .as_array()
+                    .ok_or("missing slots")?
+                {
+                    assert_eq!(entry["goal_history_present"], false);
+                    assert!(
+                        entry["clock_journal_id"].is_null()
+                            && entry["inventory_clock_journal_id"].is_null()
+                    );
+                }
+            }
             if case == "advanced" {
                 let plan = runtime.original.as_ref().ok_or("missing original")?.digest;
                 let c = runtime.context(false)?;
@@ -339,7 +499,15 @@ fn control(case: &str) -> TestResult {
     }))
 }
 
-fn recover(case: &str) -> TestResult {
+fn recover(requested_case: &str) -> TestResult {
+    let case = requested_case
+        .strip_prefix("portfolio_")
+        .unwrap_or(requested_case);
+    let case = if case == "reopened" {
+        "published"
+    } else {
+        case
+    };
     let retained: Value = serde_json::from_slice(&std::fs::read(std::env::var(INPUT)?)?)?;
     let goal: ProjectStockGoal = serde_json::from_value(retained["goal"].clone())?;
     let intent = ProjectProductionIntent::from_json(&retained["intent"])?;
@@ -371,6 +539,10 @@ fn recover(case: &str) -> TestResult {
                 budget(),
                 parent_floor,
             )
+        })
+        .and_then(|runtime| {
+            runtime.validate_project_publication(&goal, &intent)?;
+            Ok(runtime)
         });
     if !matches!(case, "published" | "published_floor") {
         assert!(
@@ -400,6 +572,25 @@ fn recover(case: &str) -> TestResult {
     assert_eq!(reference["recovery"], expected["recovery"]);
     assert_eq!(reference["native_custody"], expected["native_custody"]);
     assert!(!runtime.project_status(&goal)?.original_goal_proven);
+    if goal.is_portfolio() {
+        assert_eq!(
+            reference["recovery"]["portfolio"].as_array().map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(
+            runtime
+                .layout
+                .as_ref()
+                .ok_or("missing recovered layout")?
+                .inventory_minima()
+                .len(),
+            3
+        );
+        let c = runtime.context(false)?;
+        runtime.select_order(Some(2), &c)?;
+        assert_eq!(runtime.project_recovery_reference(), reference);
+        runtime.validate_project_publication(&goal, &intent)?;
+    }
     let c = runtime.context(false)?;
     let view = runtime.inspect(&c)?.value;
     assert!(view["review"].is_null());

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Portfolio publication and recovery campaign
+
+- Extend the actual Runtime/native-TCP publication fixture from seven scalar
+  scenario families to seven scalar plus eight portfolio families.
+- Check two order leaves while retaining a third already-met minimum, parent
+  ACK ordering and refusal, partial custody, changed originals, lost replies,
+  no-work joint stability and native custody reopened before the first plan.
+- Preserve no-network/no-write recovery assertions and scalar coverage.
+  Formatting, Python syntax and source review pass. Execution remains pending:
+  the larger owner compilation was killed under memory pressure. The separate
+  162-test component result does not include this expanded campaign.
+
 ## Unreleased — Native resource-project stock portfolios
 
 - Accept one to four immutable furniture targets through optional Manager and

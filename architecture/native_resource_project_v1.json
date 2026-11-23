@@ -457,6 +457,13 @@
     "integrated_rust_qualified": false,
     "modern_stdio_qualified": false,
     "live_dfhack_qualified": false,
-    "historical_receipts_cover_this_increment": false
+    "historical_receipts_cover_this_increment": false,
+    "native_tcp_campaign_authored": true,
+    "native_tcp_scalar_scenario_families": 7,
+    "native_tcp_portfolio_scenario_families": 8,
+    "native_tcp_campaign_executed": false,
+    "full_owner_typecheck_completed": false,
+    "full_owner_typecheck_blocker": "metadata-only compiler received SIGKILL under memory pressure; no successful full-owner result",
+    "successful_component_evidence_blob": "59eb141fe3933ccf7b38feaa81299645e0883c57"
   }
 }

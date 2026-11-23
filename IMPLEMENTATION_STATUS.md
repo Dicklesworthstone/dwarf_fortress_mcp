@@ -1,5 +1,30 @@
 # Implementation Status
 
+## Unreleased — Exercise portfolio publication and lost-reply recovery
+
+The actual combined-production Runtime/native-TCP campaign now preserves its
+seven scalar scenarios and adds eight portfolio scenario families. A three-
+target root has two positive deficits and one already-met minimum. Assertions
+cover exact parent intent before original writes, ACK refusal, partial
+publication, advanced preparation, lost-selector recovery, per-slot custody,
+changed or dropped met minima, no-work stability and parent-floor withdrawal.
+
+A new pre-plan restart case first retains the complete no-work root, reopens
+the native owners without a production original, then publishes the two
+deficits under the same root and deadline. Recovery checks assert no native
+contact, custody rewrite, restored review or current proof.
+
+The Rust and Python fixtures pass scoped formatting, syntax and whitespace
+checks and independent source review. This expanded campaign and the six new
+parent presentation groups remain unexecuted. The separate full-owner
+metadata compilation was killed under memory pressure without a successful
+result; further heavy retries stopped. The 162 passing component tests in the
+preceding entry remain the executed evidence for the unchanged implementation.
+Full MCP/stdio, Asupersync scheduling, live-game and release qualification are
+not established.
+
+Owner: `df-native-stock-target-3m9` (in progress).
+
 ## Unreleased — Carry complete stock portfolios through native resource projects
 
 The durable native resource-project parent now accepts one to four immutable

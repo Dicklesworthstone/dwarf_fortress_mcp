@@ -727,6 +727,27 @@ unchanged files. Full `verify.sh`, `qualify_local.sh`, integrated MCP/stdio and
 live DFHack qualification have not passed for this increment. Earlier receipts
 below describe their stated checkpoints and do not qualify this extension.
 
+### Expanded portfolio Runtime/TCP campaign
+
+The existing real Runtime and native-protocol test peer now cover seven scalar
+and eight portfolio scenario families. The mixed portfolio fixes BED, CHAIR and
+DOOR minima while compiling only the BED and CHAIR deficits. The campaign checks
+the parent ACK before original writes, unchanged custody on ACK refusal,
+interrupted publication, prepared/advanced-original refusal, lost-selector
+recovery and slot-selection continuity. Missing slots and changed or removed
+already-met minima refuse. All-met watches require fresh joint samples and
+withdraw proof when the parent floor advances.
+
+A restart case reopens actual native custody before any original exists, then
+publishes deficits under the same retained root and deadline. Recovery asserts
+no native contact, custody writes, restored review or current goal proof.
+
+These expanded Rust/Python fixtures are formatted, syntax-checked and
+independently reviewed but **not executed**. A separate full-owner metadata
+check was killed under memory pressure without a successful compilation.
+The 162-test component receipt above excludes this campaign and the six new
+parent presentation groups. No integrated or live qualification is inferred.
+
 ### Current Tree integration evidence
 
 The merged Tree and interrupted-production publication ledger passes 41 exact
