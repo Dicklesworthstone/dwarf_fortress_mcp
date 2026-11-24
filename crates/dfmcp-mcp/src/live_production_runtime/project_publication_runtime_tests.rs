@@ -1,6 +1,7 @@
 //! Actual child publication and restart against the existing native TCP peers.
-//! The parent ledger is tested separately; its ACK callback is the injected
-//! fault boundary here. These are component tests, not live-game admission.
+//! Project cases inject faults at the parent ACK; ordinary cases use the public
+//! portfolio planners without a parent binding or ACK. The parent ledger is
+//! tested separately. These are component tests, not live-game admission.
 use super::*;
 use std::path::Path;
 use std::process::Command;
@@ -14,6 +15,7 @@ const STAGE: &str = "PROJECT_PUBLICATION_RUNTIME_STAGE";
 const CLOCKS: &str = "PROJECT_PUBLICATION_RUNTIME_CLOCKS";
 const ONE_ORDER: &str = "PROJECT_PUBLICATION_RUNTIME_ONE_ORDER";
 const ASSIGN_LABOR: &str = "PROJECT_PUBLICATION_RUNTIME_ASSIGN_LABOR";
+const ORDER_COUNT: &str = "PROJECT_PUBLICATION_RUNTIME_ORDER_COUNT";
 const FOREIGN_CLOCK: &[u8] = b"foreign clock bytes must never be adopted or overwritten";
 const ORIGINAL_FILES: &[&str] = &[
     "original.plan",
@@ -36,11 +38,13 @@ fn budget() -> WorkBudget {
 
 fn expected_order_steps() -> Vec<u32> {
     let first = u32::from(std::env::var(ASSIGN_LABOR).as_deref() != Ok("0"));
-    if std::env::var(ONE_ORDER).as_deref() == Ok("1") {
-        vec![first]
-    } else {
-        vec![first, first + 1]
-    }
+    let fallback = if std::env::var(ONE_ORDER).as_deref() == Ok("1") { 1 } else { 2 };
+    let count = std::env::var(ORDER_COUNT)
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(fallback);
+    assert!((1..=4).contains(&count));
+    (first..first + count).collect()
 }
 
 fn publication_case(requested: &str) -> (bool, bool, &str) {
@@ -728,6 +732,148 @@ fn recover(requested_case: &str) -> TestResult {
     output(&reference)
 }
 
+
+fn ordinary(phase: &str, case: &str) -> TestResult {
+    let config = Config::from_environment(|| Ok(()))?;
+    assert!(config.project_binding.is_none(), "ordinary host borrowed a parent ACK");
+    let before_open = custody_bytes()?;
+    let mode = if phase == "ordinary-recover" { Mode::Offline } else { Mode::Control };
+    assert_eq!(config.initialize, phase == "ordinary-open");
+    assert_eq!(config.recovery.is_some(), phase == "ordinary-recover");
+    let opened = Runtime::open(config, mode, SessionId::new(31_001), budget());
+    if phase == "ordinary-recover" && case != "published" {
+        assert!(opened.is_err(), "ordinary recovery accepted {case}");
+        assert_eq!(custody_bytes()?, before_open, "recovery recreated original custody");
+        return Ok(());
+    }
+    let mut runtime = opened?;
+    if phase == "ordinary-open" {
+        let c = runtime.context(false)?;
+        runtime.observe(ObserveRequest::default(), &c)?;
+        assert!(runtime.original.is_none());
+        return output(&json!({
+            "intent": null, "actual": runtime.project_recovery_reference(),
+            "workforce_journal_id": runtime.workforce_journal.to_hex(),
+        }));
+    }
+    let retained: Value = serde_json::from_slice(&std::fs::read(std::env::var(INPUT)?)?)?;
+    assert_eq!(runtime.workforce_journal.to_hex(), retained["workforce_journal_id"]);
+    assert_eq!(
+        runtime.project_recovery_reference()["native_custody"],
+        retained["actual"]["native_custody"]
+    );
+    if phase == "ordinary-recover" {
+        let reference = runtime.project_recovery_reference();
+        assert_eq!(reference["recovery"], retained["actual"]["recovery"]);
+        assert_eq!(reference["portfolio_clocks"], retained["actual"]["portfolio_clocks"]);
+        check_portfolio_clocks(
+            &reference,
+            runtime.config.clock.is_some(),
+            runtime.config.inventory_clock.is_some(),
+        )?;
+        let selected = *expected_order_steps().last().ok_or("missing recovered selector")?;
+        let c = runtime.context(false)?;
+        runtime.select_order(Some(selected), &c)?;
+        let c = runtime.context(false)?;
+        let view = runtime.inspect(&c)?.value;
+        assert!(view["review"].is_null());
+        assert_eq!(view["original_goal_proven"], false);
+        assert_eq!(view["automatic_redispatch"], false);
+        assert_eq!(runtime.project_recovery_reference(), reference);
+        assert_eq!(custody_bytes()?, before_open, "ordinary recovery rewrote custody");
+        return output(&reference);
+    }
+    assert_eq!(phase, "ordinary-plan");
+    assert!(runtime.original.is_none() && runtime.frontier.is_none());
+    assert!(retained["actual"]["recovery"].is_null());
+    assert_eq!(custody_bytes()?, before_open, "pre-plan reopen rewrote native custody");
+    let c = runtime.context(false)?;
+    let observed = runtime.observe(ObserveRequest::default(), &c)?.value;
+    let assign_labor = std::env::var(ASSIGN_LABOR).as_deref() != Ok("0");
+    let orders = ["wooden_bed", "wooden_chair", "wooden_door", "wooden_table"]
+        .into_iter()
+        .take(expected_order_steps().len())
+        .map(|recipe| json!({"recipe": recipe, "amount": 1}))
+        .collect::<Vec<_>>();
+    let mut request = json!({
+        "kind": if assign_labor { "portfolio" } else { "existing_labor_portfolio" },
+        "expected_observation": observed["observation"]["seal"],
+        "units": ["43"], "labor": "CARPENTER", "orders": orders,
+        "deadline_tick": runtime.anchor.tick.get() + 300,
+        "poll_interval_ticks": 5, "stable_samples": 2,
+    });
+    if assign_labor {
+        request["enabled"] = json!(true);
+    }
+    if case == "existing_slot" {
+        let configured: Value = serde_json::from_str(
+            &std::env::var("DFMCP_SEMANTIC_WORK_ORDER_CONFIG")?,
+        )?;
+        let directory = Path::new(configured["directory"].as_str().ok_or("missing order directory")?);
+        foreign_clock_file(&directory.join(if runtime.config.inventory_clock.is_some() {
+            "portfolio-2-inventory-clock.journal"
+        } else {
+            "portfolio-2-clock.journal"
+        }))?;
+    }
+    let before_plan = custody_bytes()?;
+    let mut c = runtime.context(false)?;
+    if case == "missing_context_authority" {
+        c.grants.retain(|grant| grant.capability != Capability::ControlClock);
+    }
+    let result = if assign_labor {
+        runtime.plan_portfolio(PortfolioRequest::parse(&request.to_string())?, &c)
+    } else {
+        runtime.plan_existing_labor_portfolio(
+            ExistingLaborPortfolioRequest::parse(&request.to_string())?,
+            &c,
+        )
+    };
+    if matches!(case, "missing_authority" | "missing_context_authority" | "existing_slot") {
+        assert!(result.is_err(), "ordinary publication accepted {case}");
+        assert!(!runtime.initialization_failed, "preflight wrote a partial original");
+        assert!(runtime.original.is_none() && runtime.frontier.is_none());
+        assert_eq!(custody_bytes()?, before_plan, "refusal wrote original custody");
+        return output(&json!({"refused": case}));
+    }
+    result?;
+    assert!(!runtime.initialization_failed);
+    let reference = runtime.project_recovery_reference();
+    check_portfolio_clocks(
+        &reference,
+        runtime.config.clock.is_some(),
+        runtime.config.inventory_clock.is_some(),
+    )?;
+    assert_eq!(
+        runtime.layout.as_ref().ok_or("missing ordinary layout")?
+            .order_steps().iter().map(|step| step.get()).collect::<Vec<_>>(),
+        expected_order_steps()
+    );
+    for (path, bytes) in before_plan {
+        assert_eq!(std::fs::read(path)?, bytes, "publication changed pre-plan custody");
+    }
+    let selected = *expected_order_steps().last().ok_or("missing ordinary selector")?;
+    let c = runtime.context(false)?;
+    runtime.select_order(Some(selected), &c)?;
+    assert_eq!(runtime.project_recovery_reference(), reference);
+    let before_repeat = custody_bytes()?;
+    let c = runtime.context(false)?;
+    let repeated = if assign_labor {
+        runtime.plan_portfolio(PortfolioRequest::parse(&request.to_string())?, &c)
+    } else {
+        runtime.plan_existing_labor_portfolio(
+            ExistingLaborPortfolioRequest::parse(&request.to_string())?,
+            &c,
+        )
+    };
+    assert!(repeated.is_err(), "ordinary original was replanned");
+    assert_eq!(custody_bytes()?, before_repeat);
+    output(&json!({
+        "intent": null, "actual": reference,
+        "workforce_journal_id": runtime.workforce_journal.to_hex(),
+    }))
+}
+
 #[test]
 fn recorded_project_publication_recovers_exact_original_without_reexecution() -> TestResult {
     if let Ok(phase) = std::env::var(PHASE) {
@@ -735,6 +881,7 @@ fn recorded_project_publication_recovers_exact_original_without_reexecution() ->
         match phase.as_str() {
             "control" => control(&case)?,
             "recover" => recover(&case)?,
+            "ordinary-open" | "ordinary-plan" | "ordinary-recover" => ordinary(&phase, &case)?,
             _ => return Err("unknown project publication phase".into()),
         }
         println!("project-publication-runtime:{phase}:{case}:checked");

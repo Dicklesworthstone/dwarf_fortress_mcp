@@ -295,6 +295,148 @@ def run_case(executable, test, requested_case, clocks=(), one_order=False,
                 workshop.close()
 
 
+def run_ordinary_case(executable, test, clocks, count=2, assign_labor=True,
+                      case="published", clock_authority=True, workshop_child=False,
+                      damage_recovery=False):
+    """Reopen native custody before the first ordinary portfolio compilation."""
+    combined = load("ordinary_publication_production_peer", "combined_production.py")
+    with tempfile.TemporaryDirectory(prefix="dfmcp-ordinary-publication-") as temporary:
+        directory = Path(temporary).resolve()
+        donor = None
+        if workshop_child:
+            stock = load("ordinary_publication_workshop_seed", "combined_stock_target_runtime_peer.py")
+            donor = stock.seed_workshop(executable, combined, directory)
+        production = directory / "production"
+        production.mkdir(mode=0o700)
+        original_capture = combined.workforce_capture
+
+        def carpenter_capture(ids=(42,), option_count=0):
+            capture = combined.wf.capture(original_capture(ids, option_count))
+            capture["labor_keys"] = ["CARPENTER", "MINE"]
+            if not assign_labor:
+                for unit in capture["units"]:
+                    unit["labors"] = [1, 0]
+            return combined.wf.encode_capture(capture)
+
+        combined.workforce_capture = carpenter_capture
+        peer = combined.Peer(production)
+        try:
+            environment = combined.environment(production, peer.endpoint)
+            environment["PROJECT_PUBLICATION_RUNTIME_ASSIGN_LABOR"] = str(int(assign_labor))
+            environment["PROJECT_PUBLICATION_RUNTIME_ORDER_COUNT"] = str(count)
+            if clocks:
+                environment["PROJECT_PUBLICATION_RUNTIME_CLOCKS"] = ",".join(clocks)
+            for family, generation in (
+                ("clock", combined.CLOCK_GENERATION),
+                ("inventory_clock", combined.INVENTORY_CLOCK_GENERATION)):
+                if family not in clocks:
+                    continue
+                for name in ("DFMCP_COMBINED_PRODUCTION_CONFIG", "DFMCP_SEMANTIC_WORK_ORDER_CONFIG"):
+                    configured = json.loads(environment[name])
+                    configured[family] = {"generation": generation}
+                    environment[name] = json.dumps(configured)
+                environment[f"DFMCP_SEMANTIC_WORK_ORDER_ALLOW_{family.upper()}"] = "1"
+                environment[f"DFMCP_SEMANTIC_WORK_ORDER_{family.upper()}_TOKEN"] = combined.TOKEN.decode()
+            if donor is not None:
+                workshop, custody, donor_before, donor_calls, prerequisite, helper = donor
+                parent = json.loads(environment["DFMCP_COMBINED_PRODUCTION_CONFIG"])
+                parent["workshop_prerequisite"] = prerequisite
+                environment["DFMCP_COMBINED_PRODUCTION_CONFIG"] = json.dumps(parent)
+                environment["DFMCP_COMBINED_PRODUCTION_WORKSHOP_TOKEN"] = "t" * 32
+            retained_path = directory / "ordinary.json"
+            child(executable, test, "ordinary-open", case, environment, retained_path, retained_path)
+            preplan = json.loads(retained_path.read_text())
+            assert preplan["actual"]["recovery"] is None
+            preplan_files = combined.custody_files(production)
+            environment = pending_environment(combined, environment, preplan)
+            if donor is not None:
+                parent = json.loads(environment["DFMCP_COMBINED_PRODUCTION_CONFIG"])
+                parent["workshop_prerequisite_checkpoint"] = (
+                    preplan["actual"]["workshop_prerequisite"]["checkpoint"])
+                environment["DFMCP_COMBINED_PRODUCTION_CONFIG"] = json.dumps(parent)
+            if not clock_authority:
+                for family in clocks:
+                    environment.pop(f"DFMCP_SEMANTIC_WORK_ORDER_ALLOW_{family.upper()}", None)
+            elif case == "missing_authority":
+                # With both configured, keep the other family authorized. A
+                # generic ControlClock grant cannot substitute for this flag.
+                environment.pop(f"DFMCP_SEMANTIC_WORK_ORDER_ALLOW_{clocks[-1].upper()}", None)
+            child(executable, test, "ordinary-plan", case, environment, retained_path, retained_path)
+            current_files = combined.custody_files(production)
+            for path, identity in preplan_files.items():
+                assert current_files[path] == identity, f"ordinary plan changed retained custody: {path}"
+            if case == "published":
+                retained = json.loads(retained_path.read_text())
+                reference = retained["actual"]
+                assert [slot["step_id"] for slot in reference["recovery"]["portfolio"]] == (
+                    list(range(int(assign_labor), int(assign_labor) + count)))
+                reopened = combined.reopen_environment(
+                    environment, reference["recovery"], retained["workforce_journal_id"])
+                offline = {key: value for key, value in reopened.items()
+                           if not (key.startswith("DFMCP_") and key.endswith((
+                               "_TOKEN", "_ALLOW_LABOR", "_ALLOW_PRODUCTION",
+                               "_ALLOW_CLOCK", "_ALLOW_INVENTORY_CLOCK")))}
+                calls_before = list(peer.calls)
+                donor_calls_before = list(workshop.calls) if donor is not None else None
+                child(executable, test, "ordinary-recover", "published", offline, retained_path,
+                      directory / "recovered.json")
+                assert peer.calls == calls_before, "ordinary recovery contacted a native source"
+                assert combined.custody_files(production) == current_files
+                if damage_recovery:
+                    # Both first owners and inactive last-slot owners remain
+                    # exact original custody; absence is never first creation.
+                    paths = [production / "parent" / "original.plan",
+                             production / "parent" / "execution.journal"]
+                    for slot in sorted({1, count}):
+                        for family in clocks:
+                            basename = family.replace("_", "-") + ".journal"
+                            name = basename if slot == 1 else f"portfolio-{slot}-{basename}"
+                            paths.append(production / "orders" / name)
+                    for path in paths:
+                        original = path.read_bytes()
+                        saved = directory / f"saved-{path.parent.name}-{path.name}"
+                        path.rename(saved)
+                        try:
+                            before = combined.custody_files(production)
+                            child(executable, test, "ordinary-recover", "missing-" + path.name,
+                                  offline, retained_path, directory / "refused.json")
+                            assert before == combined.custody_files(production)
+                        finally:
+                            saved.rename(path)
+                        replacements = [("corrupt", original[:-1] + bytes([original[-1] ^ 1]))]
+                        if path.name.startswith("portfolio-"):
+                            first_name = path.name.split("-", 2)[2]
+                            replacements.append(("substituted", path.with_name(first_name).read_bytes()))
+                        for label, replacement in replacements:
+                            try:
+                                path.write_bytes(replacement)
+                                before = combined.custody_files(production)
+                                child(executable, test, "ordinary-recover", label + "-" + path.name,
+                                      offline, retained_path, directory / "refused.json")
+                                assert before == combined.custody_files(production)
+                            finally:
+                                path.write_bytes(original)
+                    assert combined.custody_files(production) == current_files
+                    assert peer.calls == calls_before
+                if donor is not None:
+                    assert workshop.calls == donor_calls_before, "offline recovery contacted the donor"
+            else:
+                assert json.loads(retained_path.read_text())["refused"] == case
+            assert not any(operation.startswith(("Prepare", "Commit")) for _, operation in peer.calls)
+            assert not peer.workforce_applied and not peer.order_created
+            assert not peer.clock_commits and not peer.inventory_clock_commits
+            if donor is not None:
+                assert helper.snapshot(custody) == donor_before
+                assert workshop.writer_count == 1
+                assert all(operation not in (2, 3, 5) for operation in workshop.calls[donor_calls:])
+        finally:
+            try:
+                peer.close()
+            finally:
+                if donor is not None:
+                    donor[0].close()
+
+
 def main():
     executable, test = sys.argv[1:]
     cases = ("no_work", "no_work_floor", "ack_refusal", "published", "partial", "advanced", "prepared_floor")
@@ -314,6 +456,17 @@ def main():
     run_case(executable, test, "portfolio_reopened", ("clock", "inventory_clock"),
              one_order=True, clock_authority=False)
     run_case(executable, test, "portfolio_no_work", ("clock", "inventory_clock"))
+    both = ("clock", "inventory_clock")
+    run_ordinary_case(executable, test, both, count=4, damage_recovery=True)
+    run_ordinary_case(executable, test, ("clock",), count=3, assign_labor=False)
+    run_ordinary_case(executable, test, ("inventory_clock",), count=2)
+    run_ordinary_case(executable, test, (), count=4, assign_labor=False)
+    run_ordinary_case(executable, test, both, count=4, assign_labor=False, workshop_child=True)
+    run_ordinary_case(executable, test, both, count=1, clock_authority=False)
+    for clocks in (("clock",), ("inventory_clock",), both):
+        run_ordinary_case(executable, test, clocks, case="missing_authority")
+    for case in ("missing_context_authority", "existing_slot"):
+        run_ordinary_case(executable, test, both, case=case)
     print("project-publication-campaign:checked")
 
 

@@ -299,7 +299,7 @@ impl Runtime {
     /// Pin every future fixed clock header without publishing its file. The
     /// first slot already exists; later slots share its verified source binding
     /// and the native owner's exact path/session/request identity derivation.
-    fn prospective_project_portfolio_clocks(
+    pub(super) fn prospective_portfolio_clock_pins(
         &self,
         layout: &ProductionLayout,
         c: &OperationContext,
@@ -409,7 +409,7 @@ impl Runtime {
             // Every original slot and exact prospective clock header is
             // acknowledged before any original or additional clock file write.
             let layout = ProductionLayout::from_plan(plan)?;
-            let clocks = self.prospective_project_portfolio_clocks(&layout, c)?;
+            let clocks = self.prospective_portfolio_clock_pins(&layout, c)?;
             recovery["portfolio"] = serde_json::json!(
                 layout
                     .order_steps()

@@ -655,9 +655,10 @@ impl NativeShell {
         Ok(self.portfolio_clock_requests(step, c))
     }
 
-    /// Pure prediction for the fixed project's first original publication.
-    /// Its existing first-slot owners may have reopened; the parent still must
-    /// ACK these exact new identities before the separate creation path below.
+    /// Pure prediction for a combined host's first original publication.
+    /// Existing first-slot owners may have reopened. The caller retains these
+    /// exact identities in its current compilation witness; resource projects
+    /// also require their parent ACK before the separate creation path below.
     pub(crate) fn prospective_project_portfolio_clock_requests(
         &self,
         step: u32,
@@ -693,9 +694,10 @@ impl NativeShell {
         )
     }
 
-    /// Called only while publishing a first fixed project original, after its
-    /// complete intent was ACKed. This exclusively creates a new slot and
-    /// verifies the preannounced identity; it never opens existing custody.
+    /// Called only during a combined host's first original publication, with
+    /// its compiling request witness or acknowledged resource-project intent.
+    /// This exclusively creates a new slot and verifies its preannounced
+    /// identity; it never opens existing custody.
     pub(crate) fn create_project_portfolio_clock(
         &self,
         step: u32,

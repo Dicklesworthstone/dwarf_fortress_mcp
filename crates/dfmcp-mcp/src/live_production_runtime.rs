@@ -790,7 +790,7 @@ impl Runtime {
             )?);
             out.create_executor(&mut work)?;
             if let Some(entries) = recovery.portfolio {
-                out.initialize_portfolio(Some(entries), None, &mut work)?;
+                out.initialize_portfolio(Some(entries), None, None, &mut work)?;
             } else {
                 if out
                     .layout
@@ -1834,6 +1834,14 @@ impl Runtime {
         )?;
         let layout = host_plan(&plan)?;
         let expected = layout.archive_seal();
+        // Ordinary and staged combined hosts retain the same first-publication
+        // boundary without borrowing a resource-project ACK. This witness is
+        // local to the compiling request and is never rebuilt by recovery.
+        let ordinary_clocks = if portfolio && publication.is_none() {
+            self.prepare_portfolio_clock_publication(&plan, &layout, &work.current()?)?
+        } else {
+            None
+        };
         // Header identity includes the exact compiling session and request.
         // Derive it once before the parent ACK and reuse it for publication.
         let recovery = durable::initial_recovery(&plan, &work.take(2 * MIB)?)?;
@@ -1920,7 +1928,7 @@ impl Runtime {
             // one-order portfolio with other already-met minima. Initialize
             // these exact project slots before comparing the actual
             // publication with the parent's acknowledged complete original.
-            self.initialize_portfolio(None, publication_intent.as_ref(), &mut work)?;
+            self.initialize_portfolio(None, publication_intent.as_ref(), None, &mut work)?;
         }
         if let Some(intent) = &publication_intent {
             intent.validate_pending_checkpoint(&self.project_recovery_reference())?;
@@ -1931,7 +1939,7 @@ impl Runtime {
             basis.existing_labor_capture = None;
         }
         if portfolio && self.portfolio.is_none() {
-            self.initialize_portfolio(None, None, &mut work)?;
+            self.initialize_portfolio(None, None, ordinary_clocks.as_ref(), &mut work)?;
         }
         self.initialization_failed = false;
         self.view(&mut Work::new(&work.current()?)?)

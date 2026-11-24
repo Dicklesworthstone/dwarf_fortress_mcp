@@ -1368,6 +1368,54 @@ the single-order request. An uncertain insertion blocks subsequent work until
 Wait reconciles that original key. It never recreates already inserted leaves
 or replaces the complete original plan.
 
+### Publish the first portfolio after a pre-plan restart
+
+A standalone `labor-order` owner, or the production child of
+`workshop-production`, can reopen its native custodians before any original
+effect plan exists and then publish its first multi-order portfolio with either
+or both configured clock families. This applies to `portfolio`,
+`existing_labor_portfolio` and the positive order leaves of `stock_targets`.
+The original StepIds and request identities retain their existing meanings.
+
+Retain the native custody IDs and every configured prerequisite checkpoint.
+Reopen all child configurations with `initialize=false`, pin the retained first
+clock journal IDs in both combined and order configurations, and leave original
+`recovery` absent only when no original has been published. For the staged
+profile, also retain the complete workflow checkpoint and exact Workshop
+handoff. Obtain a fresh production observation before requesting the first plan.
+
+Before writing the original archive or frontier, the ordinary compiler retains
+a process-local publication witness binding the complete original digest and
+anchor, compiling session and request, original order StepIds and exact clock
+identities. Creating additional clock owners requires Control mode, current
+`ControlClock` authority at the retained authority floor, and each configured
+family's independent opening and current permission. Permission for one clock
+cannot supply permission for the other. Every additional fixed clock path must
+still be absent; a pre-existing slot or missing authority refuses before original
+publication.
+
+Only that same first publication can exclusively create the additional headers
+after the original archive and frontier exist. The existing first clock owners
+are retained unchanged. A one-order portfolio reuses them and needs no additional
+clock-creation authority. Publishing a portfolio prepares no native effect,
+commits no order or labor change and advances no game time; subsequent effects
+and clock runs still require their separate reviews and confirmations.
+
+The ordinary witness is never serialized or reconstructed by recovery.
+The fixed resource-project profile retains its separate acknowledged production
+intent and parent ACK requirement; neither route borrows the other's permission.
+If a failure occurs after publication has begun, partial custody is retained and
+that owner cannot plan another original. Complete-original recovery still
+requires every retained clock ID and file, including inactive slots. Missing,
+corrupt, substituted or omitted original custody is refused without recreation
+or repair.
+
+The existing Runtime/native-TCP publication campaign contains eleven additional
+ordinary-host scenarios for this boundary, including a production child with an
+imported Workshop prerequisite. They are authored regression sources and remain
+unexecuted for this change; they do not establish full staged-profile execution,
+native-plugin qualification or production admission.
+
 ### Observe and advance the original leaves
 
 Portfolio Wait initializes or replays at most one missing goal history, then
@@ -1914,7 +1962,9 @@ native journal identities required by their existing configurations.
 Configured workshop originals additionally retain the association digest and
 complete consumed-source floor described above. Pre-plan refusals instead
 return their separately witnessed `workshop_prerequisite.checkpoint` even when
-`recovery` is still null.
+`recovery` is still null. A restart before the first original can subsequently
+publish that first portfolio under the request-bound creation rules above;
+this does not permit a recovered original to recreate missing clock custody.
 
 Offline opens retain historical custody without contacting DFHack. Reconcile
 mode can consult the original keys under Query authority. Neither reconstructs

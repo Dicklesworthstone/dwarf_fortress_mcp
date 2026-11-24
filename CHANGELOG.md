@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — Publish ordinary clocked portfolios after pre-plan recovery
+
+- Enable the first multi-order portfolio after pre-plan restart in ordinary
+  labor/order hosts and the staged Workshop production child, reusing the
+  original first clock owners and creating only absent fixed slots 2–4.
+- Bind creation to a private witness for the exact original, anchor, compiling
+  session/request and native header identities. Check each configured clock
+  family's opening/current authority and ControlClock grant before original
+  writes; retain exclusive creation and current authorization at each boundary.
+- Keep fixed resource-project parent acknowledgment and strict retained-original
+  recovery separate. Missing, corrupted, substituted or partially created
+  custody cannot be adopted or silently repaired.
+- Extend the existing Runtime/native-TCP campaign with ordinary two/three/four
+  order layouts, both clock families, Workshop donor custody, single-order
+  reuse, authority refusals and exact Offline recovery failures.
+- Independent source/API review and Python syntax parsing pass. New native
+  runtime scenarios remain unexecuted; full MCP/live qualification and
+  production admission remain open.
+
 ## Unreleased — Preserve recovered-peer cadence in default forecasts
 
 - Make default current-stage forecasts include authenticated unfinished

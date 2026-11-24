@@ -256,6 +256,66 @@
       "retained_original_recovery_creates_missing_journals": false,
       "partial_publication_repaired": false,
       "execution_evidence": "source_review_and_authored_regressions; compilation_and_execution_unavailable"
+    },
+    "ordinary_staged_preplan_restart": {
+      "supported": true,
+      "profiles": [
+        "serve-gameplay-dev labor-order",
+        "serve-gameplay-dev workshop-production"
+      ],
+      "requires_first_effect_bearing_original": true,
+      "original_recovery_selector_absent": true,
+      "retained_first_clock_ids_required": true,
+      "configured_clock_families": [
+        "order",
+        "inventory"
+      ],
+      "positive_orders_min": 1,
+      "positive_orders_max": 4,
+      "publication_witness": "nonserializable_current_compilation",
+      "publication_witness_binds": [
+        "original_plan_digest",
+        "original_anchor",
+        "compiling_session",
+        "compiling_request",
+        "complete_original_order_step_ids",
+        "configured_clock_journal_identities"
+      ],
+      "publication_witness_reconstructed_by_recovery": false,
+      "project_parent_ack_used": false,
+      "project_parent_ack_requirement_unchanged": true,
+      "new_fixed_slot_ordinals": [
+        2,
+        3,
+        4
+      ],
+      "new_slots_require_absence_before_original_writes": true,
+      "each_configured_family_requires_opening_and_current_clock_authority": true,
+      "additional_clock_creation_requires_current_control_clock_at_retained_authority_floor": true,
+      "native_creation_rechecks_independent_authority": true,
+      "exclusive_creation_after_original_archive_and_frontier": true,
+      "first_clock_owners_reused_unchanged": true,
+      "one_positive_order_creates_additional_clock": false,
+      "one_positive_order_requires_new_slot_authority": false,
+      "initial_publication_prepares_native_effect": false,
+      "initial_publication_commits_native_effect": false,
+      "initial_publication_advances_game_time": false,
+      "partial_publication_fences_owner": true,
+      "retained_original_recovery_creates_missing_journals": false,
+      "corrupt_or_substituted_original_clock_adopted": false,
+      "partial_publication_repaired": false,
+      "authored_ordinary_runtime_scenarios": 11,
+      "staged_regression_scope": "combined production child with imported Workshop prerequisite; not full staged-profile execution",
+      "execution_evidence": "source_review_and_authored_runtime_native_tcp_regressions; compilation_and_execution_unavailable",
+      "production_admission_added": false,
+      "source_paths": [
+        "crates/dfmcp-mcp/src/live_production_runtime.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/portfolio.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/project.rs",
+        "crates/dfmcp-mcp/src/semantic_work_order_runtime/native.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/project_publication_runtime_tests.rs",
+        "tests/stdio/project_publication_runtime_peer.py"
+      ]
     }
   },
   "no_work_watch": {

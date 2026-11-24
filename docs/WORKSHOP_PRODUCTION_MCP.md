@@ -90,9 +90,11 @@ default per-call allowance is 60 seconds, 8 GiB of bounded work, and 32,768 outp
 tokens. `max_game_ticks` defaults to zero; explicitly supply at most 1,200 when
 using configured clocks.
 
-The parent opens the empty production custodians and the Workshop owner before
-a construction request becomes reachable. All initialization belongs to this
-opening. A later handoff uses the same production owners.
+The parent opens the empty production native custodians, their configured first
+clock owners and the Workshop owner before a construction request becomes
+reachable. A later handoff uses the same production owners. The first production
+plan subsequently publishes its original archive and frontier; a multi-order
+portfolio also creates its additional fixed clock slots at that publication.
 
 Follow the Workshop Agent Turn recommendations to observe the configured
 material, plan the fixed Carpenter footprint, review and confirm its exact
@@ -148,6 +150,18 @@ choices, already-enabled labor, finite stock targets, portfolios and configured
 input-supply checks. Order preparation and dispatch still freshly qualify the
 exact original workshop. An optional Manager donor remains an independently
 configured prerequisite.
+
+If the workflow restarted before any production original was published, the
+reopened production child can still compile its first multi-order portfolio
+with configured clocks. It retains a local witness for the exact compiling
+request, complete original and per-order clock identities before writing original
+custody. Additional fixed slots must be absent, and each configured clock family
+needs independent opening and current permission plus current `ControlClock`
+authority. The retained first clock owners are reused unchanged; a one-order
+portfolio creates no additional clock and needs no new-slot authority.
+The Workshop handoff grants none of these permissions, and this path does not
+use the fixed resource-project parent's ACK as a substitute. Publication itself
+prepares or commits no native effect and advances no game time.
 
 Production commits use `paired_seal`. Supply exactly one seal field, matching
 the current stage. Production `scope` and `order_step_id` retain their existing
@@ -217,6 +231,16 @@ For stage `workshop`, omit `handoff_digest`; stage `transition` or
 a production original. Production recovery admits only the existing exact
 combined original, when one exists. Reopening validates the completed donor
 and settled clock Offline against the retained digest before importing it.
+When no production original exists, keep its original recovery selector absent
+and retain the native IDs, first clock IDs and prerequisite checkpoints instead.
+After the production stage is restored, a fresh observation and explicit Plan can
+publish the first original under the creation rules above.
+
+Once a production original exists, its complete per-order clock recovery vector
+and every retained file remain mandatory. Missing, corrupt, substituted or
+omitted clock custody cannot become permission to create a new slot. A failure
+after first publication begins preserves partial files and fences that child
+against another plan; the host neither repairs nor replaces them.
 
 Recovery restores custody and monotone authority floors. It does not restore
 old review permissions or authorize another construction original. Production
@@ -236,7 +260,10 @@ The source reuses the actual Workshop, Run, workforce, work-order and combined
 production owners. Focused configuration, routing, publication and custody
 regressions accompany it. Execution results are recorded in
 [Implementation Status](../IMPLEMENTATION_STATUS.md); authored tests alone do
-not establish an executed native campaign.
+not establish an executed native campaign. The additional ordinary publication
+campaign covers the combined child with an imported Workshop prerequisite in
+source. Those new regressions remain unexecuted and are not evidence of a
+complete staged-profile run.
 
 Untouched-game construction through actual finite furniture output, full modern
 MCP execution and production admission remain separate acceptance work under

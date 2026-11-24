@@ -1,5 +1,49 @@
 # Implementation Status
 
+## Unreleased — Ordinary portfolio clocks survive pre-plan restart
+
+Ordinary combined labor/order owners and the production child of the staged
+Workshop workflow can now publish their first positive multi-order original
+after reopening pre-plan custody. Existing first clock owners remain unchanged;
+additional fixed slots 2–4 are created only for that current first publication.
+This closes the remaining ordinary-host gate after the fixed resource-project
+publication path was added. It does not change that path's parent ACK boundary.
+
+A nonserializable witness binds the sealed original digest and anchor, compiling
+session/request, exact order layout and prospective native clock headers before
+any original archive/frontier write. For multiple orders, each configured clock
+family needs both opening/current effect authority and an explicit ControlClock
+authorization at the retained authority floor. The native creators reauthorize,
+exclusively create absent paths and verify the expected identities. A one-order
+portfolio reuses its first owners without additional clock-creation authority.
+Preexisting extra paths refuse before original publication; a later creation
+failure leaves partial publication fenced. Recovery of a retained original
+receives no creation witness and still requires every exact original journal.
+
+The existing Runtime/native-TCP campaign now exercises ordinary public
+portfolio planners after pre-plan reopen: two, three and four orders; manual
+labor and existing-worker StepId layouts; order clocks, inventory clocks, both
+or neither; an imported Workshop donor; one-order reuse without clock authority;
+separate family and context-authority refusal; foreign fixed-slot refusal;
+selection-independent recovery references; and missing, corrupted or
+substituted first/inactive clock journals during Offline reopen. These cases
+also assert that planning issues no native Prepare/Commit or game-time effect.
+The donor case exercises the real combined production child with retained
+Workshop custody, not the complete staged-parent stdio route.
+
+Three independent production source reviews found no remaining custody or
+API blocker. The exact Python driver passes AST parsing. The new native Rust
+campaign remains unexecuted, and a requested exact-source parser run stalled
+with the shared executor; no native Rust compilation or parser pass is claimed.
+The earlier required verification attempt timed out after its initial integrity
+heading; qualification stopped at the edited-worktree prerequisite. Historical
+component receipts do not qualify these bytes. Complete MCP, native clock
+dispatch, live DFHack and production-admission evidence remain open.
+
+Owners: `df-native-stock-target-3m9`,
+`df-dfhack-bridge-plane-c-pic.4.1` and
+`dfmcp-reality-wiring-proof-4bf.14.7` (all in progress).
+
 ## Unreleased — Default forecasts retain recovered peers' real schedule
 
 A default `current_stage` forecast for a newly committed live original now

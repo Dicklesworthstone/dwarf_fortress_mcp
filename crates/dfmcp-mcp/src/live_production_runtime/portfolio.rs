@@ -14,6 +14,38 @@ use std::collections::BTreeMap;
 // custody check or borrowing the separately reserved response allowance.
 const CLOCK_OPEN_BYTES: u64 = 16 * MIB;
 
+/// Ordinary combined hosts have no resource-project parent ACK. Their first
+/// publication instead carries this nonserializable, request-bound witness
+/// from preflight to exclusive creation after the original archive/frontier.
+/// Reopening an original never reconstructs or receives this value.
+pub(super) struct PortfolioClockPublication {
+    original: Digest32,
+    anchor: StateAnchor,
+    session: SessionId,
+    request: RequestId,
+    pins: [Option<config::ProjectPortfolioClockRecovery>; 4],
+}
+
+impl PortfolioClockPublication {
+    fn for_publication(
+        &self,
+        original: &PreparedPlan,
+        c: &OperationContext,
+    ) -> Result<[Option<config::ProjectPortfolioClockRecovery>; 4]> {
+        if self.original != original.digest
+            || self.anchor != original.anchor
+            || self.anchor != c.anchor
+            || self.session != c.session_id
+            || self.request != c.request_id
+        {
+            return Err(denied(
+                "new portfolio clocks require the same original compiling request",
+            ));
+        }
+        Ok(self.pins)
+    }
+}
+
 /// Current whole-target proof has its own bounded sampling window. A target
 /// with no action cannot borrow another leaf's historical stability. This
 /// process-local state is never reconstructed from separate leaf histories.
@@ -228,6 +260,56 @@ fn cohort_covers_selected(
 }
 
 impl Runtime {
+    pub(super) fn prepare_portfolio_clock_publication(
+        &self,
+        original: &PreparedPlan,
+        layout: &live_production::ProductionLayout,
+        c: &OperationContext,
+    ) -> Result<Option<PortfolioClockPublication>> {
+        self.check(c, true)?;
+        if self.config.project_binding.is_some()
+            || self.config.recovery.is_some()
+            || self.original.is_some()
+            || self.frontier.is_some()
+            || self.portfolio.is_some()
+            || original.anchor != c.anchor
+            || layout.archive_seal().plan_digest != original.digest
+        {
+            return Err(denied(
+                "ordinary portfolio publication requires its first complete original",
+            ));
+        }
+        if layout.order_steps().len() > 1
+            && (self.clock.is_some() || self.inventory_clock.is_some())
+        {
+            if (self.clock.is_some() && !self.clock_control_enabled())
+                || (self.inventory_clock.is_some() && !self.inventory_clock_control_enabled())
+            {
+                return Err(denied(
+                    "new portfolio clocks require independent opening and current control authority",
+                ));
+            }
+            // Authorize before any original write, then let each exclusive
+            // native creator recheck its own family at the creation boundary.
+            let mut authority = c.clone();
+            authority.anchor.tick = authority.anchor.tick.max(self.authority_tick_floor());
+            authority.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)?;
+        }
+        let Some(clocks) = self.prospective_portfolio_clock_pins(layout, c)? else {
+            return Ok(None);
+        };
+        if clocks.len() != layout.order_steps().len() || !(1..=4).contains(&clocks.len()) {
+            return Err(denied("new portfolio clock slots differ from the original layout"));
+        }
+        Ok(Some(PortfolioClockPublication {
+            original: original.digest,
+            anchor: original.anchor,
+            session: c.session_id,
+            request: c.request_id,
+            pins: std::array::from_fn(|index| clocks.get(index).copied()),
+        }))
+    }
+
     pub(super) fn selected_order_step(&self) -> Option<StepId> {
         self.portfolio.as_ref().map(|p| p.active).or_else(|| {
             self.layout
@@ -254,14 +336,17 @@ impl Runtime {
         &mut self,
         recovery: Option<[Option<config::PortfolioRecovery>; 4]>,
         publication: Option<&ProjectProductionIntent>,
+        ordinary: Option<&PortfolioClockPublication>,
         work: &mut Work,
     ) -> Result<()> {
         let ids = self.portfolio_ids();
-        // Only the first publication call receives the intent after its parent
-        // ACK. Ordinary reopening cannot derive initialization permission from
-        // retained metadata, including when a retained journal is missing.
+        // Only first publication receives a creation witness: the acknowledged
+        // project intent, or the ordinary compiling request's local witness.
+        // Recovery cannot derive permission from retained metadata, including
+        // when an original journal is missing.
         let publication_clocks = if let Some(intent) = publication {
             if recovery.is_some()
+                || ordinary.is_some()
                 || self.config.recovery.is_some()
                 || self.config.project_binding.is_none()
                 || self.mode != Mode::Control
@@ -276,6 +361,31 @@ impl Runtime {
                     .as_ref()
                     .ok_or_else(|| denied("project publication original is absent"))?,
             )?
+        } else if let Some(ordinary) = ordinary {
+            if recovery.is_some()
+                || self.config.recovery.is_some()
+                || self.config.project_binding.is_some()
+                || self.mode != Mode::Control
+                || !self.initialization_failed
+            {
+                return Err(denied(
+                    "new portfolio clock custody requires its active first publication",
+                ));
+            }
+            let pins = ordinary.for_publication(
+                self.original
+                    .as_ref()
+                    .ok_or_else(|| denied("portfolio publication original is absent"))?,
+                &work.current()?,
+            )?;
+            let first = pins[0].ok_or_else(|| denied("first portfolio clock slot is absent"))?;
+            if first.clock != self.clock.as_ref().map(ProductionClock::project_recovery_checkpoint)
+                || first.inventory_clock != self.inventory_clock.as_ref()
+                    .map(ProductionInventoryClock::project_recovery_checkpoint)
+            {
+                return Err(denied("portfolio publication changed its retained first clock owners"));
+            }
+            Some(pins)
         } else {
             None
         };

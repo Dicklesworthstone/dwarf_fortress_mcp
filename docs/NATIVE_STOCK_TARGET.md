@@ -112,6 +112,38 @@ authorized clocks retain their normal boundaries. Assignment is not a stability
 sample: the complete-parent tracker reads timing only from the original positive
 order obligations, and clock requests use the actual order StepIds.
 
+### First combined or staged portfolio after restarting before publication
+
+A `labor-order` owner, including the production child of
+`workshop-production`, may reopen native custody before any effect-bearing
+original exists and then publish its first positive stock portfolio. The
+compiler retains a nonserializable witness for the complete original digest,
+anchor, compiling session/request and every original order's clock identity.
+It is available only to that same first publication and is never reconstructed
+from retained recovery metadata.
+
+For multiple positive orders, additional fixed clock paths must be absent.
+Each configured family needs its own opening and current permission and current
+`ControlClock` authority before any original archive or frontier is written.
+After those checks, publication creates the original and exclusively creates
+the predicted additional headers. Existing first clock owners remain unchanged.
+A single positive order needs no additional header or new-slot authority.
+The same boundary also serves manually sized combined portfolios.
+
+This ordinary path has no resource-project parent ACK. The fixed-project
+contract below keeps that separate requirement. Neither publication path
+prepares or commits a native effect or advances game time. Once writing has
+begun, a failure preserves partial custody and prevents another original in that
+owner. Recovery of an existing original remains strict: all original journal
+identities and files must be present, with no recreation of missing, corrupt,
+substituted or omitted slots. See
+[COMBINED_PRODUCTION_MCP.md](COMBINED_PRODUCTION_MCP.md) and
+[WORKSHOP_PRODUCTION_MCP.md](WORKSHOP_PRODUCTION_MCP.md) for reopening details.
+
+The ordinary Runtime/native-TCP regression cases, including the imported-Workshop
+child, are authored but unexecuted for this change. They add no native-plugin,
+full staged-profile or live-game qualification.
+
 ### First project portfolio after restarting before publication
 
 The fixed resource-project owner can reopen its pre-plan custody and then
