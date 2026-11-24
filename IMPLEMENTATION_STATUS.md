@@ -31,20 +31,31 @@ owned pause effects, lossless packet output and whole-packet refusal. Packet
 regressions reject crossed version/scope metadata and retain every stage and
 the owned-work census with the correct forecast limitations.
 
-Executed checks: the Python request-schema suite passed 15 accepted and 91
-rejected cases; Python syntax and whitespace checks passed. The eleven changed
-Rust modules formatted and parsed with rustfmt 1.10.0-nightly using the dated
-2026-08-31 toolchain. An additional in-memory check evaluated 132 schema cases,
-including exact u64 boundaries; original schema variant bytes were preserved.
+Validation during this implementation; full source qualification was attempted
+at `14c991d4c879`:
 
-The host disconnected twice. After recovery, exact locked dependencies were
-fetched without substitution. The one-job locked/offline Rust check stopped
-with ENOSPC while checking getrandom 0.2.17 before reaching dfmcp-mcp; no
-Rust test execution or compilation success is established by this entry. A
-retry uses the same exact dependencies after relocating this task's caches.
-Latest-nightly,
-full-workspace, native, live-game and admission qualification remain open.
-No compatibility registry or production protocol map is widened.
+- `python3 scripts/test_lab_plan_comparison_schema.py`: passed 15 accepted
+  and 91 rejected cases. Python syntax and whitespace checks passed.
+- Scoped rustfmt 1.10.0-nightly parsed/formatted all eleven changed Rust modules
+  with the available dated 2026-08-31 toolchain. This is not the latest-nightly
+  qualification gate.
+- `scripts/verify.sh`: repository integrity, 6,042 repository checks, agent,
+  bridge, admission and dependency contracts passed; the ladder stopped when
+  bead coverage could not find the `br` executable.
+- `scripts/qualify_local.sh`: clean-source static gates and 63 Python tests
+  passed, then the native workshop component compiler (`g++/cc1plus`) was
+  killed. The exact-source qualification receipt records `status: failed`.
+- `cargo check --locked --offline -p dfmcp-mcp --tests -j 1`: exact pinned
+  dependencies were fetched without substitution. After an initial ENOSPC
+  failure and relocation of task-owned caches, rustc was killed by SIGKILL
+  while checking asupersync 0.5.0, before reaching the MCP crate. A bounded
+  retry with one frontend thread, no debug/incremental output and MIR
+  optimization level zero was also killed in that dependency.
+
+No MCP Rust compilation or new Rust test execution is established. The dated
+toolchain, static passes, independent source review and failed qualification
+receipt confer no latest-nightly, full-workspace, native, live-game or admission
+qualification. No compatibility registry or production protocol map is widened.
 
 Owners: `df-lab-plan-comparison-c9r` and
 `df-lab-joint-original-forecast-c2s` (in progress).
