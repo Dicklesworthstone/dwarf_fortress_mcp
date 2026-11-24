@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Keep structured lexical search usable under output limits
+
+- Fit search rows together with the complete laboratory Agent Turn and retained
+  work metadata, returning the largest publishable ordered prefix and its exact
+  continuation.
+- Preserve ranking, filters, source coverage, current authority and existing
+  cursor identities without repeating the source scan at smaller page limits.
+- Refuse an oversized first row, never skip a later oversized row, consider the
+  smaller terminal page, and propagate publisher errors unchanged.
+- Add five executor, retained-wrapper and public-facade regression groups.
+  Validation limitations are recorded in `IMPLEMENTATION_STATUS.md`.
+
 ## Unreleased — Advance no-order stock stability through reviewed intervals
 
 - Integrate an explicitly opted-in Run/1.13 stock-watch clock into native

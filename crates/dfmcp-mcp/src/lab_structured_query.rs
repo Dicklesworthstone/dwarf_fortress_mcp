@@ -133,7 +133,12 @@ impl Request {
         matches!(
             self.request["query"]["kind"].as_str(),
             Some(
-                "entities" | "events" | "spatial_entities" | "related_entities" | "ranked_entities"
+                "entities"
+                    | "search"
+                    | "events"
+                    | "spatial_entities"
+                    | "related_entities"
+                    | "ranked_entities"
             )
         )
     }
@@ -370,6 +375,7 @@ pub(super) fn execute_projected(
 ) -> Result<Value> {
     let execute_page = match request.request["query"]["kind"].as_str() {
         Some("entities") => core_query::execute_with_page_budget,
+        Some("search") => operational_query::execute_with_page_budget,
         Some("events") => event_query::execute_with_page_budget,
         Some("spatial_entities") => spatial_entity_query::execute_with_page_budget,
         Some("related_entities") => related_entity_query::execute_with_page_budget,
@@ -557,6 +563,104 @@ mod projected_tests {
             "coverage":page["observation_coverage"], "recommendations":[], "uncertainty":[],
         });
         packet.to_string()
+    }
+
+    fn search_request(limit: u32) -> Request {
+        Request {
+            mode: Mode::Structured,
+            at: None,
+            request: json!({"schema":"dfmcp.query/1", "query":{
+                "kind":"search", "text":"Urist", "kinds":["unit"], "limit":limit}}),
+        }
+    }
+
+    #[test]
+    fn projected_lexical_pages_fit_complete_turns_and_keep_exact_historical_continuation()
+    -> TestResult {
+        let (source, mut current) = fixture(16, 16_384);
+        let original = source.canonical_bytes();
+        current.budget.max_output_tokens = 32_768;
+        let one = execute_projected(
+            &source,
+            &current,
+            &search_request(1),
+            Instant::now(),
+            &|_| Ok(true),
+        )?;
+        let one = super::super::query_budget::response_payload(Ok(one), &current, true);
+        current.budget.max_output_tokens = u32::try_from((packet(&one).len() + 128).div_ceil(4))?;
+        let mut selected = search_request(16);
+        assert!(selected.is_projected_page());
+        let mut ids = Vec::new();
+        for page_index in 0..16 {
+            let result =
+                execute_projected(&source, &current, &selected, Instant::now(), &|page| {
+                    super::super::query_budget::lossless_page_fits(
+                        &packet(page),
+                        &page["query_budget"],
+                    )
+                })?;
+            let complete = super::super::query_budget::response_payload(Ok(result), &current, true);
+            let encoded =
+                super::super::query_budget::finish_response(packet(&complete), Duration::ZERO);
+            let page: Value = serde_json::from_str(&encoded)?;
+            assert_eq!(page["ok"], true, "{page}");
+            assert!(encoded.len() <= current.budget.max_output_tokens as usize * 4);
+            let rows = page["rows"].as_array().ok_or("rows missing")?;
+            assert!(!rows.is_empty());
+            if page_index == 0 {
+                assert!(rows.len() < 16);
+            } else {
+                assert_eq!(page["historical"], true);
+            }
+            assert_eq!(page["matched"], 16);
+            assert_eq!(page["anchor"], core_query::anchor_json(source.anchor()));
+            assert_eq!(
+                page["current_anchor"],
+                core_query::anchor_json(current.anchor)
+            );
+            assert_eq!(
+                page["agent_turn"]["coverage"]["continuation"],
+                page["continuation"]
+            );
+            assert_eq!(page["source_work"]["canonical_bytes"], original.len());
+            ids.extend(rows.iter().map(|row| row["entity_id"].clone()));
+            if page["continuation"].is_null() {
+                break;
+            }
+            selected.request["query"]["continuation"] = page["continuation"].clone();
+            if page_index == 0 {
+                let mut next = source.clone();
+                next.tick = GameTick(20);
+                next.cursor.sequence += 1;
+                next.refresh_hash();
+                current.anchor = next.anchor();
+                selected.at = Some(source.anchor().state_hash.to_string());
+            }
+        }
+        assert_eq!(
+            ids,
+            (1..=16).map(|id| json!(id.to_string())).collect::<Vec<_>>()
+        );
+        assert_eq!(source.canonical_bytes(), original);
+        current.grants[0].expires_at_tick = Some(source.tick);
+        let calls = std::cell::Cell::new(0);
+        assert_eq!(
+            execute_projected(
+                &source,
+                &current,
+                &search_request(1),
+                Instant::now(),
+                &|_| {
+                    calls.set(calls.get() + 1);
+                    Ok(true)
+                }
+            )
+            .map_err(|error| error.code),
+            Err(ErrorCode::CapabilityDenied)
+        );
+        assert_eq!(calls.get(), 0);
+        Ok(())
     }
 
     #[test]

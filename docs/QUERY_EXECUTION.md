@@ -944,6 +944,17 @@ rows in deterministic score/ID order. The existing `ls1` identity binds the
 complete predicate, session and exact source, so adding, removing or changing
 the filter invalidates an old continuation. Every page rechecks Query authority.
 
+The laboratory includes the complete wrapper, current Agent Turn and retained
+work while fitting lexical pages. Selection and ranking run once; output
+fitting keeps a contiguous prefix in the existing score/ID order and binds its
+cursor to the last published hit. An oversized next hit is never replaced by a
+smaller later hit. A terminal page may fit even when a preceding prefix does
+not, because its continuation is removed; the bounded terminal check does not
+publish that provisional prefix. Empty results still require room for the
+complete packet. A publisher error aborts the query, including a publisher's
+own budget error. Current source authority, original work/deadline limits and
+historical source identity remain independent of the response allowance.
+
 This is bounded lexical retrieval over published canonical facts. It adds no
 native reads, effects, hidden index, semantic model or FrankenSearch dependency.
 
@@ -1007,7 +1018,8 @@ enforces its final Agent Turn budget; an incomplete structured row or a cursor
 that advances past unpublished rows is never a successful response.
 
 The same pure size check and bounded terminal-page lookahead also serve
-`spatial_entities`, `related_entities`, `ranked_entities` and `events`.
+`spatial_entities`, `related_entities`, `ranked_entities`, structured lexical
+`search` and `events`.
 Their own selectors, ordering, provenance, source budgets and cursor identities
 are unchanged. Candidate rows are selected once under the original work
 allowance; fitting does not repeatedly rescan the world with smaller limits.

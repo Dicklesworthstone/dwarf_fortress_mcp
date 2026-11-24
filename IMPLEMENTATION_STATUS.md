@@ -1,5 +1,36 @@
 # Implementation Status
 
+## Unreleased — Fit lexical pages to complete Agent Turns
+
+Structured laboratory search now selects a complete ordered prefix against the
+actual Agent Turn, retained query-work catalogs and response allowance. It uses
+the same pure page-size contract as entity, spatial, related, ranked and event
+queries. The complete source is admitted and scanned once; reducing the output
+page does not weaken input, wall-time, integrity or current Query authority.
+
+Lexical ranking, whole-source match counts and existing source/session/query
+cursor identities are unchanged. An oversized next hit is never skipped, and
+an unpublishable first hit cannot manufacture an advancing empty cursor. The
+terminal page is considered when removing its continuation makes it fit even
+though an earlier prefix does not. Empty output must also fit, and publisher
+errors remain failures rather than reasons to silently change the result set.
+
+Five new regression groups cover executor fitting and failure propagation,
+retained-source wrapper pagination, and the actual facade's current authority,
+pending work and complete Agent Turn. Validation results are recorded below;
+source tests alone do not establish integrated runtime or live qualification.
+
+Scoped latest-nightly formatting, repository source integrity, dependency
+policy, the frozen agent contract and whitespace checks pass. Two independent
+source reviews found no blocking issue. The five new regression groups have
+not executed at this checkpoint: the focused real-source query build is still
+pending under host memory pressure. Full MCP/facade execution and full
+qualification remain unestablished. Required verification reached the missing
+`br` prerequisite; release qualification refused the edited worktree. No
+native, live-game or compatibility admission is changed.
+
+Owner: `df-lab-structured-query-f7q` (in progress).
+
 ## Unreleased — Advance original no-order stock goals with bounded time
 
 The native resource-project development profile now integrates an optional

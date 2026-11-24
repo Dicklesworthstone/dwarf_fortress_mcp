@@ -217,6 +217,13 @@ matches. Filters participate in work admission and continuation identity.
 Unfiltered requests keep their existing shape and ranking. See
 `QUERY_EXECUTION.md` for text fields, matching rules and selection accounting.
 
+Search pages include the complete Agent Turn and retained work when choosing
+their size. A large requested `limit` yields the largest fitting ordered prefix
+under the response allowance, with an exact `ls1` continuation. Resume with the
+same selection and retained source; page width may change. A large next hit is
+never skipped, and a first hit that cannot fit refuses without an advancing
+cursor. Search does not repeat source scans while trying smaller output pages.
+
 ## Ranking by numeric facts
 
 Select the most relevant records without retrieving and sorting the population
@@ -675,13 +682,14 @@ for the response and active watches only narrows output, so a small answer can
 still inspect a larger admitted world. Retained reads use the current grant
 expiry and keep the historical source anchor separate.
 
-For structured `entities`, `spatial_entities`, `related_entities`,
+For structured `entities`, `search`, `spatial_entities`, `related_entities`,
 `ranked_entities` and `events`, the complete laboratory wrapper and captured
 Agent Turn participate while the page is chosen. `returned` can be smaller
 than the requested `limit` without requiring the caller to retry smaller limits.
 Entity pages render the requested `fields` and any required geometry, relation
 witnesses or ranking facts; event pages retain their selected fields and event
-metadata. Large unselected values do not consume the projected output allowance,
+metadata. Lexical pages retain each selected hit's label, matched fields,
+source references and typed inspection request. Large unselected values do not consume the projected output allowance,
 while complete-source work admission still includes them.
 Future backing values are masked before complete-row fitting, so an Unknown
 field does not need enough output allowance for its hidden value. The complete
@@ -728,7 +736,7 @@ facts, continuation integrity, legacy grammar, source work and complete-packet
 budgets. These source regressions do not establish live DFHack compatibility,
 game effects, production admission or full workspace qualification.
 
-`projected_entities_mcp_tests.rs` adds complete-turn pagination for entity,
+`projected_entities_mcp_tests.rs` adds complete-turn pagination for entity, lexical,
 spatial, relationship, ranked and event pages, retaining query catalogs and
 pending game work. It also covers required-row refusal, failed-query observation
 basis, historical authority and deferred-context checks. Pure family regressions

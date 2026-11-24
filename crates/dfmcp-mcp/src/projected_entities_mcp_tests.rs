@@ -154,6 +154,100 @@ fn refused(page: &Value, code: &str) {
 }
 
 #[test]
+fn projected_search_facade_pages_preserve_exact_history_pending_work_and_current_authority()
+-> TestResult {
+    let _serial = crate::test_serial();
+    let (session, _) = fixture(8, 0, 16_384, true)?;
+    let owner = crate::server::resolve_session(Some(session.clone()))?;
+    let source = {
+        let mut guard = owner.lock().map_err(|_| "session poisoned")?;
+        let mut source = guard.adapter.snapshot().clone();
+        for entity in source.graph.entities.values_mut() {
+            entity.label = format!("Urist {} {}", entity.id, "label".repeat(256));
+        }
+        source.refresh_hash();
+        guard.adapter.inject_snapshot(source.clone())?;
+        source
+    };
+    let mut selected = json!({"mode":"structured", "request":{"schema":"dfmcp.query/1",
+        "query":{"kind":"search", "text":"Urist", "kinds":["unit"], "limit":1}}});
+    assert_eq!(query(&session, &selected)?.1["ok"], true);
+    let plan = decode(&crate::agent_facade::fortress_plan(
+        Some(session.clone()),
+        Some("retain this search-time review".to_owned()),
+        Some(false),
+        None,
+        None,
+    ))?;
+    assert_eq!(plan["ok"], true, "{plan}");
+    let (one_raw, one) = query(&session, &selected)?;
+    assert_eq!(one["ok"], true, "{one}");
+    let tokens = narrowed_tokens(&session, &one_raw)?;
+    selected["request"]["query"]["limit"] = json!(8);
+    let mut ids = Vec::new();
+    let mut current = source.clone();
+    for index in 0..8 {
+        let (raw, page) = query(&session, &selected)?;
+        assert_eq!(page["ok"], true, "{page}");
+        assert!(raw.len() <= tokens as usize * 4);
+        assert_eq!(page["matched"], 8);
+        assert_eq!(page["anchor"]["state_hash"], source.state_hash.to_string());
+        assert_eq!(
+            page["agent_turn"]["anchor"]["state_hash"],
+            current.state_hash.to_string()
+        );
+        assert_eq!(
+            page["agent_turn"]["active_work"]["pending_plans"][0]["plan_digest"],
+            plan["plan_digest"]
+        );
+        assert_eq!(
+            page["agent_turn"]["coverage"]["continuation"],
+            page["continuation"]
+        );
+        let rows = page["rows"].as_array().ok_or("search rows missing")?;
+        assert!(!rows.is_empty());
+        if index == 0 {
+            assert!(rows.len() < 8);
+        } else {
+            assert_eq!(page["historical"], true);
+        }
+        ids.extend(rows.iter().map(|row| row["entity_id"].clone()));
+        if page["continuation"].is_null() {
+            break;
+        }
+        selected["request"]["query"]["continuation"] = page["continuation"].clone();
+        if index == 0 {
+            current = advance(&session)?;
+            selected["at"] = json!(source.state_hash.to_string());
+        }
+    }
+    assert_eq!(
+        ids,
+        (1..=8).map(|id| json!(id.to_string())).collect::<Vec<_>>()
+    );
+    {
+        let mut guard = owner.lock().map_err(|_| "session poisoned")?;
+        assert_eq!(guard.adapter.snapshot(), &current);
+        guard
+            .grants
+            .iter_mut()
+            .find(|grant| grant.capability == Capability::Query)
+            .ok_or("Query grant missing")?
+            .expires_at_tick = Some(source.tick);
+    }
+    refused(&query(&session, &selected)?.1, "capability_denied");
+    assert_eq!(
+        owner
+            .lock()
+            .map_err(|_| "session poisoned")?
+            .adapter
+            .snapshot(),
+        &current
+    );
+    Ok(())
+}
+
+#[test]
 fn projected_entities_facade_pages_fit_the_complete_turn_without_skipping_rows() -> TestResult {
     let _serial = crate::test_serial();
     let (session, source) = fixture(12, 1024, 16_384, false)?;
@@ -1012,13 +1106,23 @@ fn projected_entity_views_bind_future_facts_to_the_selected_source_tick() -> Tes
         source
     };
     assert_eq!(source.tick, GameTick(10));
-    let fields = ["small", "past", "future_legacy", "future_explicit", "future_absent"];
+    let fields = [
+        "small",
+        "past",
+        "future_legacy",
+        "future_explicit",
+        "future_absent",
+    ];
     let mut entities = request(1);
     entities["request"]["query"]["fields"] = json!(fields);
     let inspect = json!({"mode":"structured","request":{"schema":"dfmcp.query/1",
         "query":{"kind":"inspect","entity_id":"1","generation":1,"fields":fields}}});
     let legacy = json!({"mode":"entities","kind":"unit","limit":1});
-    let views = [("entities", entities), ("inspect", inspect), ("legacy", legacy)];
+    let views = [
+        ("entities", entities),
+        ("inspect", inspect),
+        ("legacy", legacy),
+    ];
 
     for (kind, selected) in &views {
         let (_, page) = query(&session, selected)?;
@@ -1027,11 +1131,22 @@ fn projected_entity_views_bind_future_facts_to_the_selected_source_tick() -> Tes
         if *kind == "legacy" {
             assert_source_time_legacy_row(&page["rows"][0], false);
         } else {
-            let row = if *kind == "inspect" { &page["row"] } else { &page["rows"][0] };
+            let row = if *kind == "inspect" {
+                &page["row"]
+            } else {
+                &page["rows"][0]
+            };
             assert_source_time_typed_row(row, false, digest);
         }
     }
-    assert_eq!(owner.lock().map_err(|_| "session poisoned")?.adapter.snapshot(), &source);
+    assert_eq!(
+        owner
+            .lock()
+            .map_err(|_| "session poisoned")?
+            .adapter
+            .snapshot(),
+        &source
+    );
 
     let current = advance(&session)?;
     assert_eq!(current.tick, GameTick(11));
@@ -1042,7 +1157,11 @@ fn projected_entity_views_bind_future_facts_to_the_selected_source_tick() -> Tes
         if *kind == "legacy" {
             assert_source_time_legacy_row(&page["rows"][0], true);
         } else {
-            let row = if *kind == "inspect" { &page["row"] } else { &page["rows"][0] };
+            let row = if *kind == "inspect" {
+                &page["row"]
+            } else {
+                &page["rows"][0]
+            };
             assert_source_time_typed_row(row, true, digest);
         }
     }
@@ -1062,7 +1181,11 @@ fn projected_entity_views_bind_future_facts_to_the_selected_source_tick() -> Tes
         if *kind == "legacy" {
             assert_source_time_legacy_row(&page["rows"][0], false);
         } else {
-            let row = if *kind == "inspect" { &page["row"] } else { &page["rows"][0] };
+            let row = if *kind == "inspect" {
+                &page["row"]
+            } else {
+                &page["rows"][0]
+            };
             assert_source_time_typed_row(row, false, digest);
         }
         retained_views.push(retained);
@@ -1082,6 +1205,13 @@ fn projected_entity_views_bind_future_facts_to_the_selected_source_tick() -> Tes
         refused(&denied, "capability_denied");
         assert!(denied.get("row").is_none());
     }
-    assert_eq!(owner.lock().map_err(|_| "session poisoned")?.adapter.snapshot(), &current);
+    assert_eq!(
+        owner
+            .lock()
+            .map_err(|_| "session poisoned")?
+            .adapter
+            .snapshot(),
+        &current
+    );
     Ok(())
 }

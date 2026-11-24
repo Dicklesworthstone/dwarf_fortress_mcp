@@ -318,12 +318,7 @@ fn identity(
     Ok(Digest32::of_bytes(&bytes))
 }
 
-fn finish(
-    snapshot: &WorldSnapshot,
-    identity: Digest32,
-    mut result: Value,
-    maximum: usize,
-) -> Result<Value> {
+fn result_envelope(snapshot: &WorldSnapshot, identity: Digest32, mut result: Value) -> Value {
     result["schema"] = json!("dfmcp.query.result/1");
     result["anchor"] = anchor_json(snapshot.anchor());
     result["query_digest"] = json!(identity.to_string());
@@ -331,6 +326,16 @@ fn finish(
         result["coverage"] = json!({"domain":"observed_projection","absence_proven":false,
             "note":"counts and matches describe the supplied projection, not complete fortress history or unobserved domains"});
     }
+    result
+}
+
+fn finish(
+    snapshot: &WorldSnapshot,
+    identity: Digest32,
+    result: Value,
+    maximum: usize,
+) -> Result<Value> {
+    let result = result_envelope(snapshot, identity, result);
     let bytes = serde_json::to_vec(&result).map_err(|_| invalid("cannot encode query result"))?;
     if bytes.len() > maximum {
         return Err(exhausted(
@@ -357,11 +362,25 @@ pub(super) fn execute_with_output_budget(
     input: &Value,
     output_bytes: u64,
 ) -> Result<Value> {
+    execute_with_page_budget(snapshot, context, input, output_bytes, &|_| Ok(true))
+}
+
+/// Select one lexical prefix against the caller's immutable complete packet.
+/// This check may only narrow output: it cannot publish, acquire authority, or
+/// change the complete-source work allowance. Aggregates remain all-or-error.
+pub(super) fn execute_with_page_budget(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    output_bytes: u64,
+    fits: &dyn Fn(&Value) -> Result<bool>,
+) -> Result<Value> {
     execute_at_source(
         snapshot,
         context,
         input,
         output_bytes,
+        fits,
         Instant::now(),
         false,
     )
@@ -376,7 +395,15 @@ pub(super) fn execute_retained_with_output_budget(
     output_bytes: u64,
     started: Instant,
 ) -> Result<Value> {
-    execute_at_source(snapshot, current, input, output_bytes, started, true)
+    execute_at_source(
+        snapshot,
+        current,
+        input,
+        output_bytes,
+        &|_| Ok(true),
+        started,
+        true,
+    )
 }
 
 fn execute_at_source(
@@ -384,6 +411,7 @@ fn execute_at_source(
     context: &OperationContext,
     input: &Value,
     output_bytes: u64,
+    fits: &dyn Fn(&Value) -> Result<bool>,
     started: Instant,
     retained_source: bool,
 ) -> Result<Value> {
@@ -507,9 +535,14 @@ fn execute_at_source(
                 limit: limit.unwrap_or(4),
                 continuation,
             };
-            search(snapshot, identity, &spec, maximum, &mut work)
+            search(snapshot, identity, &spec, maximum, fits, &mut work)
         }
     }?;
+    if !fits(&value)? {
+        return Err(exhausted(
+            "query result and required presentation exceed the output budget",
+        ));
+    }
     work.check()?;
     check()?;
     Ok(value)
@@ -675,9 +708,7 @@ fn aggregate(
             1
         }
         Some(GroupBy::Fields { fields }) => {
-            if fields.is_empty()
-                || names(fields.clone(), MAX_GROUP_FIELDS)?.len() != fields.len()
-            {
+            if fields.is_empty() || names(fields.clone(), MAX_GROUP_FIELDS)?.len() != fields.len() {
                 return Err(invalid(
                     "aggregate fields grouping requires one to four distinct field names",
                 ));
@@ -754,9 +785,8 @@ fn aggregate(
                     ),
             )
             .saturating_add(
-                max_groups.saturating_mul(
-                    metrics.len().saturating_add(group_width).saturating_add(1),
-                ),
+                max_groups
+                    .saturating_mul(metrics.len().saturating_add(group_width).saturating_add(1)),
             );
         work.charge(
             0,
@@ -1145,6 +1175,7 @@ fn search(
     identity: Digest32,
     spec: &SearchSpec,
     maximum: usize,
+    fits: &dyn Fn(&Value) -> Result<bool>,
     work: &mut source::Budget,
 ) -> Result<Value> {
     if spec.text.is_empty()
@@ -1270,69 +1301,73 @@ fn search(
             "search continuation no longer names a hit in this exact result set",
         ));
     }
-    let ordered: Vec<_> = best.into_iter().collect();
-    let build = |count: usize| -> Result<Value> {
-        work.check()?;
-        let truncated = remaining > count;
-        let continuation = if truncated && count > 0 {
-            Some(cursor(identity, ordered[count - 1].0))
-        } else {
-            None
-        };
-        let rows = ordered
-            .iter()
-            .take(count)
-            .map(|(_, hit)| {
-                work.check()?;
-                Ok(json!({
-                    "entity_id":hit.entity.id.to_string(),"generation":hit.entity.generation,"revision":hit.entity.revision,
-                    "kind":kind_name(&hit.entity.kind),"label":hit.entity.label,"matched_terms":hit.terms,
-                    "matched_fields":hit.fields,"source_digests":hit.source_digests,
-                    "inspect":{"kind":"inspect","entity_id":hit.entity.id.to_string(),"generation":hit.entity.generation,
-                        "fields":hit.fields.iter().filter(|&&field|field!="$label").collect::<Vec<_>>()}
-                }))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let mut result = json!({"kind":"search","matched":matched,"returned":count,
-            "truncated":truncated,"continuation":continuation,"rows":rows,"terms":terms,
+    let output = core_query::PageBudget {
+        maximum_bytes: maximum,
+        fits,
+    };
+    let reaches_terminal = remaining <= spec.limit;
+    let mut result = result_envelope(
+        snapshot,
+        identity,
+        json!({"kind":"search","matched":matched,"returned":0,
+            "truncated":false,"continuation":null,"rows":[],"terms":terms,
             "ranking":"distinct matching terms descending, then stable entity ID ascending",
             "matching":"Unicode lowercase substring terms, not stemming or semantic search",
-            "scanned_text_bytes":scanned,"unavailable_or_nontext_fields":unavailable});
-        if spec.predicate.is_some() {
-            result["selection"] = json!({
-                "selected_entities":selected_entities,
-                "matched_predicate":matched_predicate,
-                "excluded_false":excluded_false,
-                "excluded_unknown":excluded_unknown,
-                "predicate_evaluations":selected_entities,
-                "complete_within_projection":excluded_unknown == 0,
-                "note":"only True predicate rows are searched; matched_predicate precedes lexical matching, Unknown is not False, and neither count proves complete-world absence"
-            });
-        }
-        let result = finish(snapshot, identity, result, maximum)?;
+            "scanned_text_bytes":scanned,"unavailable_or_nontext_fields":unavailable}),
+    );
+    if spec.predicate.is_some() {
+        result["selection"] = json!({
+            "selected_entities":selected_entities,
+            "matched_predicate":matched_predicate,
+            "excluded_false":excluded_false,
+            "excluded_unknown":excluded_unknown,
+            "predicate_evaluations":selected_entities,
+            "complete_within_projection":excluded_unknown == 0,
+            "note":"only True predicate rows are searched; matched_predicate precedes lexical matching, Unknown is not False, and neither count proves complete-world absence"
+        });
+    }
+    let mut accepted = None;
+    for (rank, hit) in best.into_iter().take(spec.limit) {
         work.check()?;
-        Ok(result)
-    };
-    if ordered.is_empty() {
-        return build(0);
-    }
-    // Largest complete page that fits, including the envelope and next cursor.
-    let (mut low, mut high) = (1usize, spec.limit.min(ordered.len()));
-    let mut result = None;
-    while low <= high {
-        let middle = low + (high - low) / 2;
-        match build(middle) {
-            Ok(page) => {
-                result = Some(page);
-                low = middle + 1;
-            }
-            Err(error) if error.code == ErrorCode::BudgetExceeded => {
-                high = middle - 1;
-            }
-            Err(error) => return Err(error),
+        // The label alone is an output-size lower bound; do not materialize a
+        // large row or skip it in favor of a smaller, lower-ranked match.
+        if hit.entity.label.len() > maximum {
+            break;
+        }
+        let rows = result["rows"]
+            .as_array_mut()
+            .ok_or_else(|| invalid("search result rows are unavailable"))?;
+        rows.push(json!({
+            "entity_id":hit.entity.id.to_string(),"generation":hit.entity.generation,"revision":hit.entity.revision,
+            "kind":kind_name(&hit.entity.kind),"label":hit.entity.label,"matched_terms":hit.terms,
+            "matched_fields":hit.fields,"source_digests":hit.source_digests,
+            "inspect":{"kind":"inspect","entity_id":hit.entity.id.to_string(),"generation":hit.entity.generation,
+                "fields":hit.fields.iter().filter(|&&field|field!="$label").collect::<Vec<_>>()}
+        }));
+        let count = rows.len();
+        result["returned"] = json!(count);
+        result["truncated"] = json!(remaining > count);
+        result["continuation"] = if remaining > count {
+            json!(cursor(identity, rank))
+        } else {
+            Value::Null
+        };
+        if output.accepts(&result)? {
+            accepted = Some(result.clone());
+        } else if !output.terminal_may_fit(&result, reaches_terminal)? {
+            break;
         }
     }
-    result.ok_or_else(|| exhausted("one search row and its envelope exceed the response budget"))
+    let result = accepted
+        .or_else(|| (remaining == 0).then_some(result))
+        .ok_or_else(|| exhausted("one search row and its envelope exceed the response budget"))?;
+    if !output.accepts(&result)? {
+        return Err(exhausted(
+            "search result and its envelope exceed the response budget",
+        ));
+    }
+    work.check()?;
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -1458,6 +1493,98 @@ mod tests {
         envelope(
             json!({"kind":"search","text":"cavern flood","text_fields":["message"],"match_mode":"any","limit":1}),
         )
+    }
+
+    #[test]
+    fn lexical_pages_fit_complete_packets_without_skipping_the_next_ranked_hit() -> Result<()> {
+        let (mut snapshot, mut context) = fixture();
+        snapshot
+            .graph
+            .entities
+            .get_mut(&EntityId::new(2))
+            .ok_or_else(|| invalid("missing fixture entity"))?
+            .label = "large".repeat(2048);
+        snapshot.refresh_hash();
+        context.anchor = snapshot.anchor();
+        let first = execute(&snapshot, &context, &search_query())?;
+        let maximum = first.to_string().len() + 64;
+        let fits = |page: &Value| Ok(page.to_string().len() <= maximum);
+        let mut request = search_query();
+        request["query"]["limit"] = json!(3);
+        let page = execute_with_page_budget(
+            &snapshot,
+            &context,
+            &request,
+            context.budget.max_bytes,
+            &fits,
+        )?;
+        assert_eq!(page["returned"], 1);
+        assert_eq!(page["matched"], 3);
+        assert_eq!(page["rows"], first["rows"]);
+        assert_eq!(page["continuation"], first["continuation"]);
+        request["query"]["continuation"] = page["continuation"].clone();
+        assert!(matches!(
+            execute_with_page_budget(&snapshot, &context, &request, context.budget.max_bytes, &fits),
+            Err(error) if error.code == ErrorCode::BudgetExceeded
+        ));
+        // The refusal cannot consume the large second row or skip ahead to
+        // smaller metadata. A larger allowance resumes the exact same cursor.
+        let remaining = execute(&snapshot, &context, &request)?;
+        assert_eq!(remaining["returned"], 2);
+        assert_eq!(remaining["rows"][0]["entity_id"], "2");
+        assert_eq!(remaining["rows"][1]["entity_id"], "4");
+        assert!(remaining["continuation"].is_null());
+        Ok(())
+    }
+
+    #[test]
+    fn lexical_terminal_page_can_fit_when_its_continuation_prefix_does_not() -> Result<()> {
+        let (snapshot, context) = fixture();
+        let mut request = search_query();
+        request["query"]["kinds"] = json!(["unit"]);
+        let prefix = execute(&snapshot, &context, &request)?;
+        request["query"]["limit"] = json!(2);
+        let full = execute(&snapshot, &context, &request)?;
+        assert!(prefix["continuation"].is_string());
+        assert!(full["continuation"].is_null());
+        let render = |page: &Value| {
+            json!({
+                "page":page, "resume":vec![page["continuation"].clone(); 4]
+            })
+            .to_string()
+        };
+        let maximum = render(&full).len();
+        assert!(render(&prefix).len() > maximum);
+        let result = execute_with_page_budget(
+            &snapshot,
+            &context,
+            &request,
+            context.budget.max_bytes,
+            &|page| Ok(render(page).len() <= maximum),
+        )?;
+        assert_eq!(result, full);
+        Ok(())
+    }
+
+    #[test]
+    fn lexical_packet_fitting_bounds_empty_results_and_preserves_publisher_errors() -> Result<()> {
+        let (snapshot, context) = fixture();
+        for text in ["cavern", "not-a-recorded-phrase"] {
+            let mut request = search_query();
+            request["query"]["text"] = json!(text);
+            assert!(matches!(
+                execute_with_page_budget(&snapshot, &context, &request, context.budget.max_bytes, &|_| Ok(false)),
+                Err(error) if error.code == ErrorCode::BudgetExceeded
+            ));
+            for code in [ErrorCode::InvalidRequest, ErrorCode::BudgetExceeded] {
+                assert!(matches!(
+                    execute_with_page_budget(&snapshot, &context, &request, context.budget.max_bytes,
+                        &|_| Err(DfmcpError::new(code, "packet publication unavailable"))),
+                    Err(error) if error.code == code && error.message == "packet publication unavailable"
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn complete_source_fixture() -> Result<(WorldSnapshot, OperationContext)> {
