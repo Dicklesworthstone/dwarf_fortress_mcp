@@ -86,18 +86,25 @@
       "DRINK"
     ],
     "input": "PLANT",
-    "quantity": "pending_production_input_debt + minimum_new_batches - observed_PLANT_stock",
-    "selection": "largest_useful_tranche_then_lowest_canonical_source_id",
-    "bound": "min(missing_input, source_remaining_minus_active_demand, 100)",
+    "source": "one_production_blueprint_retaining_all_known_deficient_output_quotas",
+    "quantity": "joint_food_drink_recipe_inputs_and_consumption_reserve_through_acquisition_and_production",
+    "diagnostic_selection": "largest_useful_tranche_then_lowest_canonical_source_id",
+    "diagnostic_bound": "min(missing_input, source_remaining_minus_active_demand, 100)",
     "evidence": [
       "complete_harvest_and_provisions_censuses",
       "same_original_ledger_and_generation",
       "exact_source_generation",
-      "qualified_living_enabled_gatherer"
+      "qualified_living_enabled_or_explicitly_disabled_gatherer",
+      "qualified_ready_workshops_and_recipe_staffing",
+      "ordinary_complete_production_compiler_acceptance"
     ],
     "active_original_harvest": "await_observed_yield_before_more_acquisition",
-    "identical_packet_proposals": "emit_once_preserve_both_hazards_and_shared_reference",
-    "authority": "ordinary_current_Actions_PlanSource_qualifier_including_Plan_Designate_Checkpoint_scope_expiry_anchor_and_budget",
-    "production_credit": "completed_observed_inventory_only"
+    "active_input_consumers": "retain_debt_diagnostics_without_a_new_acquisition_root",
+    "joint_packet_proposal": "emit_once_preserve_both_hazards_and_remedy_shared_with",
+    "authority": "ordinary_current_Production_PlanSource_lowering_with_complete_source_budget_Query_for_resource_analysis_and_current_stage_effect_scope_risk_expiry_checkpoint",
+    "availability_scope": "current_reviewed_stage_only",
+    "continuation": "explicit_continue_goal_preserves_original_output_quotas_and_parent_root_lineage",
+    "production_credit": "completed_observed_inventory_only",
+    "missing_workshop_site": "no_invented_construction_location"
   }
 }

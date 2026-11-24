@@ -176,7 +176,7 @@ fn missing_workshop_is_not_remedied_by_irrelevant_labor_assignment() -> TestResu
 }
 
 #[test]
-fn labor_remedy_selects_an_established_disabled_worker() -> TestResult {
+fn labor_remedy_retains_the_output_goal_and_selects_an_established_disabled_worker() -> TestResult {
     let mut snapshot = source()?;
     set(
         &mut snapshot,
@@ -191,17 +191,89 @@ fn labor_remedy_selects_an_established_disabled_worker() -> TestResult {
         lab_fact(Value::Bool(false)),
     )?;
     let alert = drink(&snapshot)?;
-    let actions: Json = serde_json::from_str(
-        alert["remedy"]["arguments"]["actions"]
-            .as_str()
-            .ok_or("labor actions missing")?,
-    )?;
+    let raw = alert["remedy"]["arguments"]["blueprint"]
+        .as_str()
+        .ok_or("production source missing")?;
+    let request = crate::lab_world::ProductionRequest::parse_current(raw)?;
+    let blueprint: Json = serde_json::from_str(raw)?;
+    assert_eq!(blueprint["quotas"], json!([{"item":"DRINK","minimum":28}]));
+    assert_eq!(blueprint["prerequisites"]["assign_labor"], true);
+    let compiled = request.compile(&snapshot)?;
+    let actions: Json = serde_json::from_str(&compiled.actions)?;
     assert_eq!(actions[0]["action"]["units"], json!(["1003"]));
-    assert_eq!(alert["remedy"]["requires"], "configure_labor");
+    assert_eq!(actions[0]["action"]["kind"], "set_labor");
+    assert_eq!(actions[1]["action"]["kind"], "create_work_order");
+    assert_eq!(alert["remedy"]["requires"], "configure_production");
+    assert!(alert["remedy"]["arguments"]["actions"].is_null());
     let mut unknown = lab_fact(Value::Bool(false));
     unknown.source = FactSource::AgentAssertion("claim".to_owned());
     set(&mut snapshot, EntityId::new(1003), "labor.BREW", unknown)?;
     assert!(drink(&snapshot)?["remedy"].is_null());
+    Ok(())
+}
+
+#[test]
+fn joint_supply_recovery_keeps_both_known_quotas_and_refuses_an_unavailable_workshop() -> TestResult
+{
+    let mut snapshot = source()?;
+    for field in [effects::STOCK_DRINK_FIELD, effects::STOCK_FOOD_FIELD] {
+        set(
+            &mut snapshot,
+            starter::STOCK_LEDGER,
+            field,
+            lab_fact(Value::U64(0)),
+        )?;
+    }
+    let before = snapshot.clone();
+    let alerts = world_alerts(&snapshot);
+    let drink = alerts
+        .iter()
+        .find(|alert| alert["alert"] == "drink_supply")
+        .ok_or("drink missing")?;
+    let food = alerts
+        .iter()
+        .find(|alert| alert["alert"] == "food_supply")
+        .ok_or("food missing")?;
+    let raw = drink["remedy"]["arguments"]["blueprint"]
+        .as_str()
+        .ok_or("joint source missing")?;
+    let blueprint: Json = serde_json::from_str(raw)?;
+    assert_eq!(
+        blueprint,
+        json!({
+            "template":"production",
+            "quotas":[{"item":"DRINK","minimum":28},{"item":"FOOD","minimum":28}],
+        })
+    );
+    let compiled = crate::lab_world::ProductionRequest::parse_current(raw)?.compile(&snapshot)?;
+    let actions = crate::lab_world::parse_steps(&compiled.actions)?;
+    assert_eq!(actions.len(), 2);
+    assert!(
+        actions
+            .iter()
+            .all(|step| matches!(step.action, dfmcp_intent::Action::CreateWorkOrder { .. }))
+    );
+    assert_eq!(drink["remedy"]["goal_scope"], "joint_supply_recovery");
+    assert_eq!(
+        drink["remedy"]["goal_alerts"],
+        json!(["drink_supply", "food_supply"])
+    );
+    assert_eq!(food["remedy_shared_with"], "drink_supply");
+    assert!(food["remedy"].is_null());
+    assert_eq!(snapshot, before);
+
+    set(
+        &mut snapshot,
+        starter::KITCHEN,
+        effects::CONSTRUCTION_STAGE_FIELD,
+        lab_fact(Value::Text("planned".to_owned())),
+    )?;
+    assert!(world_alerts(&snapshot).iter().all(|alert| {
+        !matches!(
+            alert["alert"].as_str(),
+            Some("drink_supply" | "food_supply")
+        ) || alert["remedy"].is_null()
+    }));
     Ok(())
 }
 

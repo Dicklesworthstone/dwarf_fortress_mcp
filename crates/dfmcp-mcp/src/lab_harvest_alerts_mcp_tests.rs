@@ -1,14 +1,14 @@
 //! Public agent recommendations acquire finite inputs before reserve production.
 
 use crate::agent_facade::{
-    fortress_commit, fortress_observe, fortress_open_session, fortress_plan, fortress_wait,
+    fortress_commit, fortress_observe, fortress_open_session, fortress_plan, fortress_wait_for_plan,
 };
 use crate::lab_world::{starter, world_alerts};
 use dfmcp_adapter::GameAdapter;
 use dfmcp_core::{Capability, Digest32, EntityId, GameTick, RiskTier};
 use dfmcp_intent::effects;
 use dfmcp_world::{Fact, FactSource, Value, WorldSnapshot};
-use serde_json::Value as Json;
+use serde_json::{Value as Json, json};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 const PLANTS: EntityId = EntityId::new(8_002);
@@ -52,16 +52,18 @@ fn open(selector: u64) -> TestResult<String> {
         Some(selector.to_string()),
         Some(vec![
             ("observe".to_owned(), "read_only".to_owned()),
+            ("query".to_owned(), "read_only".to_owned()),
             ("plan".to_owned(), "read_only".to_owned()),
             ("control_clock".to_owned(), "reversible".to_owned()),
             ("designate".to_owned(), "guarded".to_owned()),
             ("checkpoint".to_owned(), "guarded".to_owned()),
             ("configure_production".to_owned(), "reversible".to_owned()),
+            ("configure_labor".to_owned(), "reversible".to_owned()),
         ]),
-        None,
+        Some(60_000),
         Some(2_000),
-        None,
-        None,
+        Some(8_192),
+        Some(4 * 1024 * 1024),
         Some(16_384),
         None,
         Some("starter_fortress_resources".to_owned()),
@@ -164,8 +166,9 @@ fn public_harvest_advice_uses_real_plan_risk_scope_checkpoint_and_budget_authori
 }
 
 #[test]
-fn public_harvest_recommendation_closes_the_depleted_input_to_drink_production_loop() -> TestResult
+fn public_supply_recovery_preserves_the_original_goal_through_harvest_and_production() -> TestResult
 {
+    let _serial = crate::test_serial();
     let session = open(98_799)?;
     let observed = parsed(&fortress_observe(Some(session.clone())))?;
     let next = observed["agent_turn"]["recommendations"]
@@ -176,26 +179,33 @@ fn public_harvest_recommendation_closes_the_depleted_input_to_drink_production_l
         .ok_or("harvest recommendation missing")?;
     assert_eq!(next["risk"], "guarded");
     assert_eq!(next["requires_checkpoint"], true);
+    assert_eq!(next["goal_scope"], "joint_supply_recovery");
+    assert_eq!(next["availability_scope"], "current_reviewed_stage_only");
+    assert_eq!(next["separate_stage_review_required"], true);
+    let source: Json = parsed(
+        next["arguments"]["blueprint"]
+            .as_str()
+            .ok_or("original production source missing")?,
+    )?;
+    assert_eq!(source["template"], "production");
+    assert_eq!(source["quotas"], json!([{"item":"DRINK","minimum":28}]));
     let planned = parsed(&fortress_plan(
         Some(session.clone()),
         None,
         None,
-        Some(
-            next["arguments"]["actions"]
-                .as_str()
-                .ok_or("actions missing")?
-                .to_owned(),
-        ),
         None,
+        Some(source.to_string()),
     ))?;
     assert_eq!(planned["ok"], true, "{planned}");
-    let committed = parsed(&fortress_commit(
-        Some(session.clone()),
-        planned["plan_digest"]
-            .as_str()
-            .ok_or("digest missing")?
-            .to_owned(),
-    ))?;
+    assert_eq!(
+        planned["production"]["resource_workflow"]["stage"],
+        "acquire_resources"
+    );
+    let original = planned["plan_digest"]
+        .as_str()
+        .ok_or("digest missing")?
+        .to_owned();
+    let committed = parsed(&fortress_commit(Some(session.clone()), original.clone()))?;
     assert_eq!(committed["ok"], true, "{committed}");
     let pending = parsed(&fortress_observe(Some(session.clone())))?;
     assert!(public_drink(&pending)?["remedy"].is_null());
@@ -203,55 +213,84 @@ fn public_harvest_recommendation_closes_the_depleted_input_to_drink_production_l
         public_drink(&pending)?["ingredient_readiness"]["available_plants"],
         0
     );
-    let progressed = parsed(&fortress_wait(Some(session.clone()), Some(300)))?;
+    let progressed = parsed(&fortress_wait_for_plan(
+        Some(session.clone()),
+        Some(2_000),
+        Some(original.clone()),
+    ))?;
     assert_eq!(progressed["ok"], true, "{progressed}");
-    let ready = parsed(&fortress_observe(Some(session.clone())))?;
-    let remedy = &public_drink(&ready)?["remedy"];
-    assert_eq!(remedy["available"], true, "{ready}");
-    assert_eq!(remedy["requires"], "configure_production");
+    // Harvesting does not replace or satisfy the retained output-stock goal.
+    assert!(
+        progressed["objectives"]
+            .as_array()
+            .is_some_and(|goals| goals
+                .iter()
+                .any(|goal| goal["plan_digest"] == original && goal["predicate_truth"] == "false")),
+        "{progressed}"
+    );
     let production = parsed(&fortress_plan(
         Some(session.clone()),
         None,
         None,
         None,
-        Some(
-            remedy["arguments"]["blueprint"]
-                .as_str()
-                .ok_or("production source missing")?
-                .to_owned(),
-        ),
+        Some(json!({"template":"continue_goal", "plan_digest":original.clone()}).to_string()),
     ))?;
     assert_eq!(production["ok"], true, "{production}");
-    let committed = parsed(&fortress_commit(
-        Some(session.clone()),
-        production["plan_digest"]
-            .as_str()
-            .ok_or("production digest missing")?
-            .to_owned(),
-    ))?;
+    assert_eq!(
+        production["production"]["resource_workflow"]["stage"],
+        "production"
+    );
+    assert_eq!(
+        production["production"]["continuation"]["parent_plan_digest"],
+        original
+    );
+    assert_eq!(
+        production["production"]["resource_workflow"]["original_request"]["quotas"],
+        source["quotas"]
+    );
+    let child = production["plan_digest"]
+        .as_str()
+        .ok_or("production digest missing")?
+        .to_owned();
+    let committed = parsed(&fortress_commit(Some(session.clone()), child.clone()))?;
     assert_eq!(committed["ok"], true, "{committed}");
-    let progressed = parsed(&fortress_wait(Some(session.clone()), Some(300)))?;
+    let progressed = parsed(&fortress_wait_for_plan(
+        Some(session.clone()),
+        Some(2_000),
+        Some(child.clone()),
+    ))?;
     assert_eq!(progressed["ok"], true, "{progressed}");
+    assert!(
+        progressed["objectives"]
+            .as_array()
+            .is_some_and(|goals| goals.iter().any(|goal| goal["plan_digest"] == child
+                && goal["predicate_truth"] == "true"
+                && goal["status"] == "achieved")),
+        "{progressed}"
+    );
     session_change(&session, |session| {
         let snapshot = session.adapter.snapshot();
         let provisions = effects::provisions_report(snapshot)?.ok_or("provisions missing")?;
-        assert_eq!(provisions.available_plants, 0);
-        assert_eq!(provisions.consumed_plants, 6);
         let harvest = effects::harvest_report(snapshot)?.ok_or("harvest missing")?;
         let plants = harvest
             .sources
             .iter()
             .find(|source| source.source == PLANTS)
             .ok_or("plant source missing")?;
-        assert_eq!(plants.remaining, 34);
-        assert_eq!(plants.harvested, 6);
+        assert_eq!(plants.initial, 40);
+        assert_eq!(plants.remaining + plants.harvested, plants.initial);
+        assert_eq!(
+            plants.harvested,
+            provisions.consumed_plants + provisions.available_plants
+        );
+        assert!(provisions.consumed_plants >= 6);
         assert_eq!(harvest.tasks.len(), 1);
         assert_eq!(harvest.tasks[0].status, effects::STATUS_COMPLETE);
-        assert_eq!(
+        assert!(matches!(
             snapshot.graph.entities[&starter::STOCK_LEDGER].fields[effects::STOCK_DRINK_FIELD]
                 .known_value(),
-            Some(&Value::U64(30))
-        );
+            Some(Value::U64(count)) if *count >= 28
+        ));
         assert!(
             world_alerts(snapshot)
                 .iter()
@@ -259,5 +298,176 @@ fn public_harvest_recommendation_closes_the_depleted_input_to_drink_production_l
         );
         Ok(())
     })?;
+    Ok(())
+}
+
+#[test]
+fn public_joint_supply_recovery_finishes_both_original_quotas_from_one_input_project() -> TestResult
+{
+    let _serial = crate::test_serial();
+    let session = open(98_800)?;
+    session_change(&session, |session| {
+        let mut snapshot = session.adapter.snapshot().clone();
+        write(
+            &mut snapshot,
+            starter::STOCK_LEDGER,
+            effects::STOCK_FOOD_FIELD,
+            Value::U64(0),
+        )?;
+        snapshot.cursor = snapshot.cursor.checked_next().ok_or("cursor exhausted")?;
+        snapshot.refresh_hash();
+        session.adapter.inject_snapshot(snapshot)?;
+        Ok(())
+    })?;
+    let before = session_change_snapshot(&session)?;
+    let observed = parsed(&fortress_observe(Some(session.clone())))?;
+    assert_eq!(observed["ok"], true, "{observed}");
+    let alerts = observed["world_alerts"]
+        .as_array()
+        .ok_or("alerts missing")?;
+    let food = alerts
+        .iter()
+        .find(|alert| alert["alert"] == "food_supply")
+        .ok_or("food alert missing")?;
+    assert_eq!(food["remedy_shared_with"], "drink_supply");
+    assert!(food["remedy"].is_null());
+    let recommendations = observed["agent_turn"]["recommendations"]
+        .as_array()
+        .ok_or("recommendations missing")?;
+    assert_eq!(
+        recommendations
+            .iter()
+            .filter(|next| {
+                matches!(
+                    next["recommendation_id"].as_str(),
+                    Some("remedy-drink_supply" | "remedy-food_supply")
+                )
+            })
+            .count(),
+        1,
+        "{observed}"
+    );
+    let next = recommendations
+        .iter()
+        .find(|next| next["recommendation_id"] == "remedy-drink_supply")
+        .ok_or("joint recovery recommendation missing")?;
+    let original: Json = parsed(
+        next["arguments"]["blueprint"]
+            .as_str()
+            .ok_or("joint production source missing")?,
+    )?;
+    let quotas = json!([{"item":"DRINK","minimum":28},{"item":"FOOD","minimum":28}]);
+    assert_eq!(original["quotas"], quotas);
+    assert_eq!(session_change_snapshot(&session)?, before);
+
+    let mut request = original;
+    let mut parent: Option<String> = None;
+    for expected_stage in ["acquire_resources", "production"] {
+        let planned = parsed(&fortress_plan(
+            Some(session.clone()),
+            None,
+            None,
+            None,
+            Some(request.to_string()),
+        ))?;
+        assert_eq!(planned["ok"], true, "{planned}");
+        assert_eq!(
+            planned["production"]["resource_workflow"]["stage"],
+            expected_stage
+        );
+        assert_eq!(
+            planned["production"]["resource_workflow"]["original_request"]["quotas"],
+            quotas
+        );
+        if let Some(parent) = &parent {
+            assert_eq!(
+                planned["production"]["continuation"]["parent_plan_digest"],
+                *parent
+            );
+        }
+        let digest = planned["plan_digest"]
+            .as_str()
+            .ok_or("plan digest missing")?
+            .to_owned();
+        let committed = parsed(&fortress_commit(Some(session.clone()), digest.clone()))?;
+        assert_eq!(committed["ok"], true, "{committed}");
+        let waited = parsed(&fortress_wait_for_plan(
+            Some(session.clone()),
+            Some(2_000),
+            Some(digest.clone()),
+        ))?;
+        assert_eq!(waited["ok"], true, "{waited}");
+        if expected_stage == "production" {
+            let goal = waited["objectives"]
+                .as_array()
+                .and_then(|goals| goals.iter().find(|goal| goal["plan_digest"] == digest))
+                .ok_or("production objective missing")?;
+            assert_eq!(goal["predicate_truth"], "true", "{goal}");
+            assert_eq!(goal["status"], "achieved", "{goal}");
+        }
+        request = json!({"template":"continue_goal", "plan_digest":digest.clone()});
+        parent = Some(digest);
+    }
+    let final_world = session_change_snapshot(&session)?;
+    for field in [effects::STOCK_DRINK_FIELD, effects::STOCK_FOOD_FIELD] {
+        assert!(matches!(
+            final_world.graph.entities[&starter::STOCK_LEDGER].fields[field].known_value(),
+            Some(Value::U64(count)) if *count >= 28
+        ));
+    }
+    let harvest = effects::harvest_report(&final_world)?.ok_or("harvest missing")?;
+    assert_eq!(
+        harvest.tasks.len(),
+        1,
+        "one joint input acquisition must fund both outputs"
+    );
+    assert!(world_alerts(&final_world).iter().all(|alert| {
+        !matches!(
+            alert["alert"].as_str(),
+            Some("drink_supply" | "food_supply")
+        )
+    }));
+    Ok(())
+}
+
+fn session_change_snapshot(session: &str) -> TestResult<WorldSnapshot> {
+    let handle = crate::server::lookup_session_str(session)?;
+    crate::server::with_session_read(
+        &handle,
+        |error| Err(error.into()),
+        |session| Ok(session.adapter.snapshot().clone()),
+    )
+}
+
+#[test]
+fn public_resource_recovery_advice_requires_query_and_the_complete_source_budget() -> TestResult {
+    let _serial = crate::test_serial();
+    for case in 0..3 {
+        let session = open(98_801 + case)?;
+        let before = session_change_snapshot(&session)?;
+        session_change(&session, |session| {
+            match case {
+                0 => session
+                    .grants
+                    .retain(|grant| grant.capability != Capability::Query),
+                1 => session.budget.max_bytes = 1,
+                _ => session.budget.max_entities = 1,
+            }
+            Ok(())
+        })?;
+        let observed = parsed(&fortress_observe(Some(session.clone())))?;
+        assert_eq!(observed["ok"], true, "case {case}: {observed}");
+        let remedy = &public_drink(&observed)?["remedy"];
+        assert_eq!(remedy["available"], false, "case {case}: {observed}");
+        assert!(remedy["unavailable_reason"].is_string());
+        assert!(
+            observed["agent_turn"]["recommendations"]
+                .as_array()
+                .ok_or("recommendations missing")?
+                .iter()
+                .all(|next| next["recommendation_id"] != "remedy-drink_supply")
+        );
+        assert_eq!(session_change_snapshot(&session)?, before);
+    }
     Ok(())
 }

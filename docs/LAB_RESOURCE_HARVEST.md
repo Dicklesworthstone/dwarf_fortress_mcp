@@ -64,30 +64,42 @@ Food, furniture and workshop planners still require observed current inputs. A h
 
 ## Low-input recovery advice
 
-When a low FOOD or DRINK reserve lacks PLANT ingredients, observation can
-propose one finite acquisition through the existing `fortress.plan` Actions
-source. The quantity covers pending ingredient debt plus the minimum new
-batches, less observed current PLANT stock, bounded by available source units
-and the 100-unit action limit. It is an acquisition proposal, not a guarantee
-that the subsequent reserve-production plan fits its complete service horizon.
+When observed FOOD or DRINK falls below four consumption rounds for the known
+living population, observation can propose one `production` blueprint through
+the existing `fortress.plan` tool. All currently known deficient output quotas
+share that source. A joint request budgets their common PLANT supply together;
+an isolated labor or harvest action no longer replaces the original output goal.
 
-The proposal requires a complete qualified source/task census, the same stock
-ledger and generation as provisions, and a qualified living worker with
-`PLANT_GATHERING` enabled. It prefers the largest useful bounded tranche and
-the lowest source ID on ties. Unknown, depleted or unstaffed supply remains a
-diagnostic blocker. Existing active PLANT work yields `awaiting_harvest` until
-its output is observed. No pending work is credited as inventory.
+When necessary ingredients are short, the request retains an explicit
+`acquire_resources` policy. The ordinary resource-aware compiler sizes the
+complete gathering and production program, including consumption during both
+stages. A known disabled gathering or production worker can be included through
+the corresponding explicit labor-assignment policy. Unknown labor cannot be
+treated as disabled. Existing qualified workshops are required: this advice
+does not invent a construction site.
 
-The server's ordinary remedy qualifier parses the real Actions source and
-checks current Plan authority, guarded Designate authority, Checkpoint,
-source scope, expiry, anchor and budget. A proposal without that authority is
-diagnostic rather than an executable recommendation.
+Acquisition requires complete qualified source/task and provisions censuses,
+the same stock-ledger identity and generation, and sufficient finite source
+capacity. Active harvests or competing ingredient consumers remain blockers;
+their future output is never credited as inventory. The retained harvesting
+diagnostic may describe one bounded tranche, but only the complete production
+compiler determines whether the whole proposed project is feasible.
 
-Identical food/drink acquisition actions appear once in an observation packet.
-The second alert retains its shortage and source evidence, identifies
-`remedy_shared_with`, and has no duplicate action. Distinct requests remain
-separate choices. After completed acquisition, the agent observes the ledger
-and replans production against current stock, pending demand and consumption.
+The server lowers the real production source before marking it available. It
+checks the complete source record/byte allowance, current Observe and Plan
+authority, Query authority for resource-aware analysis, and each current-stage
+effect's actual scope, risk, expiry and checkpoint requirement. All remedies in
+one observation share the wall-time allowance. Availability is explicitly
+`current_reviewed_stage_only`; it does not authorize or guarantee later stages.
+
+The first deficient supply alert carries the joint remedy. A second affected
+alert preserves its hazard and evidence, names `remedy_shared_with`, and carries
+no duplicate request. The recommendation retains `goal_scope`, `goal_alerts`
+and `separate_stage_review_required` so a fresh agent can see the full purpose.
+After committing and observing acquisition, explicitly review `continue_goal`
+for the retained plan, then separately commit production. That continuation
+preserves every original output quota and the parent/root lineage. Gathered
+plants alone never establish the original FOOD or DRINK goal.
 
 ## Bounds and evidence
 

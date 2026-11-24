@@ -10,7 +10,6 @@ use serde_json::{Value as Json, json};
 pub(super) struct AlertInputBlocker {
     pub reason: String,
     pub readiness: Json,
-    pub remedy: Json,
 }
 
 /// Screen the proposed low-stock remedy against necessary current inputs.
@@ -21,7 +20,6 @@ pub(super) fn alert_input_blocker(
     provisions: &Result<Option<effects::ProvisionsReport>>,
     minimum_batches: u64,
 ) -> Option<AlertInputBlocker> {
-    let mut remedy = Json::Null;
     let (reason, mut readiness) = match provisions {
         Ok(Some(report)) => {
             let available = report.available_plants.saturating_sub(report.remaining_demand_plants);
@@ -43,9 +41,8 @@ pub(super) fn alert_input_blocker(
                 "pending_demand_is_planning_debit_only": true,
                 "next_step": "inspect current ingredients and original orders; replan after sufficient qualified input becomes available",
             });
-            if let Some(advice) = harvest_input_remedy(snapshot, report, minimum_batches) {
-                readiness["harvesting"] = advice.readiness;
-                remedy = advice.remedy;
+            if let Some(advice) = harvest_input_readiness(snapshot, report, minimum_batches) {
+                readiness["harvesting"] = advice;
             }
             (reason, readiness)
         }
@@ -62,26 +59,18 @@ pub(super) fn alert_input_blocker(
     };
     readiness["evidence_scope"] = json!("laboratory_reference_world");
     readiness["source_anchor"] = crate::observation_projection::anchor_json(&snapshot.anchor());
-    Some(AlertInputBlocker {
-        reason,
-        readiness,
-        remedy,
-    })
+    Some(AlertInputBlocker { reason, readiness })
 }
 
-struct HarvestAdvice {
-    readiness: Json,
-    remedy: Json,
-}
-
-/// Suggest one bounded acquisition from a complete, qualified source census.
+/// Inspect one bounded acquisition from a complete, qualified source census.
 /// Current input remains insufficient until completed work has actually yielded
-/// stock. Existing harvest work is observed before proposing additional demand.
-fn harvest_input_remedy(
+/// stock. This diagnostic is never a replacement source for the original FOOD
+/// and DRINK goal. Supply alerts retain those outputs in one production request.
+fn harvest_input_readiness(
     snapshot: &WorldSnapshot,
     provisions: &effects::ProvisionsReport,
     minimum_batches: u64,
-) -> Option<HarvestAdvice> {
+) -> Option<Json> {
     let mut readiness = json!({
         "status": "blocked",
         "epistemic_state": "certified_derived",
@@ -100,10 +89,7 @@ fn harvest_input_remedy(
             readiness["status"] = json!("unknown");
             readiness["epistemic_state"] = json!("unknown");
             readiness["reason"] = json!({"code": error.code.as_str(), "message": error.message});
-            return Some(HarvestAdvice {
-                readiness,
-                remedy: Json::Null,
-            });
+            return Some(readiness);
         }
     };
     if report.ledger != provisions.ledger
@@ -113,10 +99,7 @@ fn harvest_input_remedy(
         readiness["epistemic_state"] = json!("unknown");
         readiness["reason"] =
             json!("finite harvest and provisions do not share the original stock ledger");
-        return Some(HarvestAdvice {
-            readiness,
-            remedy: Json::Null,
-        });
+        return Some(readiness);
     }
     let Some(shortage) = provisions
         .remaining_demand_plants
@@ -129,10 +112,7 @@ fn harvest_input_remedy(
         readiness["reason"] = json!(
             "the necessary finite input shortage cannot be established within its quantity bound"
         );
-        return Some(HarvestAdvice {
-            readiness,
-            remedy: Json::Null,
-        });
+        return Some(readiness);
     };
     readiness["minimum_missing_plants"] = json!(shortage);
     if report.tasks.iter().any(|task| {
@@ -142,10 +122,7 @@ fn harvest_input_remedy(
         readiness["reason"] = json!(
             "original PLANT harvest work remains active; observe its completed yield before proposing more acquisition"
         );
-        return Some(HarvestAdvice {
-            readiness,
-            remedy: Json::Null,
-        });
+        return Some(readiness);
     }
     let labor = format!(
         "{}{}",
@@ -164,10 +141,7 @@ fn harvest_input_remedy(
     let Some(worker) = worker else {
         readiness["reason"] =
             json!("a qualified living worker with PLANT_GATHERING enabled is not established");
-        return Some(HarvestAdvice {
-            readiness,
-            remedy: Json::Null,
-        });
+        return Some(readiness);
     };
     let request_limit = shortage.min(u64::from(effects::MAX_HARVEST_AMOUNT));
     let capacity = |source: &effects::HarvestSource| {
@@ -186,10 +160,7 @@ fn harvest_input_remedy(
     let Some(source) = selected else {
         readiness["reason"] =
             json!("no qualified finite PLANT source has uncommitted units available");
-        return Some(HarvestAdvice {
-            readiness,
-            remedy: Json::Null,
-        });
+        return Some(readiness);
     };
     let amount = capacity(source);
     readiness["status"] = json!("ready");
@@ -203,18 +174,7 @@ fn harvest_input_remedy(
     readiness["proposed_harvest_units"] = json!(amount);
     readiness["worker_entity_id"] = json!(worker.id.to_string());
     readiness["worker_generation"] = json!(worker.generation);
-    Some(HarvestAdvice {
-        readiness,
-        remedy: json!({
-            "tool": "fortress.plan",
-            "requires": "designate",
-            "arguments": {"actions": json!([{"action": {
-                "kind": "harvest_resource", "source": source.source.to_string(),
-                "source_generation": source.generation, "resource": "PLANT", "amount": amount,
-            }}]).to_string()},
-            "then": "observe completed harvest and replan production against current PLANT stock, pending demand and consumption reserves",
-        }),
-    })
+    Some(readiness)
 }
 
 pub(crate) fn provisions_json(snapshot: &WorldSnapshot) -> Result<Option<Json>> {

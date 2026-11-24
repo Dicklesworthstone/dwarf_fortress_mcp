@@ -1,9 +1,9 @@
 use super::*;
 use dfmcp_core::{
-    CapabilityGrant, CapabilityScope, EntityId, FortressId, GameTick, RequestId, SessionId,
-    WorkBudget,
+    CapabilityGrant, CapabilityScope, Digest32, EntityId, FortressId, GameTick, RequestId,
+    SessionId, WorkBudget,
 };
-use dfmcp_world::WorldSnapshot;
+use dfmcp_world::{Fact, FactSource, Value as WorldValue, WorldSnapshot};
 
 fn snapshot() -> Result<WorldSnapshot> {
     crate::lab_world::scenario_snapshot("starter_fortress", FortressId::new(98_620), true)
@@ -271,5 +271,84 @@ fn stale_authority_cannot_qualify_a_remedy_from_another_anchor() -> Result<()> {
     assert_eq!(snapshot, before.0);
     assert_eq!(context, before.1);
     assert_eq!(recovery.projection(), before.2);
+    Ok(())
+}
+
+#[test]
+fn resource_supply_advice_checks_query_source_and_shared_time_before_publication() -> Result<()> {
+    let mut snapshot = crate::lab_world::scenario_snapshot(
+        "starter_fortress_resources",
+        FortressId::new(98_624),
+        false,
+    )?;
+    let tick = snapshot.tick;
+    let ledger = snapshot
+        .graph
+        .entities
+        .get_mut(&crate::lab_world::starter::STOCK_LEDGER)
+        .ok_or_else(|| invalid("stock fixture missing"))?;
+    for field in [
+        dfmcp_intent::effects::STOCK_DRINK_FIELD,
+        dfmcp_intent::effects::STOCK_PLANT_FIELD,
+    ] {
+        ledger.fields.insert(
+            field.to_owned(),
+            Fact::known(
+                WorldValue::U64(0),
+                tick,
+                FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
+                Digest32::ZERO,
+            ),
+        );
+    }
+    snapshot.refresh_hash();
+    let mut base = context(
+        &snapshot,
+        &[
+            (Capability::Observe, RiskTier::ReadOnly),
+            (Capability::Query, RiskTier::ReadOnly),
+            (Capability::Plan, RiskTier::ReadOnly),
+            (Capability::Designate, RiskTier::Guarded),
+            (Capability::Checkpoint, RiskTier::Guarded),
+            (Capability::ConfigureProduction, RiskTier::Reversible),
+        ],
+    );
+    base.budget.max_wall_millis = 60_000;
+    base.budget.max_bytes = 4 * 1024 * 1024;
+    base.budget.max_entities = 8_192;
+    let mut recovery = civilian_recovery::CivilianRecovery::default();
+    recovery.observe(&snapshot);
+    let original = crate::lab_world::world_alerts(&snapshot);
+    let before = snapshot.clone();
+    for case in 0..6 {
+        let mut current = base.clone();
+        match case {
+            0 => {}
+            1 => current
+                .grants
+                .retain(|grant| grant.capability != Capability::Query),
+            2 => current.grants[1].expires_at_tick = Some(GameTick(0)),
+            3 => current.budget.max_bytes = 1,
+            4 => current.budget.max_entities = 1,
+            _ => current.budget.max_wall_millis = 0,
+        }
+        let unchanged = current.clone();
+        let mut alerts = original.clone();
+        qualify(&snapshot, &recovery, &current, &mut alerts);
+        let remedy = &alerts
+            .iter()
+            .find(|alert| alert["alert"] == "drink_supply")
+            .ok_or_else(|| invalid("drink alert missing"))?["remedy"];
+        assert_eq!(remedy["available"], case == 0, "case {case}: {remedy}");
+        assert_eq!(remedy["availability_scope"], "current_reviewed_stage_only");
+        if case > 0 {
+            assert!(remedy["unavailable_reason"].is_string(), "{remedy}");
+        } else {
+            assert_eq!(remedy["risk"], "guarded");
+            assert_eq!(remedy["requires_checkpoint"], true);
+        }
+        assert_eq!(current, unchanged);
+        assert_eq!(snapshot, before);
+    }
     Ok(())
 }

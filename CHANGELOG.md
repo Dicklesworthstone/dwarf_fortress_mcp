@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Recover food and drink through retained production goals
+
+- Combine known FOOD/DRINK shortfalls into one production blueprint and budget
+  their shared ingredients together. Preserve the output quotas through finite
+  gathering, explicitly permitted labor enables and reviewed continuation.
+- Replace isolated harvest/labor remedies with complete source-bound goals;
+  retain unknown evidence and unavailable prerequisites as blockers.
+- Qualify current-stage advice against complete source bytes/records, source
+  read authority, scoped effects, checkpoint policy and a shared wall deadline.
+  Retain goal and authority metadata in public recommendations.
+- Add real compiler and public control-loop regression source, including joint
+  inputs, explicit stage commits, continuation lineage and conservation. Scoped
+  formatting/source review pass; MCP build/test execution remains unestablished
+  after dependency SIGKILL and an interrupted resource-constrained retry.
+
 ## Unreleased — Cover the complete public owned project workflow
 
 - Add an actual facade harvest-to-production workflow with an owned deferred

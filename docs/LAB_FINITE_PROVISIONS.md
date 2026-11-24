@@ -171,14 +171,19 @@ input-shortage information. Missing or unqualified evidence is displayed as
 unknown; it cannot become a zero or a retained current quantity. Ingredient
 shortages remain separate from worker/workshop capacity blockers.
 
-Low-stock alerts screen recommendations that need new production against the
-qualified ingredient supply after existing orders' remaining demand. When
-necessary ingredients are short, the alert names that blocker and suppresses
-the proposed production or labor remedy. Missing evidence remains unknown,
-without invented stock counts. This is only a necessary-input screen: the
-production compiler still determines the full consumption-reserve budget.
+Low-stock alerts combine the currently known FOOD and DRINK shortfalls into one
+production source and screen their joint ingredient demand after existing
+orders' remaining demand. A qualified finite-harvest world can propose a
+resource-aware production project, retaining the original output quotas across
+separately reviewed acquisition and production stages. Explicit labor setup
+can enable a known disabled worker; a raw labor or harvest action does not
+replace the supply goal. Active competing input consumers, unknown evidence,
+insufficient finite supply and missing workshop sites remain blockers. The
+normal compiler determines the full consumption-reserve budget before the
+current stage is advertised as available under current authority and bounds.
 Retained hunger or thirst flags do not invent an ingredient requirement when
-the proposed stock target is already met.
+the proposed stock target is already met. See
+[low-input recovery advice](LAB_RESOURCE_HARVEST.md#low-input-recovery-advice).
 
 Forecasts return `predicted_provisions` with a predicted anchor and discarded
 simulation scope. They retain separate action, goal and quiescence outcomes.

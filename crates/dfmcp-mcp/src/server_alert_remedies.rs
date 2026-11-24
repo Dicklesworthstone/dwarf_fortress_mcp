@@ -5,6 +5,7 @@
 //! in a presentation cache are not enough to establish risk, scope or expiry.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 
 use dfmcp_core::{Capability, DfmcpError, ErrorCode, IntentId, OperationContext, Result, RiskTier};
 use dfmcp_intent::{Intent, StaticPlanner};
@@ -22,21 +23,65 @@ pub(super) fn qualify(
     // Several hostiles can share one recruitment remedy. Lower identical
     // advice only once within this immutable observation, never across anchors.
     let mut assessed = BTreeMap::<String, Map<String, Value>>::new();
+    let started = Instant::now();
     for alert in alerts {
         let Some(remedy) = alert.get_mut("remedy").filter(|value| value.is_object()) else {
             continue;
         };
         let fields = assessed.entry(remedy.to_string()).or_insert_with(|| {
-            assessment(
-                snapshot,
-                context,
-                lower(snapshot, recovery, context, remedy),
-            )
+            let intent = remaining_context(context, started)
+                .and_then(|current| lower(snapshot, recovery, &current, remedy));
+            let mut fields = assessment(snapshot, context, intent);
+            if remedy["goal_scope"] == "joint_supply_recovery" {
+                fields.insert(
+                    "availability_scope".to_owned(),
+                    json!("current_reviewed_stage_only"),
+                );
+                if let Some(capabilities) = fields
+                    .get("required_capabilities")
+                    .and_then(Value::as_array)
+                {
+                    let mut required: BTreeSet<String> = capabilities
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect();
+                    required.insert(Capability::Observe.as_str().to_owned());
+                    if remedy["arguments"]["blueprint"]
+                        .as_str()
+                        .is_some_and(|raw| {
+                            crate::lab_world::ProductionRequest::parse_current(raw)
+                                .is_ok_and(|request| request.is_resource_aware())
+                        })
+                    {
+                        required.insert(Capability::Query.as_str().to_owned());
+                    }
+                    fields.insert("required_capabilities".to_owned(), json!(required));
+                }
+            }
+            if let Err(error) = remaining_context(context, started) {
+                fields.insert("available".to_owned(), json!(false));
+                fields.insert("unavailable_reason".to_owned(), json!(error.to_string()));
+            }
+            fields
         });
         if let Some(remedy) = remedy.as_object_mut() {
             remedy.extend(fields.clone());
         }
     }
+}
+
+fn remaining_context(context: &OperationContext, started: Instant) -> Result<OperationContext> {
+    let spent = started.elapsed().as_millis();
+    if spent >= u128::from(context.budget.max_wall_millis) {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "world remedy assessment exceeded the shared wall-time allowance",
+        ));
+    }
+    let mut remaining = context.clone();
+    remaining.budget.max_wall_millis -= spent as u64;
+    Ok(remaining)
 }
 
 fn invalid(message: &str) -> DfmcpError {
@@ -81,16 +126,18 @@ fn lower(
     } else if let Some(raw) = arguments.get("blueprint").and_then(Value::as_str) {
         // Objective lowering reads the complete relevant world domain. An
         // observation's small output allowance does not authorize a larger read.
-        if snapshot.graph.entities.len() > context.budget.max_entities as usize {
-            return Err(DfmcpError::new(
-                ErrorCode::BudgetExceeded,
-                "world remedy objective exceeds the current entity allowance",
-            ));
-        }
+        super::query_budget::admit_observation_sources(&[snapshot], context)?;
         if crate::lab_world::is_production_objective(raw) {
+            let request = crate::lab_world::ProductionRequest::parse_current(raw)?;
+            if request.is_resource_aware() {
+                // A resource project inspects the whole input/workload domain,
+                // just as its ordinary Plan entry point does. Observation
+                // advice cannot borrow a Query grant for that extra analysis.
+                context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+            }
             PlanSource::Production {
                 summary,
-                raw: crate::lab_world::ProductionRequest::parse_current(raw)?.canonical_json(),
+                raw: request.canonical_json(),
             }
         } else if civilian_recovery::is_release_request(raw) {
             let burrow = civilian_recovery::parse_release_request(raw)?;

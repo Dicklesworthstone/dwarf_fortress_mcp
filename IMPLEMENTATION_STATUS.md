@@ -1,5 +1,35 @@
 # Implementation Status
 
+## Unreleased — Retain complete supply goals in alert recovery
+
+Laboratory FOOD and DRINK shortfalls now share one production blueprint with
+all known deficient output quotas. Necessary ingredient demand is screened
+jointly, and the normal resource-aware compiler can propose finite acquisition
+without replacing the original output goal. Known disabled gathering and
+production labor can be enabled through separately retained source policies.
+Unknown evidence, missing workshop sites, inadequate finite supply and active
+competing input work remain explicit blockers. No native action or dependency
+generation changes.
+
+The server qualifies the actual current stage against complete source bounds,
+current Observe/Plan authority, Query for resource analysis, scoped effect
+grants and checkpoint requirements. Advice shares one wall-time allowance and
+reports current-stage-only availability. The Agent Turn retains the joint goal,
+required capabilities and separate-stage review requirement. Regression source
+follows actual public Plan/Commit/selected Wait/continue_goal into production,
+preserves original quotas and checks joint finite-input conservation.
+
+Eight changed Rust files pass scoped latest-nightly formatting and the diff
+passes whitespace checks. Independent source review completed. New MCP tests
+remain unexecuted: the restored host fetched the exact locked dependencies, but
+the workspace check was SIGKILLed in unchanged asupersync 0.5.0 before MCP. A
+targeted single-frontend retry was interrupted after host-wide stalls, without a
+compiler result. The preexisting comparison schema suite now passes 17 accepted
+and 92 rejected cases; that syntax evidence does not validate this Rust feature.
+Full repository/native/live/admission qualification remains open.
+
+Owners: `df-lab-alert-evidence-w5a`, `df-lab-resource-harvest-h2m.3` (in progress).
+
 ## Unreleased — Exercise actual owned project continuation
 
 The public facade regression now follows a resource project through comparison,

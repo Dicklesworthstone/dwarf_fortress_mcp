@@ -897,6 +897,17 @@ fn recommendations(
                     remedy["arguments"].clone(),
                 );
                 next["requires_checkpoint"] = remedy["requires_checkpoint"].clone();
+                if remedy["goal_scope"] == "joint_supply_recovery" {
+                    for field in [
+                        "goal_scope",
+                        "goal_alerts",
+                        "separate_stage_review_required",
+                        "availability_scope",
+                        "required_capabilities",
+                    ] {
+                        next[field] = remedy[field].clone();
+                    }
+                }
                 out.push(next);
             }
         }
@@ -1729,7 +1740,10 @@ fn continuity_status(
     if operation == "fortress.restore" {
         return ContinuityStatus::Reset;
     }
-    if matches!(payload["mode"].as_str(), Some("history" | "forecast_originals")) {
+    if matches!(
+        payload["mode"].as_str(),
+        Some("history" | "forecast_originals")
+    ) {
         // Retained metadata and private predictions do not acknowledge a new
         // current observation or establish complete world-history continuity.
         return ContinuityStatus::Partial;
@@ -2460,7 +2474,10 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
             crate::server::QueryPublication::Published(response) => response,
             crate::server::QueryPublication::Pending(raw) => {
                 let mut payload = response_payload(&raw, "fortress.query");
-                if matches!(payload["mode"].as_str(), Some("history" | "forecast_originals")) {
+                if matches!(
+                    payload["mode"].as_str(),
+                    Some("history" | "forecast_originals")
+                ) {
                     let (presentation, failure) = ResponsePresentation::capture_metadata_query(
                         &payload,
                         session_id.as_deref(),
@@ -2720,7 +2737,9 @@ pub fn fortress_wait_for_outcomes(
     } else if plan_digests.is_some()
         && (plan_digest.is_some() || watch_id.is_some() || watch_ids.is_some())
     {
-        Some("plan_digest, plan_digests, watch_id and watch_ids are mutually exclusive wait selectors")
+        Some(
+            "plan_digest, plan_digests, watch_id and watch_ids are mutually exclusive wait selectors",
+        )
     } else if plan_digest.is_some() && watch_id.is_some() && watch_ids.is_none() {
         Some("plan_digest and watch_id are mutually exclusive wait selectors")
     } else if usize::from(plan_digest.is_some())
