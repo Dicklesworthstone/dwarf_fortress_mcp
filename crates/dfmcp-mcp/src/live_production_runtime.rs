@@ -28,6 +28,7 @@ use std::time::{Duration, Instant};
 
 mod choices;
 mod clock;
+pub(crate) mod clock_guidance;
 mod config;
 mod custody;
 mod existing_labor_portfolio_request;
@@ -1351,6 +1352,7 @@ impl Runtime {
             }
             None => Value::Null,
         };
+        let clock_guidance = self.clock_guidance_json(frontier.as_ref(), &work.context);
         let frontier = frontier.as_ref().map(frontier_json);
         let observation=self.basis.as_ref()
             .filter(|basis| basis.projection.snapshot.anchor() == self.anchor && !self.clock_withholds_goal())
@@ -1377,6 +1379,7 @@ impl Runtime {
             "inventory_clock":self.inventory_clock_json(),
             "inventory_clock_control_enabled":self.inventory_clock_control_enabled(),
             "inventory_clock_invalidates_goal":self.inventory_clock_invalidates_goal,
+            "clock_guidance":clock_guidance,
             "current_parent_goal":self.parent_goal_json(),
             "production_inspection_source":self.inspection_source_json(),
             "parent_goal_observation_fenced":self.parent_goal_observation_fenced(),

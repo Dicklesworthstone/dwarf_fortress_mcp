@@ -141,6 +141,30 @@ impl ProductionClock {
     pub(super) fn has_runs(&self) -> bool {
         self.latest.as_ref().is_some_and(ClockView::has_runs)
     }
+    pub(super) fn guidance_owner(&self) -> clock_guidance::Owner {
+        let latest = self.latest.as_ref();
+        clock_guidance::Owner {
+            inspected: !self.inspection_required && latest.is_some(),
+            target_bound: self.target.as_ref().is_some_and(|target| {
+                latest.is_some_and(|view| view.target_digest == Some(target.digest()))
+            }),
+            original_paired_seal: latest.and_then(|view| view.original_paired_seal),
+            pending: self.pending(),
+            unresolved: self.may_be_running(),
+            run_count: latest.map_or(0, |view| view.runs.len()),
+            run_limit: orders::clock::MAX_RUNS,
+            prepared: latest.and_then(ClockView::active).and_then(|run| {
+                (run.entry.state() == OrderRunState::Prepared).then(|| {
+                    let plan = run.entry.plan();
+                    clock_guidance::Prepared {
+                        before_tick: plan.before().tick(),
+                        game_ticks: plan.spec().game_ticks(),
+                        wall_millis: plan.spec().wall_ms(),
+                    }
+                })
+            }),
+        }
+    }
     pub(super) fn historical_advancement(&self) -> Value {
         let Some(view) = &self.latest else {
             return Value::Null;
@@ -490,6 +514,11 @@ impl Runtime {
     }
     fn sample_clock_target(&mut self, c: &OperationContext) -> Result<ClockTarget> {
         self.wait_with_goal(c)?;
+        self.clock_goal_ready()
+    }
+    /// Pure current-evidence prerequisite shared by Plan and advisory guidance.
+    /// A complete portfolio cohort preserves each selected source anchor.
+    pub(super) fn clock_goal_ready(&self) -> Result<ClockTarget> {
         if self
             .inventory_clock
             .as_ref()
@@ -526,9 +555,16 @@ impl Runtime {
             .ok_or_else(|| {
                 denied("clock requires a fresh receipt-linked original production-goal sample")
             })?;
-        if self.parent_goal.as_ref().is_none_or(|parent| {
-            parent.anchor != self.anchor || parent.selected_anchor != sample.anchor
-        }) || self.clock_withholds_goal()
+        let selected_parent = self.parent_goal.as_ref().is_some_and(|parent| {
+            parent.anchor == self.anchor && parent.selected_anchor == sample.anchor
+        });
+        let complete_parent = self.portfolio.as_ref()
+            .and_then(|portfolio| portfolio.current.as_ref())
+            .is_some_and(|parent| {
+                parent.anchor == self.anchor
+                    && parent.selected_anchors.contains(&(monitor.step_id(), sample.anchor))
+            });
+        if (!selected_parent && !complete_parent) || self.clock_withholds_goal()
         {
             return Err(denied(
                 "clock requires a fresh joined original labor and production-goal sample",

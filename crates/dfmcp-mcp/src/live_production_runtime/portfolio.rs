@@ -681,7 +681,7 @@ impl Runtime {
                 })
             })
     }
-    fn pending_portfolio_steps(&self) -> Vec<StepId> {
+    pub(super) fn pending_portfolio_steps(&self) -> Vec<StepId> {
         let mut ids = Vec::new();
         if let Some(p) = &self.portfolio {
             if self.clock.as_ref().is_some_and(ProductionClock::pending)

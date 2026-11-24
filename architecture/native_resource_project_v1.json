@@ -261,6 +261,45 @@
       "regression_groups_authored": 4,
       "rust_tests_executed": false,
       "validation": "independent source review; execution environment unavailable"
+    },
+    "production_clock_guidance": {
+      "schema": "dfmcp.production-clock-guidance/1",
+      "producer": "live_production_runtime::clock_guidance",
+      "consumer": "native_resource_project::presentation::production",
+      "typed_current_owner_projection": true,
+      "shared_closed_decoder": true,
+      "source_anchor_preserved": true,
+      "exact_original_portfolio_step_required": true,
+      "offers": [
+        "new_interval",
+        "review_prepared"
+      ],
+      "plan_kinds": [
+        "run",
+        "inventory_run"
+      ],
+      "blocker_actions": [
+        "wait",
+        "inspect",
+        "operator",
+        "none"
+      ],
+      "prepares_review_only": true,
+      "separate_commit_confirmation_required": true,
+      "grants_authority": false,
+      "native_contact": false,
+      "journal_mutation": false,
+      "advances_game_time": false,
+      "inventory_requires_true_stock_and_labor": true,
+      "retained_prepared_interval_renewed": false,
+      "current_confirmation_precedes_re_review": true,
+      "inactive_clock_pending_blocks_new_interval": true,
+      "zero_default_tick_allowance_preserved": true,
+      "no_work_clock_target_added": false,
+      "producer_regression_groups_authored": 11,
+      "parent_regression_groups_authored": 5,
+      "rust_tests_executed": false,
+      "validation": "independent source reviews; execution environment unavailable"
     }
   },
   "unsupported": [
@@ -364,7 +403,9 @@
     "crates/dfmcp-mcp/src/semantic_work_order_runtime/native_inventory_clock.rs",
     "crates/dfmcp-mcp/src/native_resource_project/production_presentation.rs",
     "crates/dfmcp-mcp/src/native_resource_project/production_presentation_tests.rs",
-    "crates/dfmcp-mcp/src/live_production_presentation.rs"
+    "crates/dfmcp-mcp/src/live_production_presentation.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/clock_guidance.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/clock_guidance_tests.rs"
   ],
   "qualification": {
     "pre_outage_ledger_component_cases_passed": 17,

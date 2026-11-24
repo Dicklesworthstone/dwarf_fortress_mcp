@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Guide parent projects through bounded production time
+
+- Publish closed, authority-free clock guidance from the actual combined
+  runtime's original, source-qualified goal, native clock owners and budgets.
+- Let resource-project Agent Turns prepare an eligible order or inventory
+  interval, or obtain a fresh review of the exact retained Prepared interval.
+  Preserve the actual original portfolio StepId and separate confirmation.
+- Report actionable blockers for reconciliation, missing current samples,
+  inactive clock owners, absent authority, zero allowance and expired lifetime.
+  Inventory clocks require observed True stock and unfinished stability.
+- Reuse Plan's current-evidence readiness checks and accept an exact selected
+  member of a complete portfolio cohort without relabeling its source anchor.
+- Add eleven shared guidance regression groups and five parent integration
+  groups. Independent source review completed; new Rust compilation, formatting
+  and execution remain unavailable.
+
 ## Unreleased — Resume original prepared work through its parent project
 
 - Recommend `review_prepared` when the production child retains exactly one

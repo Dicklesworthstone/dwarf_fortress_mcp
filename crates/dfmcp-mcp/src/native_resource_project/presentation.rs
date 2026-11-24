@@ -467,6 +467,8 @@ fn next_step(
             "fortress_plan",
             "Prepare the next dependency-ready step of the exact original stock-target plan for its own review.",
         )
+    } else if let Some(next) = production::clock_next(result, reference, session) {
+        return next;
     } else if result["stage"] == "production" && result["child"]["original_plan"].is_object() {
         arguments["scope"] = json!("goal");
         (
@@ -842,6 +844,7 @@ pub(super) fn packet(
             "canonical_cross_family_anchor_available":false,
             "development_review_available":pending.is_some(),
             "production_publication_pending":publication_pending,
+            "production_clock_guidance":production::summary(&result, &reference),
         }))
         .active_work(json!({
             "pending_plans":pending.clone().into_iter().collect::<Vec<_>>(),

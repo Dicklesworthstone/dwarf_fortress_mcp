@@ -1,5 +1,55 @@
 # Implementation Status
 
+## Unreleased — Native parent projects can request useful bounded time
+
+The combined production Runtime now publishes
+`dfmcp.production-clock-guidance/1` from typed current owners, original
+obligations and source-qualified monitoring state. The native resource-project
+Agent Turn consumes this projection before falling back to a goal wait. An
+eligible unfinished order receives an exact `run` request; already True
+inventory can receive `inventory_run` to finish its original stability cadence.
+Every request remains a Plan for a separate review and subsequent confirmation.
+
+The pure projection performs no native I/O, journal mutation, preparation or
+time advancement. It checks settled original effects, exact current source
+membership, current labor, all active/inactive clock owners, original lifetime,
+finite retained history, session tick allowance and independent authorization
+through the proposed interval. New intervals fit the original remaining
+deadline and at most 1,200 ticks; when truth is already True they fit the
+original cadence. Existing Prepared intervals retain their exact before tick,
+tick/wall bounds and original target, including at the retained-run limit.
+Next-call wall advice uses the session ceiling without renewing the current
+operation's Work deadline.
+
+A closed shared decoder independently checks the original digest, selected
+StepId, source anchors, clock identities, retained owner vector and exact
+request fields. A complete portfolio cohort may cover a selected leaf while
+retaining its distinct source cursor. The order Plan readiness path now accepts
+that same exact membership. No whole-project success is inferred from an
+individual leaf, a clock receipt or a retired order.
+
+Blocked advice distinguishes fresh goal sampling/reconciliation, inspection
+of a specific original portfolio owner and operator intervention. Missing
+authority, zero game-tick allowance, expired originals, full clock history and
+inventory-only False stock are explicit blockers. A retained Prepared native
+receipt remains a preparation, never a restored confirmation. Parent guidance
+requires the current verified acknowledged production original; failed,
+offline, retained-only, cancelled or fenced parent results cannot offer a new
+interval. Existing current confirmations retain precedence.
+
+Eleven producer/decoder regression groups and five additional parent packet
+groups cover both clock families, scalar and four-order layouts, exact retained
+Prepared re-review, distinct composite anchors, inactive pending clocks,
+source floors, budgets, deadlines, current confirmations and blocked next steps.
+Two independent reviews of the parent and producer found no remaining source
+blocker. No new Rust compilation, formatting or test execution has occurred
+because the executor is unavailable. Full verification, MCP/native/live
+qualification and production admission remain open. No-work inventory watches
+still have no effect-bearing clock target.
+
+Owners: `df-combined-order-clock-c8m` and `df-native-stock-target-3m9`
+(in progress).
+
 ## Unreleased — Parent recovery guidance resumes an original preparation
 
 The native resource-project Agent Turn now recommends `review_prepared` for

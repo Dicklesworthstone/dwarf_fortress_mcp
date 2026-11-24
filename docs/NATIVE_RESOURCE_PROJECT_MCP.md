@@ -635,6 +635,37 @@ review. A pending clock prevents incompatible order selection.
 qualified goal sampling. Fresh stock samples require actual observed
 game-tick progress; repeated foreground calls do not advance time.
 
+### Choose the next production interval
+
+The child publishes `clock_guidance` with schema
+`dfmcp.production-clock-guidance/1`. The parent's briefing summarizes its
+validated source anchor, original digest, selected StepId, offer count and
+explicit blockers. Its enabled clock affordances and next Plan recommendation
+copy the child's complete closed request. A portfolio request names the actual
+original order StepId; scalar requests omit that selector.
+
+A `new_interval` offer is bounded by the remaining original deadline,
+session tick allowance and current independent clock authority. When stock or
+order truth is already True, its proposed tick count fits the original
+stability cadence. Inventory clocks require qualified True inventory and labor;
+an inventory-only configuration cannot advance a False stock goal. All original
+effects and incompatible clock owners must first settle.
+
+A `review_prepared` clock offer uses the same `run` or `inventory_run`
+request kind with the exact retained original seal, before tick and tick/wall
+interval. It neither renews the original nor repeats native preparation.
+A current confirmation remains the next action when already available; reading
+a retained journal cannot recreate it. Planning advances zero game ticks.
+Commit requires its own explicit current confirmation.
+
+Without an eligible offer, guidance requests one reconciliation/fresh sample,
+queries the exact portfolio owner holding pending work, or explains an operator
+blocker such as zero allowance, missing independent authority or an expired
+original. A consumed newer source floor can therefore request a fresh sample
+without suggesting a stale interval. Source loss, Unknown truth and full
+retained history remain explicit limitations. No-work watches retain their
+existing observation lifecycle and have no original Created clock target.
+
 ## Stop, close and recover
 
 Default `fortress_cancel` uses `scope: "project"`; `goal` is an alias.
