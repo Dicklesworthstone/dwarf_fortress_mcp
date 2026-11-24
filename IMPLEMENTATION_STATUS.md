@@ -1,5 +1,25 @@
 # Implementation Status
 
+## Unreleased — Exercise actual owned project continuation
+
+The public facade regression now follows a resource project through comparison,
+selection, actual harvest Commit/Wait, explicit `continue_goal`, a separately
+reviewed production Commit/Wait, and the achieved original BED24 goal. A real
+owned peer pauses and resumes during the same foreground schedule. The actual
+wait allowances use the forecast's bounded predecessor and completion frontiers;
+they do not install hypothetical successors or change the original quota.
+
+The case preserves all incoming facade tests and checks pending-plan and full
+session-state purity before selection, original-parent lineage, distinct stage
+seals and final observed goal truth. Decoded-schema coverage also includes
+three- and four-candidate complete projects and rejection of continuation wrappers.
+
+These incremental tests have been source-reviewed but not executed: the
+execution environment remains unavailable. The previously recorded upstream
+schema and formatting passes do not cover these new additions.
+
+Owners: `df-lab-plan-comparison-c9r`, `df-lab-project-forecast-p7q` (in progress).
+
 ## Unreleased — Bound retained project source and preserve owned forecast scope
 
 Complete-project comparisons now charge the exact immutable normalized project

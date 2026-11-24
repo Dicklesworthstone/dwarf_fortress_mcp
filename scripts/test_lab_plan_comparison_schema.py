@@ -139,6 +139,13 @@ def main() -> None:
         value = copy.deepcopy(owned_project)
         value["candidates"][0]["blueprint"] = {"template": template}
         cases.append((value, True))
+    for count in (3, 4):
+        value = copy.deepcopy(owned_project)
+        value["candidates"] = [
+            {**copy.deepcopy(project["candidates"][0]), "key": f"project{i}"}
+            for i in range(count)
+        ]
+        cases.append((value, True))
     for key in owned_project:
         value = copy.deepcopy(owned_project)
         del value[key]
@@ -153,6 +160,7 @@ def main() -> None:
     for bad in ({"key": "pause", "paused_target": True},
                 {"key": "actions", "actions": []},
                 {"key": "legacy", "blueprint": {"template": "dining_hall"}},
+                {"key": "continuation", "blueprint": {"template": "continue_goal"}},
                 {"key": "recursive", "blueprint": {"template": "compare_candidates"}}):
         value = copy.deepcopy(owned_project)
         value["candidates"][0] = bad

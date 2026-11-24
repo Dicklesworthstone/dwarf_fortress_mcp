@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — Cover the complete public owned project workflow
+
+- Add an actual facade harvest-to-production workflow with an owned deferred
+  pause/resume peer, forecast-derived bounded waits, explicit continuation,
+  separate stage commits, preserved BED24 quota and final observed success.
+- Extend decoded requests with three/four-candidate and continuation-wrapper
+  cases. Preserve existing regressions; these additions remain unexecuted.
+
 ## Unreleased — Bound project custody and retain owned forecast semantics
 
 - Charge immutable project-source bytes before the first complete-project
