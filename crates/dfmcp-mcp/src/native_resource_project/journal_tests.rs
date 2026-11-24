@@ -3179,3 +3179,6 @@ mod private_files {
         Ok(())
     }
 }
+
+#[path = "stock_clock_recovery_tests.rs"]
+mod stock_clock_recovery;

@@ -591,6 +591,99 @@ impl NativeShell {
         Ok(observation)
     }
 
+    /// This separate no-order owner lives under its acknowledged parent, never
+    /// in an original order's clock slot. Only trusted combined configuration
+    /// supplies the path; no MCP request selects it.
+    fn resource_stock_clock_binding(
+        &self,
+        parent_directory: &std::path::Path,
+        c: &OperationContext,
+    ) -> Result<(PathBuf, dfmcp_adapter::bounded_run::journal::RunBinding)> {
+        self.config.current()?;
+        let raw = parent_directory.to_str()
+            .ok_or_else(|| invalid("stock clock parent directory must be UTF-8"))?;
+        if self.config.combined_check.is_none()
+            || !parent_directory.is_absolute()
+            || !(2..=3800).contains(&raw.len())
+            || raw[1..].split('/').any(|part| {
+                part.is_empty() || part == "." || part == ".." || part.chars().any(char::is_control)
+            })
+            || parent_directory.starts_with(&self.config.directory)
+            || self.config.directory.starts_with(parent_directory)
+        {
+            return Err(denied(
+                "stock clock requires its separate canonical resource-parent custody directory",
+            ));
+        }
+        let clock = self.config.inventory_clock.as_ref()
+            .ok_or_else(|| denied("stock clock requires independently configured inventory-clock source authority"))?;
+        if c.anchor.fortress_id != self.config.sources.fortress() {
+            return Err(denied("stock clock parent context belongs to another fortress"));
+        }
+        c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        let binding = dfmcp_adapter::bounded_run::journal::RunBinding::new(
+            self.config.endpoint,
+            dfmcp_adapter::bounded_run::rpc::RunManifest {
+                generation: clock.identity().0,
+                df_version: self.config.sources.df_version.clone(),
+                dfhack_version: self.config.sources.dfhack_version.clone(),
+            },
+        )?;
+        Ok((parent_directory.join("stock-watch-clock.journal"), binding))
+    }
+
+    /// Pure intended initial header, acknowledged by the parent before file
+    /// creation. It grants no initialization, source, or clock authority.
+    pub(crate) fn prospective_resource_stock_clock_journal(
+        &self,
+        parent_directory: &std::path::Path,
+        c: &OperationContext,
+    ) -> Result<Digest32> {
+        if self.config.recovery.is_some() {
+            return Err(denied("a new stock-watch clock cannot replace retained production custody"));
+        }
+        let (path, binding) = self.resource_stock_clock_binding(parent_directory, c)?;
+        Ok(binding.initial_journal_id(
+            c.session_id,
+            portfolio_clock_request_id(&path, c.request_id, true),
+        ))
+    }
+
+    /// Fresh creation consumes one already acknowledged prospective identity;
+    /// recovery always opens existing exact custody and can never repair it.
+    pub(crate) fn open_resource_stock_clock(
+        &self,
+        parent_directory: &std::path::Path,
+        mode: Mode,
+        initialize: bool,
+        expected: Digest32,
+        c: &OperationContext,
+    ) -> Result<dfmcp_adapter::bounded_run::journal::RunJournal<
+        dfmcp_adapter::bounded_run::private_file::PrivateRunFile,
+    >> {
+        let (path, binding) = self.resource_stock_clock_binding(parent_directory, c)?;
+        if expected == Digest32::ZERO || (initialize && mode != Mode::Control) {
+            return Err(denied("stock clock requires its exact acknowledged creation or recovery identity"));
+        }
+        if initialize {
+            if self.config.recovery.is_some() {
+                return Err(denied("a new stock-watch clock cannot replace retained production custody"));
+            }
+            c.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
+            c.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)?;
+            let prospective = binding.initial_journal_id(
+                c.session_id,
+                portfolio_clock_request_id(&path, c.request_id, true),
+            );
+            if prospective != expected {
+                return Err(denied("stock clock creation differs from its acknowledged prospective header"));
+            }
+        }
+        inventory_clock::open_at(
+            &self.config, mode, c, &path, initialize, Some(expected),
+        )?.ok_or_else(|| denied("independently configured stock clock custody is absent"))
+    }
+
     /// Additional fixed portfolio slots share only independently pinned native
     /// sources. Each original order retains its own private clock journal.
     pub(crate) fn open_portfolio_clock(
@@ -1918,3 +2011,7 @@ mod runtime_checkpoint_tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "native_resource_stock_clock_tests.rs"]
+mod resource_stock_clock_tests;

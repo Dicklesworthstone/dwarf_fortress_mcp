@@ -43,6 +43,9 @@ mod tree;
 #[path = "manager.rs"]
 mod manager;
 
+#[path = "stock_clock.rs"]
+pub(super) mod stock_clock;
+
 fn invalid(message: &str) -> dfmcp_core::DfmcpError {
     error(ErrorCode::InvalidRequest, message)
 }

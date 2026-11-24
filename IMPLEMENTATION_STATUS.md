@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Retain an independent no-order stock-watch clock
+
+The native resource-project parent now has an internal bounded Run/1.13 owner
+for a no-order stock goal. Its immutable target binds the complete parent
+original, every stock minimum and temporal term, acknowledged native production
+custody, fortress and source epoch. It never invents a manager order or a Created
+receipt. A separate fixed private journal keeps later per-order clock slots
+available.
+
+Parent replay authenticates an explicit immutable opt-in and acknowledges the
+exact prospective clock identity before file creation. First publication is a
+separate Production checkpoint while no order original exists. The target and
+journal identity cannot be replaced; tick and source-sequence rejection floors
+cannot regress, including beneath a higher parent floor or during cancelled
+project drain. Older originals keep their canonical omitted-field bytes.
+
+The owner retains one current reviewed interval, uses the existing final native
+guard and single-attempt unpause coordinator, and restores neither review nor
+stock proof on recovery. Query reconciliation and independently authorized
+safety cancellation retain the original deadline without requiring new stock
+truth. This checkpoint supplies the internal owner and durable custody; the
+public foreground stock-watch workflow is being wired separately.
+
+Seven core coordinator cases, ten parent custody/replay cases and a native
+private-file subprocess campaign are added as regression source. They have
+been reviewed against the existing owners but have not executed: the local
+executor disconnected during this work, and the current exact MCP dependency
+build remains unqualified as recorded below. No native/live qualification,
+compatibility admission or production mutation capability is claimed.
+
+Owners: `df-native-stock-target-3m9`, `df-combined-order-clock-c8m`,
+`dfmcp-reality-wiring-proof-4bf.14` (in progress).
+
 ## Unreleased — Supervise independent laboratory Tasks concurrently
 
 Modern MCP Tasks now share a bounded concurrent application service: up to

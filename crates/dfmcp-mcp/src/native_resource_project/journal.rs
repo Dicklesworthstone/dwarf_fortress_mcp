@@ -3,6 +3,10 @@
 //! An opening marker is acknowledged before constructing each child. Replay
 //! never grants initialization, restores a review, or proves a current goal.
 //! The independent ACK refuses valid-prefix rollback even after a lost reply.
+use super::runtime::stock_clock::{
+    ClockCheckpoint, original_digest, production_source_digest,
+};
+use crate::live_production_runtime::ProjectStockGoal;
 use std::io::SeekFrom;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -101,6 +105,9 @@ pub(crate) struct Checkpoint {
     /// the child can write that original. Absence keeps v1 canonical bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) production_intent: Option<Value>,
+    /// Independent no-order clock custody; omitted for every earlier original.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) stock_clock: Option<Value>,
     /// Omitted fields preserve the exact canonical bytes of earlier journals.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) tree: Option<Value>,
@@ -195,6 +202,49 @@ fn manager_successor(original: &Value, initial_stage: Stage) -> Result<Option<St
         Some(_) => Err(corrupt()),
     }
 }
+/// The optional clock belongs to the exact parent original. Explicit false or
+/// null is not a legacy original: disabled configurations omit this field.
+fn stock_watch_policy(original: &Value) -> Result<bool> {
+    match original.get("stock_watch_clock") {
+        None => Ok(false),
+        Some(Value::Bool(true)) => Ok(true),
+        Some(_) => Err(corrupt()),
+    }
+}
+
+/// Replaying a correctly checksummed frame must enforce the same original and
+/// source custody as a live append; checksum validity alone grants no clock.
+fn validate_stock_clock(
+    snapshot: &Snapshot,
+    original: &Value,
+    parent_journal_id: Digest32,
+    fortress: &str,
+    initial_tick: u64,
+    retained_tick: u64,
+) -> Result<()> {
+    let Some(value) = &snapshot.checkpoint.stock_clock else {
+        return Ok(());
+    };
+    require(stock_watch_policy(original)?)?;
+    let clock = ClockCheckpoint::from_json(value)?;
+    let goal: ProjectStockGoal = serde_json::from_value(
+        original.get("goal").cloned().ok_or_else(corrupt)?,
+    )
+    .map_err(|_| corrupt())?;
+    goal.validate()?;
+    let production = snapshot.checkpoint.production.as_ref().ok_or_else(corrupt)?;
+    clock.target().matches_original(
+        parent_journal_id,
+        original_digest(original)?,
+        &goal,
+        production_source_digest(production)?,
+    )?;
+    require(clock.target().fortress().to_string() == fortress)?;
+    require(clock.target().original_tick() >= initial_tick)?;
+    require(clock.high_tick() <= retained_tick)?;
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Body {
@@ -288,6 +338,10 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<()> {
     if let Some(value) = &c.production_intent {
         value_bytes(value, MAX_CHECKPOINT)?;
     }
+    if let Some(value) = &c.stock_clock {
+        value_bytes(value, MAX_CHECKPOINT)?;
+        ClockCheckpoint::from_json(value)?;
+    }
     let phase = if snapshot.stage == Stage::Cancelled {
         snapshot.cancelled_from.ok_or_else(conflict)?
     } else {
@@ -296,7 +350,7 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<()> {
         }
         snapshot.stage
     };
-    if c.production_intent.is_some() && phase != Stage::Production {
+    if (c.production_intent.is_some() || c.stock_clock.is_some()) && phase != Stage::Production {
         return Err(conflict());
     }
     let tree_pair = c.tree.is_some() == c.tree_handoff.is_some();
@@ -382,7 +436,32 @@ fn transition(old: &Snapshot, new: &Snapshot, after_manager: Option<Stage>) -> R
     if before.production_intent.is_some() && before.production_intent != after.production_intent {
         return Err(conflict());
     }
-    if before.production_intent.is_some() {
+    if let Some(retained) = &before.stock_clock {
+        let retained = ClockCheckpoint::from_json(retained)?;
+        let current = ClockCheckpoint::from_json(after.stock_clock.as_ref().ok_or_else(conflict)?)?;
+        retained.validate_successor(&current)?;
+    }
+    if before.stock_clock.is_none() && after.stock_clock.is_some() {
+        // A no-order target must be independently acknowledged before its
+        // separate native journal is created. Never mint it while opening a
+        // child, publishing an order original, stopping, or recovering.
+        let clock = ClockCheckpoint::from_json(after.stock_clock.as_ref().ok_or_else(conflict)?)?;
+        if old.stage != Stage::Production
+            || new.stage != Stage::Production
+            || before.production != after.production
+            || before.production_intent.is_some()
+            || after.production_intent.is_some()
+            || before
+                .production
+                .as_ref()
+                .and_then(|value| value.get("recovery"))
+                != Some(&Value::Null)
+            || !clock.is_initial()
+        {
+            return Err(conflict());
+        }
+    }
+    if before.production_intent.is_some() || before.stock_clock.is_some() {
         // The child owns descriptor semantics. Reuse the parent's ordinary
         // original/floor continuity check so even a checksummed replay cannot
         // erase a published original or newer sticky rejection evidence.
@@ -557,6 +636,7 @@ fn replay(bytes: &[u8], work: &Work) -> Result<Replay> {
     let mut high_tick = header.initial_tick;
     let initial_stage = header.initial_stage()?;
     let after_manager = manager_successor(&header.original, initial_stage)?;
+    stock_watch_policy(&header.original)?;
     let mut snapshot = Snapshot::initial(initial_stage);
     let mut heads = Vec::new();
     while !r.0.is_empty() {
@@ -572,6 +652,15 @@ fn replay(bytes: &[u8], work: &Work) -> Result<Replay> {
         let body: Body = serde_json::from_slice(raw).map_err(|_| corrupt())?;
         require(serde_json::to_vec(&body).map_err(|_| corrupt())? == raw)?;
         require(body.high_tick >= high_tick)?;
+        validate_stock_clock(
+            &body.snapshot,
+            &header.original,
+            journal_id,
+            &header.fortress,
+            header.initial_tick,
+            body.high_tick,
+        )
+        .map_err(|_| corrupt())?;
         if heads.is_empty() {
             require(body.snapshot == Snapshot::initial(initial_stage))?;
         } else {
@@ -638,6 +727,7 @@ pub(crate) struct Journal<S, A> {
     pin: Pin,
     high_tick: u64,
     recorded_tick: u64,
+    initial_tick: u64,
     opening: OperationContext,
     mode: Mode,
     fenced: bool,
@@ -656,6 +746,7 @@ pub(crate) fn open_private(
     Work::new(context)?;
     value_bytes(&original, MAX_ORIGINAL)?;
     manager_successor(&original, initial_stage)?;
+    stock_watch_policy(&original)?;
     if initialize {
         require(mode == Mode::Control && expected_pin.is_none())?;
         context.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
@@ -729,6 +820,7 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
         let work = Work::new(context)?;
         value_bytes(&original, MAX_ORIGINAL)?;
         let after_manager = manager_successor(&original, initial_stage)?;
+        stock_watch_policy(&original)?;
         if initialize {
             require(mode == Mode::Control && expected_pin.is_none())?;
             context.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
@@ -834,6 +926,7 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
             },
             high_tick,
             recorded_tick: head.tick,
+            initial_tick: decoded.header.initial_tick,
             opening: context.clone(),
             mode,
             fenced: false,
@@ -952,14 +1045,31 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
             );
         let starts_intent = self.snapshot.checkpoint.production_intent.is_none()
             && snapshot.checkpoint.production_intent.is_some();
-        self.access(context, starts_stage || starts_intent)?;
-        let work = Work::new(context)?;
-        if self.mode == Mode::Offline
-            || ((starts_stage || starts_intent) && self.mode != Mode::Control)
-        {
+        let starts_stock_clock = self.snapshot.checkpoint.stock_clock.is_none()
+            && snapshot.checkpoint.stock_clock.is_some();
+        let starts_original = starts_stage || starts_intent || starts_stock_clock;
+        let mut retained_context = context.clone();
+        if let Some(value) = &snapshot.checkpoint.stock_clock {
+            let clock = ClockCheckpoint::from_json(value)?;
+            // A sibling clock floor must not disappear behind a newer child
+            // summary, nor be published under authority issued at an older tick.
+            retained_context.anchor.tick =
+                GameTick(retained_context.anchor.tick.get().max(clock.high_tick()));
+        }
+        self.access(&retained_context, starts_original)?;
+        let work = Work::new(&retained_context)?;
+        if self.mode == Mode::Offline || (starts_original && self.mode != Mode::Control) {
             return Err(conflict());
         }
         transition(&self.snapshot, &snapshot, self.after_manager)?;
+        validate_stock_clock(
+            &snapshot,
+            &self.original,
+            parsed_digest(&self.pin.journal_id)?,
+            &self.opening.anchor.fortress_id.to_string(),
+            self.initial_tick,
+            self.high_tick,
+        )?;
         self.verify_work(&work)?;
         if self.snapshot == snapshot && self.recorded_tick == self.high_tick {
             return Ok(self.pin());

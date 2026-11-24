@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Retain bounded time custody for no-order stock goals
+
+- Add a separate Run/1.13 stock-watch owner bound to the complete original
+  resource goal and acknowledged production source custody.
+- Acknowledge the exact prospective private journal before creation; preserve
+  immutable targets, actual ancestry and monotone source floors on recovery.
+- Keep review process local and preserve overdue reconciliation and separately
+  authorized cancellation. Add core, private-file and parent replay regression
+  source; execution remains unverified while the local executor is unavailable.
+- Keep this first checkpoint internal; public foreground integration follows
+  without changing the admitted production surface or compatibility registry.
+
 ## Unreleased — Run independent laboratory Task monitors together
 
 - Supervise up to eight independent session monitors concurrently, with one per
