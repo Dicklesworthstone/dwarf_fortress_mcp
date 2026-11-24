@@ -56,6 +56,9 @@ use objectives::{Objective, objective_history_roots};
 #[path = "recovery_compiler.rs"]
 mod recovery_compiler;
 
+#[path = "recovered_step_progress.rs"]
+mod recovered_step_progress;
+
 #[path = "blueprint_source.rs"]
 mod blueprint_source;
 
@@ -616,69 +619,7 @@ fn observe_carried(session: &mut LabSession) -> Result<()> {
         }
         return Err(error);
     }
-    let observed = (|| -> Result<Vec<CarriedStep>> {
-        let snapshot = session.adapter.snapshot();
-        let evidence = PredicateEvidence::laboratory(snapshot)?;
-        let mut next = session.carried.clone();
-        for step in &mut next {
-            if step.is_final() {
-                continue;
-            }
-            step.observation_error = None;
-            if let Some(work) = &step.work_step {
-                // An anchored failure may have preceded dispatch; the legacy
-                // journal does not distinguish that case. Never infer absence
-                // from a missing work entity: retain Unknown for reconciliation.
-                step.work_state = dfmcp_intent::inspect_effect_work(
-                    snapshot,
-                    &work.action,
-                    &work.idempotency_key,
-                    true,
-                )?;
-                step.work_anchor = Some(snapshot.anchor());
-                if step.state == "dispatched"
-                    && matches!(work.action, Action::HarvestResource { .. })
-                {
-                    dfmcp_intent::effects::validate_harvest_identity(
-                        snapshot,
-                        dfmcp_intent::effects::created_entity_id(&work.idempotency_key, 0),
-                        &work.action,
-                    )?;
-                }
-            }
-            if step.state != "dispatched" {
-                continue;
-            }
-            if let Some(monitor) = &mut step.monitor {
-                monitor.observe_with_evidence(&evidence)?;
-                match monitor.status() {
-                    Some(ObligationStatus::Fulfilled { .. }) => {
-                        step.state = "verified".to_owned();
-                        step.proof_anchor = monitor.last_observation_anchor();
-                    }
-                    Some(ObligationStatus::Failed { reason, .. }) => {
-                        step.state = "failed".to_owned();
-                        step.failure_reason = Some(reason.clone());
-                        step.proof_anchor = monitor.last_observation_anchor();
-                    }
-                    _ => {}
-                }
-            } else if evidence.establishes(&step.proof)? {
-                step.state = "verified".to_owned();
-                step.proof_anchor = Some(snapshot.anchor());
-            }
-            if step.state == "verified"
-                && let Some(work) = &step.work_step
-            {
-                // Recovery has the same proof obligations as live execution.
-                // Matching field predicates cannot certify a replaced entity or
-                // broken input/item custody. Refusal discards the shadow rows,
-                // so neither the monitor nor durable state becomes Verified.
-                dfmcp_intent::effects::validate_terminal_action_identity(snapshot, work)?;
-            }
-        }
-        Ok(next)
-    })();
+    let observed = recovered_step_progress::observe(session.adapter.snapshot(), &session.carried);
     match observed {
         Ok(next) => {
             session.carried = next;
@@ -1619,10 +1560,7 @@ fn recover_commit(
                 predicates.push(obligation.terminal.clone());
             }
             let proof = Predicate::All(predicates).normalized();
-            let mut identity = b"dfmcp-recovered-obligation-v1".to_vec();
-            identity.extend_from_slice(commit.plan_digest.as_bytes());
-            identity.extend_from_slice(&step.id.get().to_be_bytes());
-            let proof_id = ActionId::new(Digest32::of_bytes(&identity).first_u128().max(1));
+            let proof_id = recovered_step_progress::proof_id(commit.plan_digest, step.id);
             let monitor_result =
                 if state != "dispatched" || unanchored_terminal || unanchored_absence {
                     Ok(None)
@@ -6084,22 +6022,7 @@ fn wait_selection_error(
 /// Recovered work has no live adapter action handle, but its original cadence
 /// and deadline must constrain the same foreground observation loop.
 fn carried_wait_ceiling(session: &LabSession) -> Option<u64> {
-    let now = session.adapter.snapshot().tick;
-    session
-        .carried
-        .iter()
-        .filter(|step| !step.is_final())
-        .filter_map(|step| step.work_step.as_ref()?.obligation.as_ref())
-        .map(|spec| {
-            let cadence = spec.poll_interval_ticks.max(1);
-            let until_deadline = spec.deadline_tick.0.saturating_sub(now.0);
-            if until_deadline == 0 {
-                cadence
-            } else {
-                cadence.min(until_deadline)
-            }
-        })
-        .min()
+    recovered_step_progress::ceiling(session.adapter.snapshot().tick, &session.carried)
 }
 
 /// The watch owner has already admitted its complete Agent Turn. Its caller

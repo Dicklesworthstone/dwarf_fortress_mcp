@@ -131,6 +131,31 @@ impl RecoveredObligation {
         self.runtime.last_observation_anchor(self.action_id)
     }
 
+    /// Check an existing monitor's sealed identity without exposing its proof
+    /// identifier as an adapter handle or constructing a replacement runtime.
+    #[must_use]
+    pub fn matches_original(
+        &self,
+        proof_id: ActionId,
+        spec: &ObligationSpec,
+        registered_tick: GameTick,
+    ) -> bool {
+        if spec.terminal.validate_shape().is_err()
+            || spec.failure.as_ref().is_some_and(|failure| failure.validate_shape().is_err())
+        {
+            return false;
+        }
+        let mut expected = spec.clone();
+        expected.terminal = expected.terminal.normalized();
+        expected.failure = expected.failure.map(|failure| failure.normalized());
+        self.action_id == proof_id
+            && self.runtime.obligations.get(&self.action_id).is_some_and(|obligation| {
+                obligation.action_id == proof_id
+                    && obligation.spec == expected
+                    && obligation.registered_tick == registered_tick
+            })
+    }
+
     /// A second restart preserves terminal proof and discards unfinished
     /// stability. The absolute deadline and original registration survive.
     pub fn after_restart(&self, frontier: &WorldSnapshot) -> Result<Self> {
@@ -216,6 +241,38 @@ mod tests {
             poll_interval_ticks: cadence,
             stable_for_observations: stable,
         }
+    }
+
+    #[test]
+    fn retained_monitor_matches_the_entire_original_identity_without_resetting_samples() -> Result<()> {
+        let frontier = snapshot(20, 2, 1, false);
+        let original = spec(100, 10, 2);
+        let mut monitor = RecoveredObligation::new_laboratory(
+            ActionId::new(17), original.clone(), GameTick(0), &frontier,
+        )?;
+        monitor.observe_laboratory(&snapshot(30, 2, 2, false))?;
+        let before = format!("{monitor:?}");
+        assert!(monitor.matches_original(ActionId::new(17), &original, GameTick(0)));
+        let mut equivalent = original.clone();
+        equivalent.terminal = Predicate::All(vec![Predicate::True, original.terminal.clone()]);
+        assert!(monitor.matches_original(ActionId::new(17), &equivalent, GameTick(0)));
+        assert!(!monitor.matches_original(ActionId::new(18), &original, GameTick(0)));
+        assert!(!monitor.matches_original(ActionId::new(17), &original, GameTick(1)));
+        for changed in [
+            ObligationSpec { terminal: Predicate::Paused(true), ..original.clone() },
+            ObligationSpec { failure: Some(Predicate::Paused(true)), ..original.clone() },
+            ObligationSpec { deadline_tick: GameTick(101), ..original.clone() },
+            ObligationSpec { poll_interval_ticks: 11, ..original.clone() },
+            ObligationSpec { stable_for_observations: 1, ..original.clone() },
+        ] {
+            assert!(!monitor.matches_original(ActionId::new(17), &changed, GameTick(0)));
+        }
+        assert_eq!(format!("{monitor:?}"), before);
+        monitor.observe_laboratory(&snapshot(40, 2, 3, false))?;
+        assert!(matches!(monitor.status(), Some(ObligationStatus::Fulfilled {
+            fulfilled_at_tick: GameTick(40), ..
+        })));
+        Ok(())
     }
 
     #[test]

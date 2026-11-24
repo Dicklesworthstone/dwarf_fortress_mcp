@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Bind recovered proof to its exact original work
+
+- Reject recovered temporal monitors whose proof identity, original registration
+  tick or complete normalized obligation differs from the sealed original step.
+  A matching recovery anchor and plausible status alone are insufficient.
+- Share the existing pure observation transition and cadence ceiling between
+  real waiting and private model consumers. Current Observe authorization,
+  interruption handling and atomic publication remain with the owning caller.
+- Add an intent regression covering foreign IDs, timing, predicates, deadlines,
+  cadence and stability while preserving an existing sample streak.
+- Independent source review confirms the extracted transition and cadence rules
+  match the original implementation. Rust execution and formatting remain
+  unavailable after the execution host failed; no new runtime qualification.
+
 ## Unreleased — Reopen acknowledged clocked stock portfolios
 
 - Remove the remaining configuration gate that rejected an explicitly retained

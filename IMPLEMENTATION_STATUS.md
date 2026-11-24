@@ -1,5 +1,33 @@
 # Implementation Status
 
+## Unreleased — Keep recovered temporal proof bound to the original step
+
+Recovered step custody now checks the monitor's deterministic proof identity,
+complete normalized obligation and original registration tick against the exact
+sealed step. That comparison includes its combined postconditions and terminal
+predicate, failure predicate, absolute deadline, polling cadence and stability
+requirement. A monitor belonging to other work in the same accepted recovery
+can no longer qualify merely because its anchor and status appear consistent.
+
+Real foreground waiting now calls a shared pure recovered-step transition and
+the same cadence/deadline ceiling. The transition returns a complete candidate
+without dispatching work or publishing observations. Current Observe authority,
+interruption on failure and atomic replacement of carried state remain in the
+existing owner. This prepares safe reuse by private forecasts without changing
+the real observation schedule or restoring an adapter action handle.
+
+One new intent regression covers every monitor identity dimension, normalized
+predicate equivalence, unchanged state during inspection and preservation of
+an existing eligible stability sample. Independent review checked the actual
+durable constructor and compared the extracted transition and ceiling against
+the prior source; their behavior is unchanged. Source integrity checks pass.
+The new test and Rust formatting remain unexecuted because the execution host
+became unavailable during read-only work. No full MCP/native/live qualification
+or broader bead completion is claimed.
+
+Owners: `df-lab-selected-plan-wait-s4q` and
+`df-lab-joint-original-forecast-c2s` (in progress).
+
 ## Unreleased — Complete the acknowledged clocked-portfolio reopen path
 
 An obsolete configuration rejection still prevented an explicitly retained

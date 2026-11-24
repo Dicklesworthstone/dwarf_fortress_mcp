@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result, StateAnchor, StepId};
+use dfmcp_core::{DfmcpError, Digest32, ErrorCode, GameTick, Result, StateAnchor, StepId};
 use dfmcp_intent::{EffectWorkState, ObligationStatus, PlanStep, PreparedPlan, effects};
 use dfmcp_lab::durable::{DurableLabStore, DurableObjective};
 use dfmcp_world::{Predicate, PredicateEvidence, PredicateTruth, WorldSnapshot};
@@ -420,7 +420,9 @@ impl RecoveredPlanCustody {
                 return Err(corrupt("selected original action ordering changed"));
             }
             if let Some(row) = carried.get(&step.id) {
-                inspect_carried(row, receipt, step, custody, snapshot.anchor(), &mut actions)?;
+                inspect_carried(
+                    row, receipt, step, plan.anchor.tick, custody, snapshot.anchor(), &mut actions,
+                )?;
             } else if receipt.state == State::Dispatched {
                 return Err(unavailable(
                     "a dispatched original step lost its recovered observation monitor",
@@ -460,6 +462,7 @@ fn inspect_carried(
     row: &CarriedStep,
     receipt: &Receipt,
     step: &PlanStep,
+    registered_tick: GameTick,
     custody: &VerifiedCustody,
     current: StateAnchor,
     actions: &mut Actions,
@@ -548,9 +551,13 @@ fn inspect_carried(
                 ));
             }
         } else if let Some(monitor) = &row.monitor {
-            if monitor.recovery_anchor() != recovery {
+            if monitor.recovery_anchor() != recovery
+                || !super::super::recovered_step_progress::monitor_matches(
+                    row, custody.plan_digest, registered_tick, step,
+                )
+            {
                 return Err(corrupt(
-                    "carried proof monitor belongs to a different recovery",
+                    "carried proof monitor belongs to a different original or recovery",
                 ));
             }
             let consistent = match (state, monitor.status()) {
