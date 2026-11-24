@@ -649,6 +649,109 @@ fn parent_labor_diagnostics(parent: &Value) -> Option<ParentLaborDiagnostics> {
     })
 }
 
+/// Re-offer the same undispatched native preparation after a lost reply or
+/// reopen. The caller must separately establish that this is its current live
+/// Control view. Historical custody alone never restores a review permit.
+pub(crate) fn original_prepared_review_request(
+    view: &Value,
+    eligible: bool,
+) -> Option<(u32, Value)> {
+    let anchor = &view["anchor"];
+    let tick = anchor["tick"].as_u64()?;
+    let original = &view["original_plan"];
+    let entries = view["frontier"]["entries"].as_array()?;
+    let steps = original["steps"].as_array()?;
+    let stock_targets = stock_targets::summary(&view["stock_targets"]);
+    let stock_failed = view["stock_target"]["revalidation_failed"] == true
+        || stock_targets["revalidation_failed"] == true
+        || (!view["stock_targets"].is_null() && stock_targets.is_null());
+    let watch_owned =
+        !view["no_work_stock_goal"].is_null() && view["no_work_stock_goal"]["cancelled"] != true;
+    if !eligible
+        || view["ok"] != true
+        || view["mode"] != "control"
+        || view["closed"] == true
+        || view["custody_initialization_may_be_partial"] == true
+        || watch_owned
+        || stock_failed
+        || !view["review"].is_null()
+        || view["frontier"]["needs_reconciliation"] != false
+        || original["anchor"] != *anchor
+        || digest(&original["plan_digest"]).is_none()
+        || view["observation_tick_floor"].as_u64()? > tick
+        || original["expires_at_tick"].as_u64()? <= tick
+        || entries.is_empty()
+        || entries.len() > 5
+        || steps.is_empty()
+        || steps.len() > 5
+    {
+        return None;
+    }
+    // Every configured owner participates, including an inactive portfolio
+    // slot. Another retained clock or a later consumed tick cannot permit an
+    // older original preparation to regain a current confirmation.
+    let orders = view["portfolio"]["orders"].as_array();
+    if orders.is_some_and(|orders| orders.len() > 4) {
+        return None;
+    }
+    for clocks in std::iter::once(view).chain(orders.into_iter().flatten()) {
+        for owner in CLOCK_OWNERS {
+            let clock = owner.view(clocks);
+            if !clock_settled(clock)
+                || (clock.is_object() && clock["high_tick"].as_u64()? > tick)
+            {
+                return None;
+            }
+        }
+    }
+    let mut active = entries.iter().filter(|entry| {
+        !matches!(
+            entry["phase"].as_str(),
+            Some("pending" | "applied" | "failed" | "cancelled")
+        )
+    });
+    let entry = active.next()?;
+    if active.next().is_some()
+        || entry["phase"] != "prepared"
+        || entry["dispatch_attempted"] != false
+        || digest(&entry["preparation_digest"]).is_none()
+    {
+        return None;
+    }
+    let step_id = u32::try_from(entry["step_id"].as_u64()?).ok()?;
+    let mut matching = steps.iter().filter(|step| step["step_id"] == step_id);
+    let step = matching.next()?;
+    if matching.next().is_some()
+        || step["key"] != entry["idempotency_key"]
+        || bounded(&step["key"], 128).is_none_or(str::is_empty)
+        || (!step["obligation"].is_null()
+            && step["obligation"]["deadline_tick"].as_u64()? <= tick)
+    {
+        return None;
+    }
+    let authority = match entry["family"].as_str() {
+        Some("workforce/1.17") => {
+            step["action"]["kind"] == "set_labor" && view["labor_control_enabled"] == true
+        }
+        Some("work-orders/1.10") => {
+            step["action"]["kind"] == "create_work_order"
+                && view["production_control_enabled"] == true
+                && view["workshop_prerequisite"]["source_fenced"] != true
+                && view["manager_prerequisite"]["source_fenced"] != true
+                && view["input_supply"]["source_fenced"] != true
+                && view["input_supply"]["revalidation_failed"] != true
+                && view["input_supply"]["status"] != "unavailable"
+        }
+        _ => false,
+    };
+    authority.then(|| {
+        (
+            step_id,
+            json!({"kind":"review_prepared","original_plan_digest":original["plan_digest"]}),
+        )
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn encode(
     operation: &str,
@@ -873,58 +976,10 @@ fn encode(
     });
     let current_tick = anchor
         .is_some_and(|a| view["anchor"] == anchor_value(a) && known_tick == Some(a.tick.get()));
-    let prepared_review = if control_available
-        && !stock_watch_owned
-        && !uncertain
-        && current_tick
-        && review.is_null()
-        && !stock_target_failed
-        && view["frontier"]["needs_reconciliation"] == false
-        && view["original_plan"]["anchor"] == view["anchor"]
-        && digest(&view["original_plan"]["plan_digest"]).is_some()
-        && known_tick
-            .zip(view["original_plan"]["expires_at_tick"].as_u64())
-            .is_some_and(|(tick, expiry)| tick < expiry)
-    {
-        let mut active = entries.iter().filter(|entry| {
-            !matches!(
-                entry["phase"].as_str(),
-                Some("pending" | "applied" | "failed" | "cancelled")
-            )
-        });
-        let selected = active.next().filter(|_| active.next().is_none());
-        selected
-            .filter(|entry| {
-                entry["phase"] == "prepared"
-                    && entry["dispatch_attempted"] == false
-                    && digest(&entry["preparation_digest"]).is_some()
-                    && view["original_plan"]["steps"]
-                        .as_array()
-                        .is_some_and(|steps| {
-                            steps.iter().any(|step| {
-                                step["step_id"] == entry["step_id"]
-                                    && step["key"] == entry["idempotency_key"]
-                                    && (step["obligation"].is_null()
-                                        || known_tick
-                                            .zip(step["obligation"]["deadline_tick"].as_u64())
-                                            .is_some_and(|(tick, expiry)| tick < expiry))
-                                    && if entry["family"] == "workforce/1.17" {
-                                        step["action"]["kind"] == "set_labor"
-                                            && view["labor_control_enabled"] == true
-                                    } else {
-                                        entry["family"] == "work-orders/1.10"
-                                            && step["action"]["kind"] == "create_work_order"
-                                            && view["production_control_enabled"] == true
-                                            && !prerequisite_fenced
-                                            && !input_failed
-                                    }
-                            })
-                        })
-            })
-            .map(|entry| entry["step_id"].clone())
-    } else {
-        None
-    };
+    let prepared_review = original_prepared_review_request(
+        view,
+        control_available && !uncertain && current_tick && result["ok"] == true,
+    );
     // A complete cohort has its own public anchor. Its exact selected leaf
     // remains usable clock evidence without relabeling the selected anchor.
     let cohort_covers_selected = portfolio
@@ -1250,12 +1305,12 @@ fn encode(
             true,
             json!({"paired_seal":review["paired_seal"],"confirmed":true}),
         ))
-    } else if prepared_review.is_some() {
+    } else if let Some((_, request)) = &prepared_review {
         Some((
             "fortress_plan",
             "Review the exact retained undispatched step under fresh source and authority checks; native preparation is not repeated and a new confirmation is required.",
             false,
-            json!({"request":json!({"kind":"review_prepared", "original_plan_digest":view["original_plan"]["plan_digest"]}).to_string()}),
+            json!({"request":request.to_string()}),
         ))
     } else if view["frontier"]["next_ready"].is_u64()
         && view["original_plan"]["plan_digest"].is_string()
@@ -1695,7 +1750,7 @@ fn encode(
     let mut actions = entries;
     let mut cancellation_drains = Vec::new();
     let mut affordances = Vec::new();
-    if let Some(step) = prepared_review {
+    if let Some((step, _)) = &prepared_review {
         affordances.push(json!({"action":"fortress_plan","scope":"step",
             "request_kind":"review_prepared","step_id":step,"enabled":true,
             "grants_authority":false,"repeats_native_preparation":false}));
@@ -2032,7 +2087,7 @@ mod tests {
                 "production_control_enabled",
             ),
         ] {
-            let mut view = json!({"anchor":anchor_value(anchor),
+            let mut view = json!({"ok":true,"mode":"control","anchor":anchor_value(anchor),
                 "observation_tick_floor":anchor.tick.get(),
                 "original_plan":{"anchor":anchor_value(anchor),"plan_digest":"a".repeat(64),
                     "expires_at_tick":anchor.tick.get()+100,
@@ -2100,6 +2155,70 @@ mod tests {
             assert!(!recommends_review(&consumed_future, "control", true, false));
             view[control] = json!(false);
             assert!(!recommends_review(&view, "control", true, false));
+        }
+    }
+
+    #[test]
+    fn shared_prepared_review_requires_current_raw_owner_and_every_clock_floor() {
+        let (anchor, _) = joined_order_goal_view("false", false);
+        let view = json!({"ok":true,"mode":"control","anchor":anchor_value(anchor),
+            "observation_tick_floor":anchor.tick.get(),
+            "original_plan":{"anchor":anchor_value(anchor),"plan_digest":"a".repeat(64),
+                "expires_at_tick":anchor.tick.get()+100,
+                "steps":[{"step_id":0,"key":"same-original-key",
+                    "action":{"kind":"create_work_order"},
+                    "obligation":{"deadline_tick":anchor.tick.get()+50}}]},
+            "frontier":{"needs_reconciliation":false,"entries":[
+                {"step_id":0,"family":"work-orders/1.10","phase":"prepared",
+                 "idempotency_key":"same-original-key","preparation_digest":"b".repeat(64),
+                 "dispatch_attempted":false}]},
+            "production_control_enabled":true,"review":null});
+        let expected = (0, json!({"kind":"review_prepared",
+            "original_plan_digest":"a".repeat(64)}));
+        assert_eq!(
+            original_prepared_review_request(&view, true),
+            Some(expected)
+        );
+        assert!(original_prepared_review_request(&view, false).is_none());
+        for case in 0..13 {
+            let mut changed = view.clone();
+            match case {
+                0 => changed["ok"] = false.into(),
+                1 => changed["mode"] = "offline".into(),
+                2 => changed["mode"] = "reconcile".into(),
+                3 => changed["custody_initialization_may_be_partial"] = true.into(),
+                4 => changed["original_plan"]["anchor"]["sequence"] =
+                    (anchor.cursor.sequence + 1).into(),
+                5 => changed["original_plan"]["steps"][0]["key"] = "".into(),
+                6 => changed["original_plan"]["steps"][0]["obligation"]["deadline_tick"] =
+                    anchor.tick.get().into(),
+                7 => changed["workshop_prerequisite"] = json!({"source_fenced":true}),
+                8 => {
+                    let duplicate = changed["original_plan"]["steps"][0].clone();
+                    changed["original_plan"]["steps"].as_array_mut().expect("steps")
+                        .push(duplicate);
+                }
+                9 => {
+                    let duplicate = changed["frontier"]["entries"][0].clone();
+                    changed["frontier"]["entries"].as_array_mut().expect("entries")
+                        .push(duplicate);
+                }
+                10 => changed["clock"] = json!({"pending":false,"unresolved":false,
+                    "may_be_running":false,"needs_reconciliation":false,"active_run":null,
+                    "high_tick":anchor.tick.get()+1}),
+                11 => changed["portfolio"] = json!({"orders":[{"inventory_clock":{
+                    "pending":false,"unresolved":false,"may_be_running":false,
+                    "needs_reconciliation":false,"active_run":null,
+                    "high_tick":anchor.tick.get()+1}}]}),
+                _ => changed["portfolio"] = json!({"orders":[{"inventory_clock":{
+                    "pending":true,"unresolved":false,"may_be_running":false,
+                    "needs_reconciliation":true,"active_run":{"state":"prepared"},
+                    "high_tick":anchor.tick.get()}}]}),
+            }
+            assert!(
+                original_prepared_review_request(&changed, true).is_none(),
+                "case {case}"
+            );
         }
     }
 

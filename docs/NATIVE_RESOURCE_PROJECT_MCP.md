@@ -573,6 +573,17 @@ undispatched original step; it never repeats native preparation or restores an
 old confirmation. An acknowledged labor step and dependent order remain
 separate native effects.
 
+The parent recommends this recovery request before another ready step or a
+goal wait when exactly one eligible original preparation remains. It checks
+the acknowledged child original, current Control view and source floor,
+unexpired original lifetime, settled clocks and independent effect authority.
+Its affordance is `review_prepared_original_step` and names the actual original
+StepId; the returned request fixes the retained original digest. An existing
+current review instead keeps its exact confirmation recommendation. Retained,
+offline, uncertain, fenced, expired or partial views supply no fresh review
+offer. Calling Plan obtains a review only; the later Commit requires a separate
+fresh confirmation.
+
 ### 5. Verify the original outcome
 
 `fortress_wait` performs one foreground reconciliation or goal sample. It

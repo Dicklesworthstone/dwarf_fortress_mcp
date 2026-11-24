@@ -241,7 +241,27 @@
       "complete_semantic_approval_projection": true
     },
     "portfolio_clock_confirmations_require_exact_selected_order": true,
-    "inactive_portfolio_clocks_remain_visible": true
+    "inactive_portfolio_clocks_remain_visible": true,
+    "original_prepared_review_guidance": {
+      "request_kind": "review_prepared",
+      "precedes_next_ready_step": true,
+      "families": [
+        "workforce/1.17",
+        "work-orders/1.10"
+      ],
+      "requires_current_verified_child_original": true,
+      "requires_unique_undispatched_prepared_step": true,
+      "requires_original_source_floor_and_lifetime": true,
+      "requires_settled_active_and_inactive_clocks": true,
+      "requires_independent_current_authority": true,
+      "repeats_native_preparation": false,
+      "renews_original_lifetime": false,
+      "restores_confirmation": false,
+      "separate_commit_confirmation_required": true,
+      "regression_groups_authored": 4,
+      "rust_tests_executed": false,
+      "validation": "independent source review; execution environment unavailable"
+    }
   },
   "unsupported": [
     "automatic_native_effect_without_current_review",
@@ -341,7 +361,10 @@
     "crates/dfmcp-mcp/src/live_production_runtime/planning_inspection.rs",
     "crates/dfmcp-mcp/src/live_production_runtime/portfolio.rs",
     "crates/dfmcp-mcp/src/semantic_work_order_runtime/native_clock.rs",
-    "crates/dfmcp-mcp/src/semantic_work_order_runtime/native_inventory_clock.rs"
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/native_inventory_clock.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/production_presentation.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/production_presentation_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_presentation.rs"
   ],
   "qualification": {
     "pre_outage_ledger_component_cases_passed": 17,

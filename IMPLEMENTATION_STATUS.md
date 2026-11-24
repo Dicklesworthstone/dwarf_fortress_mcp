@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Parent recovery guidance resumes an original preparation
+
+The native resource-project Agent Turn now recommends `review_prepared` for
+an eligible retained undispatched labor or finite-order step. Previously the
+parent could fall through to another dependency-ready step or repeated Wait
+calls despite the existing native re-review route. The combined profile and
+parent now share one original-step selector; the parent additionally requires
+a successful current Control production result, verified custody and the exact
+original digest in its acknowledged retained child checkpoint.
+
+The selector requires a unique original prepared frontier entry, exact
+idempotency key and preparation digest, matching current/original anchor,
+unexpired plan and obligation, no later consumed source floor, settled clocks
+including inactive portfolio owners, and the relevant independent authority.
+Source fences, failed stock/input revalidation and partial custody suppress
+the offer. Existing current confirmations retain precedence. Re-review grants
+no dispatch authority, repeats no native preparation, and neither changes the
+original key nor renews its lifetime; each effect still needs a separate fresh
+confirmation.
+
+Four parent regression groups cover both effect families, precedence over
+another ready step, current exact confirmation, fourteen retained/foreign
+parent contexts and sixteen source/lifetime/authority/key refusals. Thirteen
+shared-helper refusal cases exercise the same selector in combined production.
+Two independent source reviews found no remaining implementation blocker.
+These Rust sources have not been compiled, formatted or executed because the
+execution host remains unavailable. Historical test receipts do not qualify
+these changes; the full verification commands, MCP/native/live qualification
+and broad gameplay acceptance remain open.
+
+Owners: `df-native-stock-target-3m9` and
+`df-dfhack-bridge-plane-c-pic.4.1` (in progress).
+
 ## Unreleased — Ordinary portfolio clocks survive pre-plan restart
 
 Ordinary combined labor/order owners and the production child of the staged

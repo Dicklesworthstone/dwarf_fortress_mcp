@@ -12,6 +12,11 @@ use serde_json::{Value, json};
 mod manager;
 #[path = "tree_presentation.rs"]
 mod tree;
+#[path = "production_presentation.rs"]
+mod production;
+#[cfg(test)]
+#[path = "production_presentation_tests.rs"]
+mod production_tests;
 
 const CHUNK_BYTES: usize = 24_000;
 const FIRST_TEXT_BYTES: usize = 60_000;
@@ -444,6 +449,8 @@ fn next_step(
             "fortress_explain",
             "Inspect the exact terminal evidence and its observation anchor; a retained census does not prove a fresh or stable count.",
         )
+    } else if let Some(next) = production::prepared_review_next(result, reference, session) {
+        return next;
     } else if result["stage"] == "production"
         && result["mode"] == "control"
         && result["child"]["frontier"]["next_ready"].is_number()
@@ -788,6 +795,15 @@ pub(super) fn packet(
     } else {
         manager::observed_plan(&result)
     };
+    let mut affordances: Vec<_> = manager_offer.map(|request| json!({
+        "intent":"appoint_vacant_manager", "request":request,
+        "unit_id":result["child"]["observation"]["unit_id"],
+        "histfig_id":result["child"]["observation"]["histfig_id"],
+        "capability":"configure_production", "risk":"irreversible",
+        "confirmation_required":true, "grants_authority":false,
+        "complete_evidence_pointer":"/result/child/observation",
+    })).into_iter().collect();
+    affordances.extend(production::affordances(&result, &reference));
     let mut built = turn
         .briefing(json!({
             "profile":"native-resource-project",
@@ -840,14 +856,7 @@ pub(super) fn packet(
             "publications":publications,
             "confirmations":pending.into_iter().collect::<Vec<_>>(),
         }))
-        .affordances(manager_offer.map(|request| json!({
-            "intent":"appoint_vacant_manager", "request":request,
-            "unit_id":result["child"]["observation"]["unit_id"],
-            "histfig_id":result["child"]["observation"]["histfig_id"],
-            "capability":"configure_production", "risk":"irreversible",
-            "confirmation_required":true, "grants_authority":false,
-            "complete_evidence_pointer":"/result/child/observation",
-        })).into_iter().collect())
+        .affordances(affordances)
         .recommendations(session.map_or_else(Vec::new, |id| {
             next_step(&result, &reference, id, has_stock_watch)
         }))

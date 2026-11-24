@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Resume original prepared work through its parent project
+
+- Recommend `review_prepared` when the production child retains exactly one
+  eligible undispatched original labor or finite-order preparation and its
+  original review was lost or withdrawn.
+- Share the strict original-step selector with the combined production profile.
+  Require matching original identity, current source and floor, unexpired
+  lifetime, settled clocks and independent family authority.
+- Keep the existing current confirmation ahead of recovery advice, and require
+  a separate new confirmation after re-review. Planning never repeats native
+  preparation, changes the original key or renews its deadline.
+- Add four parent regression groups and thirteen shared-helper refusal cases.
+  Independent source review completed; compilation, formatting and execution
+  remain unavailable because the executor is down.
+
 ## Unreleased — Publish ordinary clocked portfolios after pre-plan recovery
 
 - Enable the first multi-order portfolio after pre-plan restart in ordinary
