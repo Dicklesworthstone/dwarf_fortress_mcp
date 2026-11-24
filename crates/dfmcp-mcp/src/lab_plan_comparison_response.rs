@@ -69,6 +69,16 @@ pub(super) fn finish(
         || resource_production
         || resource_room
         || production_reserve;
+    let owned_progression = payload["kind"] == "compare_candidates"
+        && payload["schema"] == "dfmcp.plan-comparison/3"
+        && payload["version"] == 3
+        && payload["forecast_scope"] == "current_stage"
+        && payload["progression_scope"] == "owned_session";
+    if payload["schema"] == "dfmcp.plan-comparison/3" && !owned_progression {
+        return Err(invariant(
+            "owned-session forecast publication lost its explicit current-stage scope",
+        ));
+    }
     if !payload.is_object()
         || payload["ok"] != true
         || payload["anchor"] != projection.anchor
@@ -214,6 +224,34 @@ pub(super) fn finish(
         "max_actions": projection.budget.max_actions,
         "maximum_response_bytes": maximum,
     });
+    let mut briefing = json!({
+        "runtime": "laboratory_reference_world",
+        "adapter": "memory",
+        "paused": projection.paused,
+        "objectives": objectives,
+        "comparison_storage": "stateless",
+        "canonical_time_advanced": 0,
+        "candidate_predictions_grant_authority": false,
+        "recovered_work_observation": "retained_not_reobserved",
+        "live_game_qualification": false,
+    });
+    if owned_progression {
+        briefing["forecast_progression_scope"] = json!("owned_session");
+        briefing["forecast_recovered_observation"] = json!("discarded_copies_only");
+        briefing["forecast_live_action_order"] =
+            json!("existing_session_commit_order_then_candidate");
+    }
+    let (assumptions, limits) = if owned_progression {
+        (
+            "Authenticated current-session live deferred work and copied recovered monitors share the real foreground cadence on discarded laboratory forks.",
+            "Other sessions' deferred dispatch and future project stages are excluded. Predicted outcomes are not observed effect proof or commit success.",
+        )
+    } else {
+        (
+            "Assumes deterministic laboratory effects, no other agents, and only this candidate's deferred dispatch; physical jobs advance.",
+            "Other plans' deferred steps are excluded. Outcomes and commit success are unproven.",
+        )
+    };
     let turn = AgentTurnBuilder::new(
         "fortress.plan",
         if selecting { AgentPhase::Propose } else { AgentPhase::Compare },
@@ -224,24 +262,14 @@ pub(super) fn finish(
         .anchor(projection.anchor.clone())
         .continuity(ContinuityStatus::Partial, Some(projection.anchor.clone()), None, None)
         .profile(ObservationProfile::Tactical)
-        .briefing(json!({
-            "runtime": "laboratory_reference_world",
-            "adapter": "memory",
-            "paused": projection.paused,
-            "objectives": objectives,
-            "comparison_storage": "stateless",
-            "canonical_time_advanced": 0,
-            "candidate_predictions_grant_authority": false,
-            "recovered_work_observation": "retained_not_reobserved",
-            "live_game_qualification": false,
-        }))
+        .briefing(briefing)
         .active_work(active_work)
         .recommendations(recommendations)
         .uncertainty(vec![uncertainty(
             "candidate-forecast-model",
             "predicted",
-            "Assumes deterministic laboratory effects, no other agents, and only this candidate's deferred dispatch; physical jobs advance.",
-            "Other plans' deferred steps are excluded. Outcomes and commit success are unproven.",
+            assumptions,
+            limits,
             Some("fortress.observe"),
             json!({"session_id": projection.session_id}),
         )])

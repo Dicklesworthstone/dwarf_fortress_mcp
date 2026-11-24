@@ -89,6 +89,90 @@ anchor makes the old selection stale: compare again. Editing the candidate's
 summary, source or digest is refused. Possession of a selection does not prove
 that a comparison previously ran and grants no authority.
 
+## Include other committed work in the session
+
+Use version 3 with both `forecast_scope: "current_stage"` and
+`progression_scope: "owned_session"` when the candidate must compete with work
+this session has already committed:
+
+```json
+{
+  "template": "compare_candidates",
+  "version": 3,
+  "forecast_scope": "current_stage",
+  "progression_scope": "owned_session",
+  "horizon_ticks": 1000,
+  "candidates": [
+    {
+      "key": "ordinary",
+      "blueprint": {
+        "template": "production",
+        "quotas": [{"item": "DRINK", "minimum": 60}]
+      }
+    },
+    {
+      "key": "conditional",
+      "blueprint": {
+        "template": "production",
+        "quotas": [{"item": "DRINK", "minimum": 60}],
+        "orders": "dependency_preserving_v1"
+      }
+    }
+  ]
+}
+```
+
+Each candidate is committed only on its private model fork. The evaluator then
+uses the same shared progression engine as `forecast_originals`, including all
+current-session open original actions in commit order and every authenticated
+unfinished recovered peer. Existing deferred work may consume workers or inputs,
+produce resources, or change the modeled pause state. Recovered monitors retain
+their original observation cadence, deadlines and post-recovery stability;
+they are passive monitors and gain no dispatch handles.
+
+This matters before selecting a plan. A candidate that works in isolation can
+finish later, fail an original deadline, or become infeasible when an existing
+deferred order consumes the same finite inputs. Version 3 models those committed
+competitors instead of assuming that their undispatched steps remain idle.
+Every alternative begins from the same real source and the same independently
+verified peer custody. The comparison changes no actual action, recovered
+monitor, pending review, original proof, reserve endpoint or game tick.
+
+Live peers require their original commit receipts and exact action membership.
+Recovered peers require complete original custody and their authentic active
+monitors. Missing, foreign, interrupted or ambiguous peer custody refuses the
+comparison; the model cannot omit that work or manufacture a replacement
+monitor. The complete competing action domain, source/custody bytes, predicates,
+polls, advances and cloned worlds share the comparison's existing aggregate
+allowances and one wall deadline. A larger number of candidates does not renew
+those allowances.
+
+The result uses `dfmcp.plan-comparison/3` and records the requested scopes.
+Its `owned_work` field names the authenticated live and recovered originals,
+their complete action counts, retained custody cost and dispatch order.
+Each candidate retains that census as `competing_work`, plus
+`shared_progression_work` from the real foreground model. The aggregate
+`forecast_work` includes competing steps for every alternative, forked retained
+custody records and bytes, and a conservative predicate-node visit bound.
+Same-tick recovered observations immediately after the hypothetical commit are
+counted separately from later progression polls.
+
+The candidate's original goal, verified actions, physical quiet and exact reserve
+frontier still determine its outcome; a competitor's completion is not the
+candidate's success. Historical reserve evidence cannot be repaired by later
+stock. Current effect permissions and expiry are checked when the private model
+reaches a deferred dispatch. The first candidate commit also refreshes copied
+recovered observations at the same tick, so its effects cannot bypass recovered
+failure or identity checks.
+
+Version 3 covers the current executable candidate stage. It does not compile
+future resource or room stages and does not poll deferred actions owned by
+another session; existing physical world jobs still evolve on the fork.
+Version 2 retains its separate complete-project model. Versions 1 and 2 retain
+their original progression assumptions. The emitted `select_candidate` request
+remains version 1: selection freshly prepares the chosen current stage, and
+actual effects still need an explicit Commit.
+
 ## Forecast the complete resource or room project
 
 Version 1 retains its current reviewed-stage behavior. To compare the original
@@ -260,9 +344,9 @@ frontier; a transport acknowledgment or completed action alone is insufficient.
 | `horizon_tick` | The original plan's final obligation deadline, unchanged by comparison. |
 | `simulation_horizon_tick` | Source game tick plus the requested common `horizon_ticks`. |
 | `simulation_horizon_reached` / `simulation_horizon_truncated` | Whether evaluation reached its cap and whether that cap stopped incomplete work before its original deadline. |
-| `resolution_ticks` | The common nominal maximum sampling stride for the candidate set; sealed deadlines and stability windows can require shorter advances. |
+| `resolution_ticks` | In versions 1 and 2, the common nominal maximum sampling stride; sealed deadlines and stability windows can require shorter advances. Version 3 uses the shared foreground schedule instead. |
 | `sampling_policy` | The rule that inserts original obligation deadlines and final cadence-spaced stability observations into the nominal schedule. |
-| `simulation_slices` | Actual attempted model advances for this candidate, including its separate reserve forecast. |
+| `simulation_slices` | Attempted model rounds for this candidate. Version 3 includes zero-time foreground polling and observes a reserve endpoint on the same shared fork. |
 | `blocked_by_pause` | The forecast cannot progress its outstanding work while the modeled world remains paused. |
 
 Candidates may finish early. No candidate simulates beyond the common horizon,
@@ -306,12 +390,12 @@ If no candidate meets these conditions, `recommended_candidate` is null and
 score or automatic effect dispatch.
 
 These are forecasts of the deterministic laboratory reference world under the
-assumption that no other agent acts. Existing physical jobs evolve on each
-fork, but only the selected candidate's deferred action chain is polled and
-dispatched. Other retained plans' deferred actions are not dispatched on these
-forks. Recommendations therefore do not model a complete joint schedule of
-all session plans. The actual adapter, clock, pending plan, action book and
-query-monitor roots remain unchanged by comparison.
+assumption that no other agent acts. In versions 1 and 2, existing physical jobs
+evolve on each fork, but only the candidate's own deferred action chain is polled
+and dispatched. Version 3 explicitly includes this session's authenticated live
+and recovered competing work as described above. Deferred dispatch owned by
+other sessions remains outside every profile. The actual adapter, clock, pending
+plan, action book and query-monitor roots remain unchanged by comparison.
 
 ## Bounds, current authority and publication
 
@@ -328,10 +412,10 @@ publication. Opening another candidate does not reset that deadline.
 | Alternatives | 2–4 |
 | Candidate key | 1–64 ASCII letters, digits, underscores or hyphens |
 | Candidate summary | 4,096 UTF-8 bytes |
-| Forecast source forks, including reserve forks (version 1) | 8 across the set |
+| Forecast source forks (versions 1 and 3) | 8 across the set; version 1 includes separate reserve forks, version 3 uses two source clones per candidate |
 | Simulation slices | 400 across the set |
 | Simulated ticks | Combined total at most the session's `max_game_ticks` |
-| Compiled action count | Combined total at most the session's `max_actions` |
+| Compiled action count | Combined total at most the session's `max_actions`; version 3 also charges all competing live/recovered steps for each candidate |
 | Action polls | At most `max_actions * 400` across the set |
 | Copied source records / canonical bytes | Combined fork totals within `max_entities` / `max_bytes` |
 | Complete encoded response | At most `min(max_bytes, max_output_tokens * 4)` bytes |
@@ -342,7 +426,10 @@ The common horizon itself must fit the game-tick budget. For example, granting
 `forecast_work` reports actual candidate, fork, action, poll, slice and
 simulated-tick costs. `actual_game_ticks_advanced` remains zero. Copied source
 bytes measure canonical snapshot work; retained adapter actions, plans,
-checkpoints and journal are not a measured heap-byte total.
+checkpoints and journal are not a measured heap-byte total. Version 3 additionally
+charges the canonical retained original and recovered-monitor custody of every
+copied candidate/peer set against those same record and byte allowances. Its
+aggregate predicate-work ceiling is 4,000,000 conservative node visits.
 
 Deadline and stability observations consume the same slice allowance as ordinary
 advances. A single-plan forecast also has a hard 400-advance ceiling covering its

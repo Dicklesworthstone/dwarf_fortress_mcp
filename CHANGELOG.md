@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Compare candidates against the session's committed work
+
+- Add opt-in comparison version 3 with `forecast_scope: "current_stage"`
+  and `progression_scope: "owned_session"`. Privately commit each candidate
+  and reuse the original-forecast scheduler for authenticated live deferred
+  actions and unfinished recovered monitors.
+- Preserve finite worker/material contention, modeled pause/resume, original
+  deadlines, recovered observation cadence and exact reserve frontiers.
+  Refresh recovered peers at the candidate's commit tick before early success.
+- Charge all alternatives, competing work, source/custody clones, predicates,
+  polls and time against one aggregate allowance. Missing peer custody refuses;
+  comparisons publish no actual effect, proof, pending review or game time.
+- Keep versions 1 and 2 and fresh version-1 selection semantics unchanged.
+  Add six model/grammar and two public-route regression groups plus schema
+  coverage. Schema checks, scoped formatting and source review pass; new Rust
+  execution and full MCP/native/live qualification remain open.
+
 ## Unreleased — Drive standalone production from current clock guidance
 
 - Consume the live Runtime's exact new-interval and retained-Prepared offers

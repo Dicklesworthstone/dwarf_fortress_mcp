@@ -362,13 +362,29 @@ fn execute_owned(
     check(&current, started)?;
     let mut selected = None;
     let payload = match request {
-        plan_comparison::Request::Compare(_) => plan_comparison::compare(
-            &session.adapter,
-            &current,
-            IntentId::new(rid),
-            request,
-            started,
-        )?,
+        plan_comparison::Request::Compare(_) => {
+            if plan_comparison::uses_owned_progression(request) {
+                let owned = plan_comparison::owned_progression::OwnedWork::admit(
+                    session, &current, started,
+                )?;
+                plan_comparison::compare_with_owned_work(
+                    &session.adapter,
+                    &current,
+                    IntentId::new(rid),
+                    request,
+                    started,
+                    Some(&owned),
+                )?
+            } else {
+                plan_comparison::compare(
+                    &session.adapter,
+                    &current,
+                    IntentId::new(rid),
+                    request,
+                    started,
+                )?
+            }
+        }
         plan_comparison::Request::Select(_) => {
             let snapshot = session.adapter.snapshot();
             let source_work =

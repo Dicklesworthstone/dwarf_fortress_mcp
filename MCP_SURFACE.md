@@ -600,6 +600,18 @@ current-stage comparison behavior and shape remain unchanged.
 Version-two selection still emits an ordinary version-one selection of only
 the current executable stage; future model plans never become effect authority.
 
+An explicit `compare_candidates` version 3 requires
+`forecast_scope: "current_stage"` and `progression_scope: "owned_session"`.
+It privately commits each candidate, then uses the original-forecast shared
+progression engine to poll all current-session open originals and authenticate
+every unfinished recovered peer. Competing deferred actions, finite resources,
+pause changes and recovered cadence participate in each prediction. The same
+aggregate source/custody, action, predicate, poll, tick and wall allowances apply
+across alternatives. Missing peer custody refuses the comparison. The response
+uses `dfmcp.plan-comparison/3`; selection remains version 1 and prepares only the
+current candidate stage. No canonical work, monitor, proof or time is changed,
+and future project stages or another session's deferred dispatch are excluded.
+
 Comparison preserves the pending plan and exposes current game work, baselines,
 and watches. Each prepared candidate includes a source-bound selection request.
 Selection checks the exact current anchor and candidate contents, recompiles an

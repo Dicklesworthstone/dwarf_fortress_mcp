@@ -35,6 +35,13 @@ pub(crate) struct ForecastBudget {
     project_mode: bool,
     project_stages: u64,
     current_project_stages: u64,
+    owned_progression: bool,
+    competing_actions: u64,
+    custody_records: u64,
+    custody_bytes: u64,
+    forked_custody_records: u64,
+    forked_custody_bytes: u64,
+    predicate_nodes: u64,
 }
 
 impl ForecastBudget {
@@ -71,6 +78,13 @@ impl ForecastBudget {
             project_mode: false,
             project_stages: 0,
             current_project_stages: 0,
+            owned_progression: false,
+            competing_actions: 0,
+            custody_records: 0,
+            custody_bytes: 0,
+            forked_custody_records: 0,
+            forked_custody_bytes: 0,
+            predicate_nodes: 0,
         };
         result.check(current)?;
         Ok(result)
@@ -169,7 +183,7 @@ impl ForecastBudget {
         Ok(work)
     }
 
-    pub(super) fn begin_candidate(
+    pub(crate) fn begin_candidate(
         &mut self,
         snapshot: &WorldSnapshot,
         plan: &PreparedPlan,
@@ -183,13 +197,96 @@ impl ForecastBudget {
             ));
         }
         let actions = self.actions.saturating_add(plan.steps.len() as u64);
-        if self.candidates >= MAX_CANDIDATES || actions > u64::from(current.budget.max_actions) {
+        if self.candidates >= MAX_CANDIDATES
+            || actions.saturating_add(self.competing_actions)
+                > u64::from(current.budget.max_actions)
+        {
             return Err(exhausted(
                 "comparison exceeds its aggregate candidate or action-step budget",
             ));
         }
         self.candidates += 1;
         self.actions = actions;
+        Ok(())
+    }
+
+    /// Each candidate copies the same authenticated peer custody onto its own
+    /// discarded world. Charge the complete competing action domain per model
+    /// and retain its canonical custody footprint for every source clone/read.
+    pub(crate) fn admit_owned_candidate(
+        &mut self,
+        actions: u64,
+        custody_records: u64,
+        custody_bytes: u64,
+        current: &OperationContext,
+    ) -> Result<()> {
+        self.check(current)?;
+        let competing = self.competing_actions.saturating_add(actions);
+        if self.actions.saturating_add(competing) > u64::from(current.budget.max_actions)
+            || custody_records > u64::from(current.budget.max_entities)
+            || custody_bytes > current.budget.max_bytes.min(16 * 1024 * 1024)
+        {
+            return Err(exhausted(
+                "owned candidate forecasts exceed their complete competing action or custody budget",
+            ));
+        }
+        self.owned_progression = true;
+        self.competing_actions = competing;
+        self.custody_records = custody_records;
+        self.custody_bytes = custody_bytes;
+        Ok(())
+    }
+
+    pub(crate) fn inspect_owned_source(
+        &self,
+        snapshot: &WorldSnapshot,
+        current: &OperationContext,
+    ) -> Result<()> {
+        self.check(current)?;
+        let anchor = snapshot.anchor();
+        if !self.owned_progression
+            || anchor.fortress_id != self.current.anchor.fortress_id
+            || anchor.cursor.epoch != self.current.anchor.cursor.epoch
+            || anchor.cursor.sequence < self.current.anchor.cursor.sequence
+            || anchor.tick < self.current.anchor.tick
+            || anchor.tick.0 > self.horizon_tick
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "owned candidate model source is outside its original epoch and common horizon",
+            ));
+        }
+        let source = self.inspect_source(snapshot, current)?;
+        let records = source["records"]
+            .as_u64()
+            .ok_or_else(|| exhausted("model source record accounting is missing"))?;
+        let bytes = source["canonical_bytes"]
+            .as_u64()
+            .ok_or_else(|| exhausted("model source byte accounting is missing"))?;
+        if records.saturating_add(self.custody_records) > u64::from(current.budget.max_entities)
+            || bytes.saturating_add(self.custody_bytes)
+                > current.budget.max_bytes.min(16 * 1024 * 1024)
+        {
+            return Err(exhausted(
+                "owned candidate model exceeds its complete current source and retained custody allowance",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn before_predicates(
+        &mut self,
+        nodes: u64,
+        current: &OperationContext,
+    ) -> Result<()> {
+        self.check(current)?;
+        let total = self.predicate_nodes.saturating_add(nodes);
+        if total > 4_000_000 {
+            return Err(exhausted(
+                "owned candidate forecasts exceed their shared predicate-work bound",
+            ));
+        }
+        self.predicate_nodes = total;
         Ok(())
     }
 
@@ -279,13 +376,17 @@ impl ForecastBudget {
         .into_iter()
         .fold(0_u64, |total, count| total.saturating_add(count as u64));
         let forked_records = self.forked_records.saturating_add(records);
+        let forked_custody_records = self
+            .forked_custody_records
+            .saturating_add(self.custody_records);
         let maximum_forks = if self.project_mode {
             MAX_PROJECT_FORKS
         } else {
             MAX_SOURCE_FORKS
         };
         if self.source_forks >= maximum_forks
-            || forked_records > u64::from(current.budget.max_entities)
+            || forked_records.saturating_add(forked_custody_records)
+                > u64::from(current.budget.max_entities)
         {
             return Err(exhausted(
                 "comparison exceeds its aggregate source-fork record budget",
@@ -303,7 +404,8 @@ impl ForecastBudget {
             )
         })?;
         let forked_bytes = self.forked_bytes.saturating_add(bytes);
-        if forked_bytes > current.budget.max_bytes {
+        let forked_custody_bytes = self.forked_custody_bytes.saturating_add(self.custody_bytes);
+        if forked_bytes.saturating_add(forked_custody_bytes) > current.budget.max_bytes {
             return Err(exhausted(
                 "comparison exceeds its aggregate forked-source byte budget",
             ));
@@ -311,6 +413,8 @@ impl ForecastBudget {
         self.source_forks += 1;
         self.forked_records = forked_records;
         self.forked_bytes = forked_bytes;
+        self.forked_custody_records = forked_custody_records;
+        self.forked_custody_bytes = forked_custody_bytes;
         Ok(())
     }
 
@@ -335,7 +439,7 @@ impl ForecastBudget {
         self.ticks += ticks;
     }
 
-    pub(super) fn before_poll(&mut self, current: &OperationContext) -> Result<()> {
+    pub(crate) fn before_poll(&mut self, current: &OperationContext) -> Result<()> {
         self.check(current)?;
         let maximum =
             u64::from(current.budget.max_actions).saturating_mul(super::MAX_FORECAST_SLICES);
@@ -379,6 +483,22 @@ impl ForecastBudget {
             work["project_stages"] = json!(self.project_stages);
             work["limits"]["stages_per_project"] = json!(MAX_PROJECT_STAGES);
             work["limits"]["source_forks"] = json!(MAX_PROJECT_FORKS);
+        }
+        if self.owned_progression {
+            work["progression_scope"] = json!("owned_session");
+            work["competing_action_steps"] = json!(self.competing_actions);
+            work["forked_retained_custody_records"] = json!(self.forked_custody_records);
+            work["forked_retained_custody_bytes"] = json!(self.forked_custody_bytes);
+            work["predicate_node_visits_bound"] = json!(self.predicate_nodes);
+            work["limits"]["complete_candidate_and_competing_steps"] =
+                json!(self.current.budget.max_actions);
+            work["limits"]["predicate_node_visits_bound"] = json!(4_000_000);
+            work["source_accounting"] = json!(
+                "canonical world and exact retained original/monitor custody copied for each discarded candidate; combined source and custody totals share negotiated record/byte limits, not a measured heap-size total"
+            );
+            work["slice_accounting"] = json!(
+                "attempted shared foreground observation rounds, including zero-time polls; simulated_game_ticks counts only successful advances"
+            );
         }
         work
     }

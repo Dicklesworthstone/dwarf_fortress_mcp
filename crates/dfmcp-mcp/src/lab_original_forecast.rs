@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use super::{LabSession, anchor_json, selected_plan_wait::SelectedPlanWait};
 
 #[path = "original_forecast_model.rs"]
-mod model;
+pub(super) mod model;
 
 #[derive(Deserialize)]
 struct Selector {

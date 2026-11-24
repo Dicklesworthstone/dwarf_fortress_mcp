@@ -1,5 +1,48 @@
 # Implementation Status
 
+## Unreleased — Candidate decisions account for owned competing work
+
+Laboratory `fortress_plan` comparison version 3 closes the gap between
+precommit candidate forecasts and the session's already committed deferred
+work. The caller explicitly selects `current_stage` and `owned_session`.
+Each alternative is compiled at one real source, committed only on a private
+fork, then evaluated by the same scheduler used for original-goal forecasts.
+Existing live actions run in their retained commit order before candidate
+actions; authentic recovered monitors retain their own observation cadence,
+deadlines and post-recovery stability. Other sessions' deferred actions and
+future project stages remain outside this generation.
+
+Admission checks the complete original receipts, action membership, sealed
+plans and recovered monitor custody. Missing or inconsistent custody refuses
+the comparison. A same-tick observation of copied recovered peers follows each
+hypothetical candidate commit, including before an immediately completed
+candidate could return. Shared progress preserves finite resource/workforce
+contention, deferred pause and resume, exact original reserve endpoints,
+current effect authority and modeled expiry. Only the candidate's own goal,
+verified actions and physical quiet determine its outcome.
+
+The report exposes authenticated `owned_work`, per-candidate competing work
+and shared scheduler costs. Candidate and competing steps, two source clones
+per candidate, canonical source plus retained custody, conservative predicate
+visits, polling rounds, simulated ticks and the public request's wall deadline
+share aggregate limits. Budget or final publication failure leaves canonical
+world, pending review, originals, monitors and proofs unchanged. Version 1/2
+behavior and the version-1 fresh selection/normal Commit path remain intact.
+
+Six new actual-model/grammar groups compare deferred pause/resume and recovered
+cadence with real foreground progression, check same-tick recovered failure,
+exact reserves and aggregate bounds. Two public facade groups cover live
+custody, pending-state/output refusal, selection and later actual commit/wait.
+The schema suite passes 12 accepted and 71 rejected cases; Python syntax,
+scoped Rust formatting and independent source review pass. These new Rust
+regressions have not executed: locked/offline Cargo metadata refuses because the pinned `fastmcp-core` Git
+revision is absent from the local cache. Existing partial artifacts also do not
+supply every locked compiler/dependency identity; no substitute graph was used. No full Rust, MCP/stdio, native,
+live-game or admission qualification is inferred.
+
+Owners: `df-lab-plan-comparison-c9r` and
+`df-lab-joint-original-forecast-c2s` (in progress).
+
 ## Unreleased — Standalone production follows the current clock owner
 
 The standalone combined-production Agent Turn now consumes the same closed

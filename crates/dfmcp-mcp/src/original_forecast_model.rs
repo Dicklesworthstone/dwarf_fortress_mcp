@@ -29,13 +29,53 @@ mod recovery;
 pub(super) use recovery::RecoveredOriginal;
 
 #[derive(Clone)]
-pub(super) struct Original {
-    pub(super) requested: Digest32,
-    pub(super) actual: Digest32,
-    pub(super) actions: Vec<ActionId>,
-    pub(super) reserve_until: Option<u64>,
-    pub(super) reserve_observation: Option<PredicateTruth>,
-    pub(super) can_continue: bool,
+pub(crate) struct Original {
+    pub(crate) requested: Digest32,
+    pub(crate) actual: Digest32,
+    pub(crate) actions: Vec<ActionId>,
+    pub(crate) reserve_until: Option<u64>,
+    pub(crate) reserve_observation: Option<PredicateTruth>,
+    pub(crate) can_continue: bool,
+}
+
+/// A containing comparison can narrow aggregate work without introducing a
+/// second observation scheduler. Each callback precedes the named model work;
+/// `advanced` records only successful private game-time advancement.
+pub(crate) trait ForecastMeter {
+    fn before_fork(&mut self, _snapshot: &WorldSnapshot) -> Result<()> {
+        Ok(())
+    }
+    fn inspect_source(&mut self, _snapshot: &WorldSnapshot) -> Result<()> {
+        Ok(())
+    }
+    fn before_goal_evaluation(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn before_round(&mut self, _ticks: u64) -> Result<()> {
+        Ok(())
+    }
+    fn advanced(&mut self, _ticks: u64) {}
+    fn before_action_poll(&mut self, _step: &dfmcp_intent::PlanStep) -> Result<()> {
+        Ok(())
+    }
+    fn after_action_poll(&mut self, _receipt: &dfmcp_adapter::ActionReceipt) {}
+    fn before_recovered_observation(&mut self, _polls: u64, _nodes: u64) -> Result<()> {
+        Ok(())
+    }
+}
+
+struct OriginalMeter;
+impl ForecastMeter for OriginalMeter {}
+
+fn inspect_model_source(
+    snapshot: &WorldSnapshot,
+    actions: u64,
+    bytes: u64,
+    inspect: &mut impl FnMut(&WorldSnapshot, u64, u64) -> Result<()>,
+    meter: &mut impl ForecastMeter,
+) -> Result<()> {
+    meter.inspect_source(snapshot)?;
+    inspect(snapshot, actions, bytes)
 }
 
 fn error(code: ErrorCode, message: &str) -> DfmcpError {
@@ -112,9 +152,12 @@ fn tracked_active_producer(
 
 /// A conservative per-frontier bound, also charged by facade goal inspection.
 /// Shape validation precedes complexity traversal and cloning monitor state.
-pub(super) fn recovered_predicate_node_bound(carried: &[CarriedStep]) -> Result<u64> {
+pub(crate) fn recovered_predicate_node_bound(carried: &[CarriedStep]) -> Result<u64> {
     let mut nodes = 0u64;
-    for row in carried.iter().filter(|row| !row.is_final() && row.state == "dispatched") {
+    for row in carried
+        .iter()
+        .filter(|row| !row.is_final() && row.state == "dispatched")
+    {
         row.proof.validate_shape()?;
         nodes = nodes.saturating_add(row.proof.complexity() as u64);
         if let Some(failure) = &row.failure {
@@ -122,7 +165,10 @@ pub(super) fn recovered_predicate_node_bound(carried: &[CarriedStep]) -> Result<
             nodes = nodes.saturating_add(failure.complexity() as u64);
         }
         if nodes > 4_000_000 {
-            return Err(error(ErrorCode::BudgetExceeded, "recovered forecast exceeds its predicate-work bound"));
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                "recovered forecast exceeds its predicate-work bound",
+            ));
         }
     }
     Ok(nodes)
@@ -136,6 +182,7 @@ fn observe_recovered(
     action_polls: u64,
     recovered_polls: &mut u64,
     predicate_nodes: &mut u64,
+    meter: &mut impl ForecastMeter,
 ) -> Result<()> {
     let count = carried.iter().filter(|row| !row.is_final()).count() as u64;
     if count == 0 {
@@ -143,12 +190,20 @@ fn observe_recovered(
     }
     check(context, started)?;
     let next_polls = recovered_polls.saturating_add(count);
-    let next_nodes = predicate_nodes.saturating_add(recovered_predicate_node_bound(carried)?);
+    let nodes = recovered_predicate_node_bound(carried)?;
+    let next_nodes = predicate_nodes.saturating_add(nodes);
     if action_polls.saturating_add(next_polls) > MAX_POLLS || next_nodes > 4_000_000 {
-        return Err(error(ErrorCode::BudgetExceeded, "recovered forecast exceeds its shared observation-work bound"));
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "recovered forecast exceeds its shared observation-work bound",
+        ));
     }
-    let observation_context = OperationContext { anchor: fork.snapshot().anchor(), ..context.clone() };
+    let observation_context = OperationContext {
+        anchor: fork.snapshot().anchor(),
+        ..context.clone()
+    };
     observation_context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+    meter.before_recovered_observation(count, nodes)?;
     let next = recovered_step_progress::observe(fork.snapshot(), carried)?;
     *carried = next;
     *recovered_polls = next_polls;
@@ -304,10 +359,68 @@ pub(super) fn forecast(
     context: &OperationContext,
     horizon_ticks: u64,
     started: Instant,
+    projects: Option<Vec<Project>>,
+    carried: Vec<CarriedStep>,
+    inspect: impl FnMut(&WorldSnapshot, u64, u64) -> Result<()>,
+    evaluate: impl FnMut(Digest32, &WorldSnapshot) -> Result<(PredicateTruth, PredicateTruth)>,
+) -> Result<Value> {
+    forecast_metered(
+        adapter,
+        originals,
+        tracked,
+        context,
+        horizon_ticks,
+        started,
+        projects,
+        carried,
+        inspect,
+        evaluate,
+        &mut OriginalMeter,
+    )
+}
+
+/// Proposed current-stage candidates reuse the same owned progression after
+/// their separate private commit. Future project stages are deliberately not
+/// admitted by this comparison generation.
+pub(crate) fn forecast_current_stage_metered(
+    adapter: &MemoryAdapter,
+    originals: &[Original],
+    tracked: &[ActionId],
+    context: &OperationContext,
+    horizon_ticks: u64,
+    started: Instant,
+    carried: Vec<CarriedStep>,
+    inspect: impl FnMut(&WorldSnapshot, u64, u64) -> Result<()>,
+    evaluate: impl FnMut(Digest32, &WorldSnapshot) -> Result<(PredicateTruth, PredicateTruth)>,
+    meter: &mut impl ForecastMeter,
+) -> Result<Value> {
+    forecast_metered(
+        adapter,
+        originals,
+        tracked,
+        context,
+        horizon_ticks,
+        started,
+        None,
+        carried,
+        inspect,
+        evaluate,
+        meter,
+    )
+}
+
+fn forecast_metered(
+    adapter: &MemoryAdapter,
+    originals: &[Original],
+    tracked: &[ActionId],
+    context: &OperationContext,
+    horizon_ticks: u64,
+    started: Instant,
     mut projects: Option<Vec<Project>>,
     mut carried: Vec<CarriedStep>,
     mut inspect: impl FnMut(&WorldSnapshot, u64, u64) -> Result<()>,
     mut evaluate: impl FnMut(Digest32, &WorldSnapshot) -> Result<(PredicateTruth, PredicateTruth)>,
+    meter: &mut impl ForecastMeter,
 ) -> Result<Value> {
     check(context, started)?;
     if adapter.snapshot().anchor() != context.anchor {
@@ -394,7 +507,10 @@ pub(super) fn forecast(
     let mut recovered_keys = BTreeSet::new();
     for row in &carried {
         let step = row.work_step.as_ref().ok_or_else(|| {
-            error(ErrorCode::Conflict, "recovered progression lost its sealed step")
+            error(
+                ErrorCode::Conflict,
+                "recovered progression lost its sealed step",
+            )
         })?;
         if row.step != Some(step.id)
             || !recovered_keys.insert((row.plan_digest, step.id))
@@ -402,21 +518,39 @@ pub(super) fn forecast(
             || row.recorded_state != "dispatched"
             || row.observation_error.is_some()
             || row.monitor.as_ref().is_none_or(|monitor| {
-                !matches!(monitor.status(), Some(dfmcp_intent::ObligationStatus::Active { .. }))
+                !matches!(
+                    monitor.status(),
+                    Some(dfmcp_intent::ObligationStatus::Active { .. })
+                )
             })
-            || !matches!(dfmcp_intent::inspect_effect_work(
-                adapter.snapshot(), &step.action, &step.idempotency_key, true,
-            )?, EffectWorkState::Active { .. } | EffectWorkState::Quiescent { .. })
+            || !matches!(
+                dfmcp_intent::inspect_effect_work(
+                    adapter.snapshot(),
+                    &step.action,
+                    &step.idempotency_key,
+                    true,
+                )?,
+                EffectWorkState::Active { .. } | EffectWorkState::Quiescent { .. }
+            )
         {
-            return Err(error(ErrorCode::Conflict, "recovered forecast requires unique admitted already-dispatched monitors"));
+            return Err(error(
+                ErrorCode::Conflict,
+                "recovered forecast requires unique admitted already-dispatched monitors",
+            ));
         }
     }
     recovered_predicate_node_bound(&carried)?;
-    let selected_recovered: BTreeSet<_> = projects.as_ref().into_iter()
-        .flatten().flat_map(Project::recovered_originals)
-        .map(RecoveredOriginal::original).collect();
-    let recovered_peer_steps = carried.iter()
-        .filter(|row| !selected_recovered.contains(&row.plan_digest)).count();
+    let selected_recovered: BTreeSet<_> = projects
+        .as_ref()
+        .into_iter()
+        .flatten()
+        .flat_map(Project::recovered_originals)
+        .map(RecoveredOriginal::original)
+        .collect();
+    let recovered_peer_steps = carried
+        .iter()
+        .filter(|row| !selected_recovered.contains(&row.plan_digest))
+        .count();
     let mut all_actions = selected.clone();
     for original in originals {
         all_actions.extend(&original.actions);
@@ -431,7 +565,10 @@ pub(super) fn forecast(
     }
     // Recovered peers constrain ordinary current-stage waits as well as full
     // projects, so their observations share the same complete action domain.
-    let complete_steps = all_actions.len().saturating_add(recovered_steps).saturating_add(recovered_peer_steps);
+    let complete_steps = all_actions
+        .len()
+        .saturating_add(recovered_steps)
+        .saturating_add(recovered_peer_steps);
     if complete_steps > MAX_TRACKED
         || complete_steps > context.budget.max_actions as usize
         || complete_steps > context.budget.max_entities as usize
@@ -447,7 +584,8 @@ pub(super) fn forecast(
     let mut stage_reviews_deferred = 0u64;
     let mut project_order: Vec<_> = (0..originals.len()).collect();
     project_order.sort_by_key(|index| originals[*index].actual);
-    inspect(adapter.snapshot(), 0, 0)?;
+    inspect_model_source(adapter.snapshot(), 0, 0, &mut inspect, meter)?;
+    meter.before_fork(adapter.snapshot())?;
     let mut fork = adapter.clone();
     let mut samples: Vec<_> = originals
         .iter()
@@ -472,6 +610,7 @@ pub(super) fn forecast(
         }
         let mut outcomes = Vec::with_capacity(originals.len());
         for (index, original) in originals.iter().enumerate() {
+            meter.before_goal_evaluation()?;
             let (mut goal, stage) = evaluate(original.actual, fork.snapshot())?;
             if let Some(projects) = &mut projects {
                 goal = projects[index].goal_truth(fork.snapshot())?;
@@ -481,9 +620,14 @@ pub(super) fn forecast(
                 samples[index] = Some(goal);
             }
             outcomes.push(match &projects {
-                Some(projects) => {
-                    projects[index].outcome(&fork, original, samples[index], goal, stage, &carried)?
-                }
+                Some(projects) => projects[index].outcome(
+                    &fork,
+                    original,
+                    samples[index],
+                    goal,
+                    stage,
+                    &carried,
+                )?,
                 None => observe(&fork, original, samples[index], goal, stage)?,
             });
         }
@@ -500,7 +644,13 @@ pub(super) fn forecast(
                     continue;
                 }
                 check(context, started)?;
-                inspect(fork.snapshot(), modeled_actions, modeled_plan_bytes)?;
+                inspect_model_source(
+                    fork.snapshot(),
+                    modeled_actions,
+                    modeled_plan_bytes,
+                    &mut inspect,
+                    meter,
+                )?;
                 let modeled_context = OperationContext {
                     anchor: fork.snapshot().anchor(),
                     ..context.clone()
@@ -544,7 +694,7 @@ pub(super) fn forecast(
                 > u64::from(context.budget.max_actions).min(MAX_TRACKED as u64)
                 || (all_actions.len() as u64)
                     .saturating_add(recovered_steps as u64)
-                .saturating_add(recovered_peer_steps as u64)
+                    .saturating_add(recovered_peer_steps as u64)
                     .saturating_add(added_actions)
                     > u64::from(context.budget.max_entities)
             {
@@ -565,7 +715,13 @@ pub(super) fn forecast(
                 || check(context, started),
             )?;
             let next_bytes = modeled_plan_bytes.saturating_add(archive.len() as u64);
-            inspect(fork.snapshot(), next_actions, next_bytes)?;
+            inspect_model_source(
+                fork.snapshot(),
+                next_actions,
+                next_bytes,
+                &mut inspect,
+                meter,
+            )?;
             let prepared = fork.prepare(&plan, &modeled_context)?;
             let receipt = fork.commit(&plan, &prepared, &modeled_context)?;
             let actions: Vec<_> = receipt
@@ -592,11 +748,25 @@ pub(super) fn forecast(
             modeled_actions = next_actions;
             modeled_plan_bytes = next_bytes;
             modeled_stages += 1;
-            inspect(fork.snapshot(), modeled_actions, modeled_plan_bytes)?;
+            inspect_model_source(
+                fork.snapshot(),
+                modeled_actions,
+                modeled_plan_bytes,
+                &mut inspect,
+                meter,
+            )?;
             // Real commit publication observes carried work at this same tick.
             // Failure and identity evidence cannot wait for a later poll slice.
-            observe_recovered(&fork, &mut carried, context, started, polls,
-                &mut recovered_polls, &mut recovered_predicate_nodes)?;
+            observe_recovered(
+                &fork,
+                &mut carried,
+                context,
+                started,
+                polls,
+                &mut recovered_polls,
+                &mut recovered_predicate_nodes,
+                meter,
+            )?;
             first_poll = true;
             continue;
         }
@@ -614,9 +784,11 @@ pub(super) fn forecast(
         }
         let recovered_pending = carried.iter().filter(|row| !row.is_final()).count() as u64;
         if slices >= MAX_SLICES
-            || polls.saturating_add(recovered_polls)
+            || polls
+                .saturating_add(recovered_polls)
                 .saturating_add(pending.len() as u64)
-                .saturating_add(recovered_pending) > MAX_POLLS
+                .saturating_add(recovered_pending)
+                > MAX_POLLS
         {
             return Err(error(
                 ErrorCode::BudgetExceeded,
@@ -666,9 +838,17 @@ pub(super) fn forecast(
         } else {
             interval
         };
+        meter.before_round(advance)?;
         if advance > 0 {
             fork.advance_ticks(advance)?;
-            inspect(fork.snapshot(), modeled_actions, modeled_plan_bytes)?;
+            meter.advanced(advance);
+            inspect_model_source(
+                fork.snapshot(),
+                modeled_actions,
+                modeled_plan_bytes,
+                &mut inspect,
+                meter,
+            )?;
         }
         for id in &pending {
             check(context, started)?;
@@ -679,9 +859,16 @@ pub(super) fn forecast(
                 anchor: fork.snapshot().anchor(),
                 ..context.clone()
             };
+            meter.before_action_poll(fork.action_step(*id).ok_or_else(|| {
+                error(
+                    ErrorCode::InvalidPlan,
+                    "tracked forecast step disappeared before polling",
+                )
+            })?)?;
             // No new grant is minted. Deferred actions recheck their real scope
             // and expiry at the modeled frontier, including modeled pauses.
             let receipt = fork.poll_action(*id, &predicted_context)?;
+            meter.after_action_poll(&receipt);
             polls += 1;
             if was_prepared
                 && receipt.state != CommitState::Prepared
@@ -702,12 +889,32 @@ pub(super) fn forecast(
                         "joint forecast exceeds its aggregate deferred-dispatch budget",
                     ));
                 }
-                inspect(fork.snapshot(), modeled_actions, modeled_plan_bytes)?;
+                inspect_model_source(
+                    fork.snapshot(),
+                    modeled_actions,
+                    modeled_plan_bytes,
+                    &mut inspect,
+                    meter,
+                )?;
             }
         }
-        inspect(fork.snapshot(), modeled_actions, modeled_plan_bytes)?;
-        observe_recovered(&fork, &mut carried, context, started, polls,
-            &mut recovered_polls, &mut recovered_predicate_nodes)?;
+        inspect_model_source(
+            fork.snapshot(),
+            modeled_actions,
+            modeled_plan_bytes,
+            &mut inspect,
+            meter,
+        )?;
+        observe_recovered(
+            &fork,
+            &mut carried,
+            context,
+            started,
+            polls,
+            &mut recovered_polls,
+            &mut recovered_predicate_nodes,
+            meter,
+        )?;
         slices += 1;
         first_poll = false;
         // Match the foreground owner's pruning of fully drained originals.
@@ -782,7 +989,8 @@ pub(super) fn forecast(
         report["forecast_work"]["retained_continuation_actions"] = json!(
             projects
                 .iter()
-                .map(|project| project.retained_actions().count() + project.recovered_retained_steps())
+                .map(|project| project.retained_actions().count()
+                    + project.recovered_retained_steps())
                 .sum::<usize>()
         );
         report["forecast_work"]["stage_reviews_deferred"] = json!(stage_reviews_deferred);
@@ -799,11 +1007,17 @@ pub(super) fn forecast(
         if recovered_steps > 0 {
             report["forecast_work"]["recovered_original_steps"] = json!(recovered_steps);
             report["forecast_work"]["verified_recovered_original_steps"] = json!(
-                projects.iter().flat_map(Project::recovered_originals)
-                    .map(RecoveredOriginal::historical_verified_steps).sum::<usize>()
+                projects
+                    .iter()
+                    .flat_map(Project::recovered_originals)
+                    .map(RecoveredOriginal::historical_verified_steps)
+                    .sum::<usize>()
             );
             report["forecast_work"]["verified_recovered_continuation_steps"] = json!(
-                projects.iter().map(Project::historical_recovered_retained_steps).sum::<usize>()
+                projects
+                    .iter()
+                    .map(Project::historical_recovered_retained_steps)
+                    .sum::<usize>()
             );
             report["assumptions"].as_array_mut().ok_or_else(|| {
                 error(ErrorCode::InternalInvariantViolation, "forecast assumptions disappeared")

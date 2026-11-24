@@ -109,6 +109,29 @@ def main() -> None:
         value = copy.deepcopy(baseline)
         value["forecast_scope"] = "complete_project"
         cases.append((value, False))
+    owned = {**copy.deepcopy(compare), "version": 3,
+             "forecast_scope": "current_stage", "progression_scope": "owned_session"}
+    cases.append((owned, True))
+    for source in ({"actions": [{"action": {"kind": "pause", "paused": True}}]},
+                   {"blueprint": {"template": "production", "quotas": [{"item": "DRINK", "minimum": 60}]}}):
+        value = copy.deepcopy(owned)
+        value["candidates"][0] = {"key": "other", **source}
+        cases.append((value, True))
+    for key in owned:
+        value = copy.deepcopy(owned)
+        del value[key]
+        cases.append((value, False))
+    for key, bad in (("version", 1), ("version", 2), ("version", 4),
+                     ("forecast_scope", "complete_project"), ("forecast_scope", None),
+                     ("progression_scope", "candidate_only"), ("progression_scope", None),
+                     ("horizon_ticks", 0), ("restore_recovered_actions", True)):
+        value = copy.deepcopy(owned)
+        value[key] = bad
+        cases.append((value, False))
+    for baseline in (compare, choose, project):
+        value = copy.deepcopy(baseline)
+        value["progression_scope"] = "owned_session"
+        cases.append((value, False))
     for request, accepted in cases:
         if validator.is_valid(request) != accepted:
             raise AssertionError(f"expected accepted={accepted}: {request!r}")

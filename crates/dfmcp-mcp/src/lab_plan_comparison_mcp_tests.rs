@@ -109,6 +109,79 @@ fn pause_candidates() -> Value {
     ])
 }
 
+fn owned_wrapper(candidates: Value, horizon: u64) -> Value {
+    json!({"template":"compare_candidates", "version":3,
+        "forecast_scope":"current_stage", "progression_scope":"owned_session",
+        "horizon_ticks":horizon, "candidates":candidates})
+}
+
+fn commit_ready_peer_pause(owner: &Owner) -> TestResult<String> {
+    let planned = parsed(&crate::agent_facade::fortress_plan(
+        Some(owner.id.clone()),
+        None,
+        None,
+        Some(
+            json!([
+                {"action":{"kind":"create_work_order", "name":"owned peer prerequisite",
+                    "job_token":"BREW_DRINK", "amount":1}},
+                {"action":{"kind":"pause", "paused":true}, "depends_on":[0]},
+            ])
+            .to_string(),
+        ),
+        None,
+    ))?;
+    assert_eq!(planned["ok"], true, "{planned}");
+    let committed = parsed(&crate::agent_facade::fortress_commit(
+        Some(owner.id.clone()),
+        text_field(&planned, "plan_digest")?,
+    ))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    let handle = resolve_session(Some(owner.id.clone()))?;
+    // Establish a real ready-but-undispatched prerequisite frontier. A public
+    // wait would also dispatch the pause, which is exactly the behavior being
+    // compared. All custody still comes from the real Plan/Commit entry points.
+    with_session(
+        &handle,
+        || Err("fixture session unavailable".into()),
+        |session| -> TestResult {
+            session.adapter.advance_ticks(50)?;
+            let first = *session.open_actions.first().ok_or("peer action missing")?;
+            let current = read_context(session);
+            session.adapter.poll_action(first, &current)?;
+            assert!(!session.adapter.snapshot().paused);
+            Ok(())
+        },
+    )?;
+    text_field(&committed, "plan_digest")
+}
+
+fn comparison_state(owner: &Owner) -> TestResult<String> {
+    let handle = resolve_session(Some(owner.id.clone()))?;
+    with_session_read(
+        &handle,
+        |error| Err(error.into()),
+        |session| {
+            Ok(format!(
+                "{:?}|{:?}|{:?}|{:?}|{:?}|{}|{:?}",
+                session.adapter,
+                session
+                    .pending
+                    .as_ref()
+                    .map(|pending| pending.digest.clone()),
+                session.commit_receipts,
+                session.open_actions,
+                session.carried,
+                session.history.len(),
+                session
+                    .objectives
+                    .iter()
+                    .map(|goal| goal.selected_wait_reserve_observation)
+                    .collect::<Vec<_>>()
+            ))
+        },
+    )
+}
+
 fn plan_blueprint(owner: &Owner, raw: &str) -> TestResult<Value> {
     parsed(&crate::agent_facade::fortress_plan(
         Some(owner.id.clone()),
@@ -257,6 +330,144 @@ fn public_candidate_production_compares_at_default_budget_then_selects_commits_a
         "{waited}"
     );
     assert_eq!(waited["objectives"][0]["status"], "achieved", "{waited}");
+    Ok(())
+}
+
+#[test]
+fn public_owned_comparison_dispatches_authenticated_peer_only_on_forks_then_selects_fresh()
+-> TestResult {
+    let _serial = crate::test_serial();
+    let owner = open(false, Some(20_000))?;
+    let peer = commit_ready_peer_pause(&owner)?;
+    let pending = text_field(&pause_plan(&owner)?, "plan_digest")?;
+    let before = comparison_state(&owner)?;
+    let source = snapshot(&owner)?;
+    let legacy = compare(&owner, production_candidates(), 1_000)?;
+    assert_eq!(legacy["ok"], true, "{legacy}");
+    assert_eq!(legacy["version"], 1);
+    assert!(legacy["progression_scope"].is_null());
+    assert_eq!(
+        candidate(&legacy, "ordinary")?["prediction"]["predicted_complete"],
+        true
+    );
+    let raw = owned_wrapper(production_candidates(), 1_000).to_string();
+    let report = plan_blueprint(&owner, &raw)?;
+    assert_eq!(report["ok"], true, "{report}");
+    assert_eq!(report["schema"], "dfmcp.plan-comparison/3");
+    assert_eq!(report["version"], 3);
+    assert_eq!(report["forecast_scope"], "current_stage");
+    assert_eq!(report["progression_scope"], "owned_session");
+    assert_eq!(
+        report["agent_turn"]["briefing"]["forecast_progression_scope"],
+        "owned_session"
+    );
+    assert_eq!(
+        report["agent_turn"]["briefing"]["forecast_recovered_observation"],
+        "discarded_copies_only"
+    );
+    assert_eq!(
+        report["agent_turn"]["briefing"]["recovered_work_observation"],
+        "retained_not_reobserved"
+    );
+    let model_scope = &report["agent_turn"]["uncertainty"][0];
+    assert!(model_scope["statement"].as_str().is_some_and(|statement| {
+        statement.contains("current-session live deferred work")
+            && statement.contains("copied recovered monitors")
+    }));
+    assert!(
+        model_scope["consequence"]
+            .as_str()
+            .is_some_and(|limits| limits.contains("Other sessions' deferred dispatch"))
+    );
+    assert!(
+        !model_scope
+            .to_string()
+            .contains("Other plans' deferred steps are excluded")
+    );
+    assert_eq!(report["owned_work"]["live_originals"], json!([peer]));
+    assert_eq!(
+        report["owned_work"]["recovered_dispatch_handles_restored"],
+        false
+    );
+    assert_eq!(report["forecast_work"]["source_forks"], 4);
+    assert_eq!(report["forecast_work"]["simulated_game_ticks"], 0);
+    assert_eq!(report["pending_plan_changed"], false);
+    assert_eq!(report["effect_evidence"], false);
+    assert!(report["recommended_candidate"].is_null());
+    for key in ["ordinary", "conditional"] {
+        let row = candidate(&report, key)?;
+        assert_eq!(row["status"], "evaluated", "{row}");
+        assert_eq!(row["prediction"]["predicted_complete"], false);
+        assert_eq!(row["prediction"]["blocked_by_pause"], true);
+        assert_eq!(row["prediction"]["predicted_frontier_tick"], source.tick.0);
+        assert_eq!(
+            row["prediction"]["shared_progression_work"]["deferred_dispatches"],
+            1
+        );
+    }
+    assert_eq!(comparison_state(&owner)?, before);
+    assert_eq!(pending_digest(&owner)?.as_deref(), Some(pending.as_str()));
+    output_budget(&owner, 1)?;
+    refusal(&plan_blueprint(&owner, &raw)?, "budget_exceeded");
+    assert_eq!(comparison_state(&owner)?, before);
+    output_budget(&owner, 20_000)?;
+
+    let selected_raw = selection(&report, "ordinary")?;
+    assert_eq!(parsed(&selected_raw)?["version"], 1);
+    let selected = plan_blueprint(&owner, &selected_raw)?;
+    assert_eq!(selected["ok"], true, "{selected}");
+    assert_eq!(selected["kind"], "select_candidate");
+    assert_eq!(snapshot(&owner)?, source);
+    assert_ne!(text_field(&selected, "plan_digest")?, pending);
+    let committed = parsed(&crate::agent_facade::fortress_commit(
+        Some(owner.id.clone()),
+        text_field(&selected, "plan_digest")?,
+    ))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    let waited = parsed(&crate::agent_facade::fortress_wait(
+        Some(owner.id.clone()),
+        Some(1_000),
+    ))?;
+    assert_eq!(waited["ok"], true, "{waited}");
+    let actual = snapshot(&owner)?;
+    assert!(actual.paused);
+    assert_eq!(actual.tick, source.tick);
+    Ok(())
+}
+
+#[test]
+fn public_owned_comparison_refuses_missing_peer_custody_and_aggregate_work_without_changes()
+-> TestResult {
+    let _serial = crate::test_serial();
+    let owner = open(false, Some(20_000))?;
+    let peer = commit_ready_peer_pause(&owner)?;
+    pause_plan(&owner)?;
+    let handle = resolve_session(Some(owner.id.clone()))?;
+    let raw = owned_wrapper(pause_candidates(), 100).to_string();
+    let receipt = {
+        let mut session = handle.lock().map_err(|_| "session poisoned")?;
+        session
+            .commit_receipts
+            .remove(&peer)
+            .ok_or("peer receipt missing")?
+    };
+    let before = comparison_state(&owner)?;
+    let missing = plan_blueprint(&owner, &raw)?;
+    refusal(&missing, "conflict");
+    assert!(missing["candidates"].is_null());
+    assert_eq!(comparison_state(&owner)?, before);
+    {
+        let mut session = handle.lock().map_err(|_| "session poisoned")?;
+        session.commit_receipts.insert(peer, receipt);
+        // One candidate plus the complete two-step peer fits. The second
+        // candidate must spend that peer domain again under the same allowance.
+        session.budget.max_actions = 3;
+    }
+    let before = comparison_state(&owner)?;
+    let bounded = plan_blueprint(&owner, &raw)?;
+    refusal(&bounded, "budget_exceeded");
+    assert!(bounded["candidates"].is_null());
+    assert_eq!(comparison_state(&owner)?, before);
     Ok(())
 }
 

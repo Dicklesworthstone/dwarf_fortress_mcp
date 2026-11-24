@@ -28,6 +28,9 @@ use super::room_provisioning::{RoomCompileStage, classify_room_stage};
 #[path = "lab_project_comparison.rs"]
 mod project_comparison;
 
+#[path = "owned_candidate_forecast.rs"]
+pub(super) mod owned_progression;
+
 const MAX_REQUEST_BYTES: usize = 128 * 1024;
 const MAX_CANDIDATES: usize = 4;
 const MAX_KEY_BYTES: usize = 64;
@@ -83,6 +86,7 @@ enum ForecastScope {
 #[derive(Debug)]
 pub(super) struct Comparison {
     scope: ForecastScope,
+    owned_progression: bool,
     horizon_ticks: u64,
     candidates: Vec<Candidate>,
 }
@@ -108,6 +112,8 @@ enum Envelope {
         version: u32,
         #[serde(default, deserialize_with = "present")]
         forecast_scope: Option<String>,
+        #[serde(default, deserialize_with = "present")]
+        progression_scope: Option<String>,
         horizon_ticks: u64,
         candidates: Vec<Candidate>,
     },
@@ -162,15 +168,23 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
         Envelope::Compare {
             version,
             forecast_scope,
+            progression_scope,
             horizon_ticks,
             candidates,
         } => {
-            let scope = match (version, forecast_scope.as_deref()) {
-                (1, None) => ForecastScope::CurrentStage,
-                (2, Some("complete_project")) => ForecastScope::CompleteProject,
+            let (scope, owned_progression) = match (
+                version,
+                forecast_scope.as_deref(),
+                progression_scope.as_deref(),
+            ) {
+                (1, None, None) => (ForecastScope::CurrentStage, false),
+                (2, Some("complete_project"), None) => (ForecastScope::CompleteProject, false),
+                (3, Some("current_stage"), Some("owned_session")) => {
+                    (ForecastScope::CurrentStage, true)
+                }
                 _ => {
                     return Err(invalid(
-                        "comparison requires version 1 without forecast_scope, or version 2 with forecast_scope complete_project",
+                        "comparison requires version 1 without scopes, version 2 with complete_project, or version 3 with current_stage and owned_session progression",
                     ));
                 }
             };
@@ -196,6 +210,7 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
             }
             Ok(Some(Request::Compare(Comparison {
                 scope,
+                owned_progression,
                 horizon_ticks,
                 candidates,
             })))
@@ -223,6 +238,10 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
             })))
         }
     }
+}
+
+pub(super) fn uses_owned_progression(request: &Request) -> bool {
+    matches!(request, Request::Compare(comparison) if comparison.owned_progression)
 }
 
 fn version_one(version: u32) -> Result<()> {
@@ -553,6 +572,11 @@ pub(super) fn compact_prediction(prediction: &Value) -> Value {
         "simulation_horizon_reached",
         "simulation_horizon_truncated",
         "reserve_forecast",
+        "progression_scope",
+        "competing_work",
+        "shared_progression_work",
+        "recovered_peers_finished_at_candidate_commit",
+        "recovered_commit_observation_polls",
     ] {
         if let Some(value) = prediction.get(key) {
             compact.insert(key.to_owned(), value.clone());
@@ -567,13 +591,29 @@ pub(super) fn compact_prediction(prediction: &Value) -> Value {
 pub(super) fn compare(
     adapter: &MemoryAdapter,
     context: &OperationContext,
+    intent_id: IntentId,
+    request: &Request,
+    started: Instant,
+) -> Result<Value> {
+    compare_with_owned_work(adapter, context, intent_id, request, started, None)
+}
+
+pub(super) fn compare_with_owned_work(
+    adapter: &MemoryAdapter,
+    context: &OperationContext,
     _intent_id: IntentId,
     request: &Request,
     started: Instant,
+    owned: Option<&owned_progression::OwnedWork>,
 ) -> Result<Value> {
     let Request::Compare(comparison) = request else {
         return Err(invalid("comparison execution requires compare_candidates"));
     };
+    if comparison.owned_progression != owned.is_some() {
+        return Err(invalid(
+            "owned-session comparison requires its exact authenticated current work selection",
+        ));
+    }
     if comparison.scope == ForecastScope::CompleteProject {
         return project_comparison::compare(adapter, context, comparison, started);
     }
@@ -687,13 +727,24 @@ pub(super) fn compare(
         // The bounded evaluator returns ordinary model infeasibility as an
         // available:false prediction. A Result error is an aggregate budget,
         // cancellation, source or authority failure and aborts the whole set.
-        let prediction = forecast_plan_bounded(
-            adapter,
-            &plan,
-            context,
-            candidate.reserve_until,
-            &mut forecast_budget,
-        )?;
+        let prediction = if let Some(owned) = owned {
+            owned.forecast(
+                adapter,
+                &plan,
+                context,
+                candidate.reserve_until,
+                started,
+                &mut forecast_budget,
+            )?
+        } else {
+            forecast_plan_bounded(
+                adapter,
+                &plan,
+                context,
+                candidate.reserve_until,
+                &mut forecast_budget,
+            )?
+        };
         let available = prediction["available"] == true;
         let reserve = &prediction["reserve_forecast"];
         let reserve_known = candidate.reserve_until.is_none()
@@ -781,6 +832,20 @@ pub(super) fn compare(
         "pending_plan_changed": false,
         "note": "predictions assume no other agent acts; selection creates a newly reviewed plan under current authority and never commits it",
     });
+    if let Some(owned) = owned {
+        result["schema"] = json!("dfmcp.plan-comparison/3");
+        result["version"] = json!(3);
+        result["forecast_scope"] = json!("current_stage");
+        result["progression_scope"] = json!("owned_session");
+        result["owned_work"] = owned.describe();
+        result["method"] =
+            json!("same_original_goal_with_owned_session_progression_on_discarded_forks");
+        result["assumptions"] = json!(
+            "every authenticated current-session open action progresses in original commit order before the candidate; unfinished recovered peers retain their real observation cadence; other owners' physical jobs evolve but their deferred actions are not dispatched; no future project stages or actual effects are created"
+        );
+        result["selection_scope"] = json!("current_reviewed_stage_only");
+        result["automatic_continuation"] = json!(false);
+    }
     if let Some(raw) = common_room.flatten() {
         result["semantic_room_request"] = serde_json::from_str(&raw).map_err(|error| {
             DfmcpError::new(
@@ -789,10 +854,15 @@ pub(super) fn compare(
             )
         })?;
         result["goal_scope"] = json!(resource_room_scope);
-        result["forecast_scope"] = json!("current_reviewed_stage_only");
+        if !comparison.owned_progression {
+            result["forecast_scope"] = json!("current_reviewed_stage_only");
+        }
         result["recommendation_scope"] = json!("current_reviewed_stage_only");
-        result["method"] =
-            json!("same_original_room_request_current_stage_on_discarded_laboratory_forks");
+        result["method"] = json!(if comparison.owned_progression {
+            "same_original_room_request_current_stage_with_owned_session_progression"
+        } else {
+            "same_original_room_request_current_stage_on_discarded_laboratory_forks"
+        });
         result["recommendation"]["reason"] = json!(if !evidence_complete {
             "at least one candidate lacks a complete comparable stage prediction; no recommendation is justified"
         } else if result["recommended_candidate"].is_null() {
