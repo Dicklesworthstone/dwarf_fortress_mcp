@@ -112,6 +112,23 @@ authorized clocks retain their normal boundaries. Assignment is not a stability
 sample: the complete-parent tracker reads timing only from the original positive
 order obligations, and clock requests use the actual order StepIds.
 
+### First project portfolio after restarting before publication
+
+The fixed resource-project owner can reopen its pre-plan custody and then
+publish its first stock portfolio with either or both configured clock families.
+Its immutable production intent names every additional fixed clock identity
+before the parent acknowledges it. Only that successful current publication
+can create those exact new headers, using independent current and opening
+clock authority and exclusive file creation. Refused acknowledgment writes no
+original or additional clock; an existing or partially created slot cannot be
+adopted or repaired.
+
+Retained-original recovery continues to require every previously acknowledged
+journal and exact identity. It receives no new-slot creation path. A one-order
+portfolio reuses the existing first clock owner. See
+[NATIVE_RESOURCE_PROJECT_MCP.md](NATIVE_RESOURCE_PROJECT_MCP.md) for the
+publication and recovery contract and the current validation limits.
+
 ## Read-only monitoring when no order is needed
 
 The reusable `StockTargetWatch` adapter accepts only an independently qualified

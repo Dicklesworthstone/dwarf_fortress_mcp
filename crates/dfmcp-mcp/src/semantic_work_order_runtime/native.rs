@@ -652,7 +652,30 @@ impl NativeShell {
     ) -> Result<(Option<dfmcp_core::RequestId>, Option<dfmcp_core::RequestId>)> {
         self.portfolio_slot(step, true, None, self.config.clock.is_some())?;
         self.portfolio_slot(step, true, None, self.config.inventory_clock.is_some())?;
-        Ok((
+        Ok(self.portfolio_clock_requests(step, c))
+    }
+
+    /// Pure prediction for the fixed project's first original publication.
+    /// Its existing first-slot owners may have reopened; the parent still must
+    /// ACK these exact new identities before the separate creation path below.
+    pub(crate) fn prospective_project_portfolio_clock_requests(
+        &self,
+        step: u32,
+        c: &OperationContext,
+    ) -> Result<(Option<dfmcp_core::RequestId>, Option<dfmcp_core::RequestId>)> {
+        self.project_portfolio_slot(step)?;
+        if self.config.initialize {
+            return self.prospective_portfolio_clock_requests(step, c);
+        }
+        Ok(self.portfolio_clock_requests(step, c))
+    }
+
+    fn portfolio_clock_requests(
+        &self,
+        step: u32,
+        c: &OperationContext,
+    ) -> (Option<dfmcp_core::RequestId>, Option<dfmcp_core::RequestId>) {
+        (
             self.config.clock.as_ref().map(|_| {
                 portfolio_clock_request_id(
                     &self.config.path(&format!("portfolio-{step}-clock.journal")),
@@ -667,7 +690,95 @@ impl NativeShell {
                     true,
                 )
             }),
-        ))
+        )
+    }
+
+    /// Called only while publishing a first fixed project original, after its
+    /// complete intent was ACKed. This exclusively creates a new slot and
+    /// verifies the preannounced identity; it never opens existing custody.
+    pub(crate) fn create_project_portfolio_clock(
+        &self,
+        step: u32,
+        mode: Mode,
+        expected: Option<Digest32>,
+        c: &OperationContext,
+    ) -> Result<Option<OrderRunJournal<PrivateOrderRunFile>>> {
+        self.project_portfolio_creation(step, mode, expected, self.config.clock.is_some(), c)?;
+        clock::open_at(
+            &self.config,
+            mode,
+            c,
+            &self.config.path(&format!("portfolio-{step}-clock.journal")),
+            true,
+            expected,
+        )
+    }
+
+    pub(crate) fn create_project_portfolio_inventory_clock(
+        &self,
+        step: u32,
+        mode: Mode,
+        expected: Option<Digest32>,
+        c: &OperationContext,
+    ) -> Result<
+        Option<
+            dfmcp_adapter::bounded_run::journal::RunJournal<
+                dfmcp_adapter::bounded_run::private_file::PrivateRunFile,
+            >,
+        >,
+    > {
+        self.project_portfolio_creation(
+            step,
+            mode,
+            expected,
+            self.config.inventory_clock.is_some(),
+            c,
+        )?;
+        inventory_clock::open_at(
+            &self.config,
+            mode,
+            c,
+            &self.config.path(&format!("portfolio-{step}-inventory-clock.journal")),
+            true,
+            expected,
+        )
+    }
+
+    fn project_portfolio_slot(&self, step: u32) -> Result<()> {
+        self.config.current()?;
+        if !(2..=4).contains(&step)
+            || self.config.combined_check.is_none()
+            || self.config.recovery.is_some()
+        {
+            return Err(denied(
+                "new project clock slots require their combined original publication owner",
+            ));
+        }
+        Ok(())
+    }
+
+    fn project_portfolio_creation(
+        &self,
+        step: u32,
+        mode: Mode,
+        expected: Option<Digest32>,
+        configured: bool,
+        c: &OperationContext,
+    ) -> Result<()> {
+        self.project_portfolio_slot(step)?;
+        if mode != Mode::Control
+            || configured != expected.is_some()
+            || expected == Some(Digest32::ZERO)
+        {
+            return Err(denied(
+                "new project clock slots require control and their acknowledged configured identity",
+            ));
+        }
+        if configured {
+            c.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
+            c.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)?;
+        }
+        Ok(())
     }
 
     fn portfolio_slot(
@@ -1354,6 +1465,61 @@ mod runtime_checkpoint_tests {
                 config: Arc::new(config),
             };
             let retained = Digest32::of_bytes(b"retained original portfolio clock");
+            let project = NativeShell::from_combined_config(Config::from_combined_clocks_environment(
+                Arc::new(|| Ok(())),
+                || Ok(()),
+                shell.config.clock.as_ref().map(ClockConfig::identity),
+                shell
+                    .config
+                    .inventory_clock
+                    .as_ref()
+                    .map(InventoryClockConfig::identity),
+            )?)?;
+            for slot in 2..=4 {
+                assert!(
+                    shell.prospective_project_portfolio_clock_requests(slot, &c).is_err(),
+                    "standalone native custody acquired project publication permission"
+                );
+                // Prediction is pure even for reopened configured owners with
+                // Query alone. It does not confer permission to create a file.
+                let (order, inventory) =
+                    project.prospective_project_portfolio_clock_requests(slot, &c)?;
+                assert_eq!(order.is_some(), configured);
+                assert_eq!(inventory.is_some(), configured);
+                for mode in [Mode::Offline, Mode::Reconcile] {
+                    assert!(
+                        project
+                            .create_project_portfolio_clock(
+                                slot, mode, configured.then_some(retained), &c,
+                            )
+                            .is_err()
+                    );
+                    assert!(
+                        project
+                            .create_project_portfolio_inventory_clock(
+                                slot, mode, configured.then_some(retained), &c,
+                            )
+                            .is_err()
+                    );
+                }
+                if configured {
+                    for expected in [None, Some(Digest32::ZERO), Some(retained)] {
+                        assert!(
+                            project
+                                .create_project_portfolio_clock(slot, Mode::Control, expected, &c)
+                                .is_err()
+                        );
+                        assert!(
+                            project
+                                .create_project_portfolio_inventory_clock(
+                                    slot, Mode::Control, expected, &c,
+                                )
+                                .is_err()
+                        );
+                    }
+                }
+                assert!(!directory.exists(), "project prediction or refusal created custody");
+            }
             for slot in 2..=4 {
                 let requests = shell.prospective_portfolio_clock_requests(slot, &c);
                 if configured && !initializing {
@@ -1498,6 +1664,9 @@ mod runtime_checkpoint_tests {
                 }
             }
             for invalid_slot in [0, 1, 5, u32::MAX] {
+                assert!(
+                    project.prospective_project_portfolio_clock_requests(invalid_slot, &c).is_err()
+                );
                 assert!(shell.prospective_portfolio_clock_requests(invalid_slot, &c).is_err());
                 assert!(
                     shell

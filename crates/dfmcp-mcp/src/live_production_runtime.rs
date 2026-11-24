@@ -790,7 +790,7 @@ impl Runtime {
             )?);
             out.create_executor(&mut work)?;
             if let Some(entries) = recovery.portfolio {
-                out.initialize_portfolio(Some(entries), &mut work)?;
+                out.initialize_portfolio(Some(entries), None, &mut work)?;
             } else {
                 if out
                     .layout
@@ -1920,7 +1920,7 @@ impl Runtime {
             // one-order portfolio with other already-met minima. Initialize
             // these exact project slots before comparing the actual
             // publication with the parent's acknowledged complete original.
-            self.initialize_portfolio(None, &mut work)?;
+            self.initialize_portfolio(None, publication_intent.as_ref(), &mut work)?;
         }
         if let Some(intent) = &publication_intent {
             intent.validate_pending_checkpoint(&self.project_recovery_reference())?;
@@ -1931,7 +1931,7 @@ impl Runtime {
             basis.existing_labor_capture = None;
         }
         if portfolio && self.portfolio.is_none() {
-            self.initialize_portfolio(None, &mut work)?;
+            self.initialize_portfolio(None, None, &mut work)?;
         }
         self.initialization_failed = false;
         self.view(&mut Work::new(&work.current()?)?)

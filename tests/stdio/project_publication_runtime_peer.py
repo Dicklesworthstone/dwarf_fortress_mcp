@@ -71,11 +71,13 @@ def pending_environment(combined, environment, retained):
     return reopened
 
 
-def run_case(executable, test, requested_case, clocks=(), one_order=False):
+def run_case(executable, test, requested_case, clocks=(), one_order=False,
+             assign_labor=True, clock_authority=True):
     portfolio = requested_case.startswith("portfolio_")
     case = requested_case.removeprefix("portfolio_")
-    reopening = case in ("reopened", "reopened_refusal")
-    case = "published" if case == "reopened" else case
+    reopening = case == "reopened" or case.startswith("reopened_")
+    case = case.removeprefix("reopened_") if case.startswith("reopened_") else (
+        "published" if case == "reopened" else case)
     prefix = "portfolio_" if portfolio else ""
     combined = load("project_publication_production_peer", "combined_production.py")
     stock = load("project_publication_workshop_seed", "combined_stock_target_runtime_peer.py")
@@ -93,6 +95,9 @@ def run_case(executable, test, requested_case, clocks=(), one_order=False):
             # peer's observation-only hook would leave Prepare pinned to MINE.
             capture = combined.wf.capture(original_capture(ids, option_count))
             capture["labor_keys"] = ["CARPENTER", "MINE"]
+            if not assign_labor:
+                for unit in capture["units"]:
+                    unit["labors"] = [1, 0]
             return combined.wf.encode_capture(capture)
 
         combined.workforce_capture = carpenter_capture
@@ -122,6 +127,7 @@ def run_case(executable, test, requested_case, clocks=(), one_order=False):
             peer.chair_stack = 2 if met or one_order else 1
             environment = combined.environment(production, peer.endpoint)
             environment["PROJECT_PUBLICATION_RUNTIME_STAGE"] = str(stage)
+            environment["PROJECT_PUBLICATION_RUNTIME_ASSIGN_LABOR"] = str(int(assign_labor))
             if one_order:
                 environment["PROJECT_PUBLICATION_RUNTIME_ONE_ORDER"] = "1"
             if clocks:
@@ -157,16 +163,26 @@ def run_case(executable, test, requested_case, clocks=(), one_order=False):
                     preplan["actual"]["workshop_prerequisite"]["checkpoint"]
                 environment["DFMCP_COMBINED_PRODUCTION_CONFIG"] = json.dumps(parent)
                 peer.inventory_stack, peer.chair_stack = 2, 2 if one_order else 1
+                preplan_files = combined.custody_files(production)
+                if case == "missing_authority" or not clock_authority:
+                    for family in clocks:
+                        environment.pop(f"DFMCP_SEMANTIC_WORK_ORDER_ALLOW_{family.upper()}", None)
             child(executable, test, "control", requested_case, environment,
                   retained_path, retained_path)
             retained = json.loads(retained_path.read_text())
             if reopening:
                 assert retained["goal"] == preplan["goal"], "reopen retargeted or renewed the root"
                 assert retained["workforce_journal_id"] == preplan["workforce_journal_id"]
+                assert retained["actual"]["native_custody"] == preplan["actual"]["native_custody"]
+                current_files = combined.custody_files(production)
+                for path, identity in preplan_files.items():
+                    assert current_files[path] == identity, f"publication changed retained custody: {path}"
             if portfolio and retained["intent"] is not None:
                 assert len(retained["intent"]["goal"]["targets"]) == 3
+                first = int(assign_labor)
                 assert [slot["step_id"] for slot in
-                        retained["intent"]["recovery_reference"]["recovery"]["portfolio"]] == ([1] if one_order else [1, 2])
+                        retained["intent"]["recovery_reference"]["recovery"]["portfolio"]] == (
+                            [first] if one_order else [first, first + 1])
                 reference = retained["intent"]["recovery_reference"]
                 if clocks:
                     pins = reference["portfolio_clocks"]
@@ -184,7 +200,7 @@ def run_case(executable, test, requested_case, clocks=(), one_order=False):
             assert not any(operation.startswith("Commit") for operation in calls)
             assert "PrepareOrder" not in calls
             assert not peer.workforce_applied and not peer.order_created
-            if case in ("published", "partial", "advanced"):
+            if case in ("published", "partial", "advanced", "slot_collision"):
                 reopened = pending_environment(combined, environment, retained)
                 offline = {key: value for key, value in reopened.items()
                            if not (key.startswith("DFMCP_") and (
@@ -289,8 +305,14 @@ def main():
     for clocks in (("clock",), ("inventory_clock",), ("clock", "inventory_clock")):
         for one_order in (False, True):
             run_case(executable, test, "portfolio_published", clocks, one_order)
-        for case in ("ack_refusal", "partial", "reopened_refusal"):
+        for case in ("ack_refusal", "partial", "reopened", "reopened_missing_authority"):
             run_case(executable, test, "portfolio_" + case, clocks)
+    for case in ("reopened_ack_refusal", "reopened_existing_slot", "reopened_slot_collision"):
+        run_case(executable, test, "portfolio_" + case, ("clock", "inventory_clock"))
+    run_case(executable, test, "portfolio_reopened", ("clock", "inventory_clock"),
+             assign_labor=False)
+    run_case(executable, test, "portfolio_reopened", ("clock", "inventory_clock"),
+             one_order=True, clock_authority=False)
     run_case(executable, test, "portfolio_no_work", ("clock", "inventory_clock"))
     print("project-publication-campaign:checked")
 

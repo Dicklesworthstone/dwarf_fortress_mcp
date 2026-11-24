@@ -127,6 +127,40 @@ impl ProjectProductionIntent {
         Ok(())
     }
 
+    /// Exact new-slot identities for the currently publishing original.
+    /// The caller may use these only after its parent ACK callback succeeds;
+    /// recovered originals always reopen with their ordinary retained pins.
+    pub(in crate::live_production_runtime) fn portfolio_clocks_for_publication(
+        &self,
+        original: &dfmcp_intent::PreparedPlan,
+    ) -> Result<Option<[Option<ProjectPortfolioClockRecovery>; 4]>> {
+        let reference = retained(&self.recovery_reference)?;
+        let recovery = reference_recovery(&self.recovery_reference)?;
+        if recovery.seal.plan_digest != original.digest || recovery.anchor != original.anchor {
+            return Err(denied(
+                "project clock publication differs from its acknowledged original",
+            ));
+        }
+        let clocks = portfolio_clock_pins(&reference, recovery)?;
+        if clocks.as_ref().is_some_and(|slots| {
+            slots.iter().skip(1).flatten().any(|slot| {
+                [slot.clock, slot.inventory_clock]
+                    .into_iter()
+                    .flatten()
+                    .any(|pin| {
+                        pin.head != pin.journal_id
+                            || pin.authority_tick_floor != 0
+                            || pin.high_source_sequence != 0
+                    })
+            })
+        }) {
+            return Err(denied(
+                "new project clock slots require untouched prospective headers",
+            ));
+        }
+        Ok(clocks)
+    }
+
     pub(crate) fn validate_initial_frontier(&self, frontier: durable::Recovery) -> Result<()> {
         let expected = reference_recovery(&self.recovery_reference)?.frontier;
         if frontier.journal_id != expected.journal_id

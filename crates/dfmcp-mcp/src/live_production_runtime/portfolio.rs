@@ -253,9 +253,32 @@ impl Runtime {
     pub(super) fn initialize_portfolio(
         &mut self,
         recovery: Option<[Option<config::PortfolioRecovery>; 4]>,
+        publication: Option<&ProjectProductionIntent>,
         work: &mut Work,
     ) -> Result<()> {
         let ids = self.portfolio_ids();
+        // Only the first publication call receives the intent after its parent
+        // ACK. Ordinary reopening cannot derive initialization permission from
+        // retained metadata, including when a retained journal is missing.
+        let publication_clocks = if let Some(intent) = publication {
+            if recovery.is_some()
+                || self.config.recovery.is_some()
+                || self.config.project_binding.is_none()
+                || self.mode != Mode::Control
+                || !self.initialization_failed
+            {
+                return Err(denied(
+                    "new project clock custody requires its active acknowledged publication",
+                ));
+            }
+            intent.portfolio_clocks_for_publication(
+                self.original
+                    .as_ref()
+                    .ok_or_else(|| denied("project publication original is absent"))?,
+            )?
+        } else {
+            None
+        };
         if ids.is_empty()
             || ids.len() > 4
             || self.portfolio.is_some()
@@ -264,6 +287,12 @@ impl Runtime {
                 ids.iter()
                     .enumerate()
                     .any(|(index, step)| r[index].is_none_or(|entry| entry.step_id != step.get()))
+            })
+            || publication_clocks.is_some_and(|pins| {
+                pins.iter().flatten().count() != ids.len()
+                    || ids.iter().enumerate().any(|(index, step)| {
+                        pins[index].is_none_or(|pin| pin.step_id != step.get())
+                    })
             })
         {
             return Err(denied(
@@ -299,28 +328,43 @@ impl Runtime {
         for (ordinal, step) in ids.iter().copied().enumerate().skip(1) {
             let retained = recovery.and_then(|r| r[ordinal]);
             let slot = self.order_slot(step)?;
-            let clock = self
-                .config
-                .orders
-                .open_portfolio_clock(
+            let publication_pin = publication_clocks.and_then(|pins| pins[ordinal]);
+            let clock_context = work.take(CLOCK_OPEN_BYTES)?;
+            let clock = if let Some(pin) = publication_pin {
+                self.config.orders.create_project_portfolio_clock(
+                    slot,
+                    order_mode(self.mode),
+                    pin.clock.map(|clock| clock.journal_id),
+                    &clock_context,
+                )?
+            } else {
+                self.config.orders.open_portfolio_clock(
                     slot,
                     order_mode(self.mode),
                     recovery.is_none(),
                     retained.and_then(|r| r.clock_journal_id),
-                    &work.take(CLOCK_OPEN_BYTES)?,
+                    &clock_context,
                 )?
-                .map(ProductionClock::new);
-            let inventory_clock = self
-                .config
-                .orders
-                .open_portfolio_inventory_clock(
+            }
+            .map(ProductionClock::new);
+            let inventory_context = work.take(CLOCK_OPEN_BYTES)?;
+            let inventory_clock = if let Some(pin) = publication_pin {
+                self.config.orders.create_project_portfolio_inventory_clock(
+                    slot,
+                    order_mode(self.mode),
+                    pin.inventory_clock.map(|clock| clock.journal_id),
+                    &inventory_context,
+                )?
+            } else {
+                self.config.orders.open_portfolio_inventory_clock(
                     slot,
                     order_mode(self.mode),
                     recovery.is_none(),
                     retained.and_then(|r| r.inventory_clock_journal_id),
-                    &work.take(CLOCK_OPEN_BYTES)?,
+                    &inventory_context,
                 )?
-                .map(ProductionInventoryClock::new);
+            }
+            .map(ProductionInventoryClock::new);
             self.portfolio
                 .as_mut()
                 .ok_or_else(|| denied("portfolio absent"))?

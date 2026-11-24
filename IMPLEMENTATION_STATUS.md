@@ -1,5 +1,39 @@
 # Implementation Status
 
+## Unreleased — Publish the first clocked portfolio after a pre-plan restart
+
+A fixed resource-project owner reopened before publishing its first original
+can now publish a multi-order stock portfolio with configured order clocks,
+inventory clocks, or both. The previous pre-plan multi-order restriction is
+removed through a distinct publication path. Exact prospective identities are
+derived before the existing parent acknowledgment; only the successful current
+publication passes that typed intent into creation of new fixed slots 2–4.
+
+The descriptor binds the actual original plan and anchor, ordered StepIds and
+untouched initial clock headers. Independent opening/current family authority
+remains mandatory, and the lower native owners exclusively create each expected
+journal. Known extra paths refuse before acknowledgment; a later collision
+fences partial publication without adoption or repair. Retained-original
+recovery receives no publication intent and follows the unchanged exact-identity
+reopen path. One-order portfolios reuse their existing first owners.
+
+The native-owner and actual Runtime/TCP regression sources cover successful
+reopened publication with either/both clock families and both StepId layouts,
+one-order reuse without additional clock effect authority, missing creation
+authority, refused acknowledgment, foreign paths, and failure after one valid
+additional header has been created. Offline recovery preserves and rejects
+incomplete custody. Independent review checked all seven changed source files
+and lower native initializers, and resolved a missing trait import before
+publication. Ordinary portfolio reopen gates remain byte-for-byte unchanged.
+
+Source integrity and JSON parsing checks pass. New Rust/Python compilation,
+formatting and test execution are unavailable because the executor failed.
+Historical component receipts do not qualify these bytes; integrated MCP,
+native clock dispatch, live DFHack and production admission remain open.
+
+Owners: `df-native-stock-target-3m9` and
+`dfmcp-reality-wiring-proof-4bf.14` (both in progress).
+
 ## Unreleased — Keep recovered temporal proof bound to the original step
 
 Recovered step custody now checks the monitor's deterministic proof identity,

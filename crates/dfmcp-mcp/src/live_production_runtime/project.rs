@@ -7,6 +7,7 @@ use super::{
     ProductionClock, ProductionInventoryClock, ProjectProductionIntent, Runtime,
     StockTargetRequest, View,
 };
+use crate::semantic_work_order_runtime::Shell as _;
 use crate::semantic_workforce_runtime::{denied, invalid};
 use dfmcp_adapter::live_production::ProductionLayout;
 use dfmcp_core::{Digest32, OperationContext, Result, StateAnchor};
@@ -311,6 +312,22 @@ impl Runtime {
         if self.clock.is_none() && self.inventory_clock.is_none() {
             return Ok(None);
         }
+        if layout.order_steps().len() > 1 {
+            // Reopening existing custody grants no new clock authority. Only
+            // an explicitly controlled first publication may create additional
+            // owners, and all omitted fixed paths must still be absent.
+            if (self.clock.is_some()
+                && (!self.opening_clock || !self.config.orders.clock_enabled()))
+                || (self.inventory_clock.is_some()
+                    && (!self.opening_inventory_clock
+                        || !self.config.orders.inventory_clock_enabled()))
+            {
+                return Err(denied(
+                    "new project portfolio clocks require independent current control authority",
+                ));
+            }
+            self.config.orders.require_absent_portfolio_clocks(2)?;
+        }
         let mut pins = Vec::with_capacity(layout.order_steps().len());
         for (ordinal, step) in layout.order_steps().iter().enumerate() {
             let (clock, inventory_clock) = if ordinal == 0 {
@@ -323,7 +340,7 @@ impl Runtime {
                 let slot = u32::try_from(ordinal + 1)
                     .map_err(|_| invalid("project portfolio clock slot exceeds its bound"))?;
                 let (clock_request, inventory_request) = self.config.orders
-                    .prospective_portfolio_clock_requests(slot, c)?;
+                    .prospective_project_portfolio_clock_requests(slot, c)?;
                 let clock = match (&self.clock, clock_request) {
                     (Some(owner), Some(request)) => {
                         Some(owner.prospective_project_checkpoint(c, request)?)

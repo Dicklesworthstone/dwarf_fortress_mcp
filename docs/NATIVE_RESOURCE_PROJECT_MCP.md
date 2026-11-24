@@ -223,10 +223,19 @@ the child's `portfolio.orders`, not native manager-order IDs or custody-file
 ordinals. Planning, confirming or cancelling a portfolio clock requires that
 explicit StepId. Scalar clock actions reject it.
 
-A configured owner reopened before its first multi-order original cannot
-initialize new clock slots. Such planning refuses before the parent publication
-ACK; recovery never grants initialization permission. A one-order portfolio
-uses the already retained first clock owner. An all-met stock watch has no
+A configured owner reopened before its first original can publish a multi-order
+portfolio under the same project goal and deadline. The publication derives the
+exact identities of additional fixed clock slots before the parent ACK. After
+that ACK succeeds, a separate first-publication path exclusively creates those
+preannounced headers. Each configured family requires its independent opening
+and current clock authority. Known additional paths must be absent before the
+ACK, and a later collision fails publication without adopting existing bytes.
+
+This applies only to a new original being published in the current controlled
+call. Reopening a retained original still requires every acknowledged journal
+to exist and match its exact identity; it cannot recreate missing or partial
+custody. A one-order portfolio uses the retained first clock owner without
+requiring authority to create additional owners. An all-met stock watch has no
 original order or clock target and does not gain clock authority.
 
 ### Optional Manager stage
@@ -803,6 +812,24 @@ historical custody and current production goal anchors remain explicit and
 separate.
 
 ## Validation record
+
+### First portfolio publication after reopening
+
+The actual Runtime/TCP campaign now exercises successful first publication
+from a reopened pre-plan owner with order clocks, inventory clocks, or both,
+including both original StepId layouts. It also covers a one-order reopened
+portfolio without additional clock effect authority, missing independent
+creation authority, refused parent acknowledgment, a foreign path before
+acknowledgment, and a collision after one valid additional header was created.
+Strict offline recovery preserves the bytes and refuses incomplete custody.
+The native owner regressions preserve the ordinary reopen-mode checks and
+exercise the distinct combined-project publication path.
+
+Independent source review checked the acknowledged descriptor, exclusive native
+initializers, all changed callsites and the partial-publication failure paths.
+These new Rust/Python sources have not been compiled, formatted or executed:
+the execution environment is unavailable. Earlier component receipts do not
+qualify this increment; full MCP and live DFHack acceptance remain open.
 
 ### Current per-order inspection and portfolio-clock increment
 

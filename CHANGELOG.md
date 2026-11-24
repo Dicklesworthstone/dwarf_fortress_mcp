@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Publish clocked portfolios after a pre-plan restart
+
+- Allow a recovered pre-plan resource-project owner to publish its first
+  multi-order stock portfolio with order clocks, inventory clocks, or both.
+- Bind every new fixed clock header to the original production intent before
+  the parent ACK; exclusively create those headers only after that ACK succeeds.
+  Each configured family retains independent opening and current authority.
+- Preserve strict retained-original reopening. Missing, foreign, collided or
+  partial custody cannot become replacement clock journals or restored permits.
+  One-order portfolios reuse their retained first owners.
+- Extend actual Runtime/TCP and native-owner regression sources for successful
+  reopening, both original StepId layouts, refused ACK, missing authority and
+  partial-header collisions. Independent source review completed; compilation,
+  formatting and execution remain unavailable because the executor is down.
+
 ## Unreleased — Bind recovered proof to its exact original work
 
 - Reject recovered temporal monitors whose proof identity, original registration

@@ -160,7 +160,24 @@
     "prospective_portfolio_clock_ids_acknowledged_before_creation": true,
     "prospective_clock_ids_share_native_header_codec": true,
     "prospective_clock_ids_share_fixed_slot_request_salt": true,
-    "published_clock_headers_must_match_intent": true
+    "published_clock_headers_must_match_intent": true,
+    "new_project_clock_headers_after_preplan_reopen": {
+      "fixed_slots": [
+        2,
+        3,
+        4
+      ],
+      "prospective_identity_before_parent_ack": true,
+      "creation_only_in_current_acknowledged_first_publication": true,
+      "exact_original_plan_and_anchor_bound": true,
+      "existing_first_owner_reused": true,
+      "independent_opening_and_current_family_authority_required": true,
+      "additional_paths_absent_before_ack": true,
+      "exclusive_creation": true,
+      "partial_or_foreign_slot_adoption": false,
+      "missing_retained_journal_initialization": false,
+      "one_order_requires_additional_creation_authority": false
+    }
   },
   "bounds": {
     "max_wall_millis": 60000,
@@ -538,7 +555,7 @@
     "default_game_ticks": 0,
     "current_joint_stock_proof_required": true,
     "all_met_watch_has_clock_target": false,
-    "reopening_before_first_multi_order_original_allows_new_clock_initialization": false,
+    "reopening_before_first_multi_order_original_allows_new_clock_initialization": true,
     "tests_executed": false,
     "integrated_rust_qualified": false,
     "live_dfhack_qualified": false,
@@ -553,6 +570,15 @@
       "compilation_completed": false,
       "native_clock_dispatch_campaign_executed": false,
       "blocker": "No usable execution environment is available"
+    },
+    "preplan_restart_validation": {
+      "source_reviewed": true,
+      "runtime_tcp_regressions_authored": true,
+      "native_owner_regressions_authored": true,
+      "partial_creation_and_offline_refusal_covered": true,
+      "tests_executed": false,
+      "compilation_completed": false,
+      "blocker": "Execution environment unavailable; source review does not establish runtime or live qualification"
     }
   }
 }

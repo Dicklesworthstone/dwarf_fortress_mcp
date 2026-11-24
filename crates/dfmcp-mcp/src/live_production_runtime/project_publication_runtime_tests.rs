@@ -13,6 +13,8 @@ const OUTPUT: &str = "PROJECT_PUBLICATION_RUNTIME_OUTPUT";
 const STAGE: &str = "PROJECT_PUBLICATION_RUNTIME_STAGE";
 const CLOCKS: &str = "PROJECT_PUBLICATION_RUNTIME_CLOCKS";
 const ONE_ORDER: &str = "PROJECT_PUBLICATION_RUNTIME_ONE_ORDER";
+const ASSIGN_LABOR: &str = "PROJECT_PUBLICATION_RUNTIME_ASSIGN_LABOR";
+const FOREIGN_CLOCK: &[u8] = b"foreign clock bytes must never be adopted or overwritten";
 const ORIGINAL_FILES: &[&str] = &[
     "original.plan",
     "original.citizens",
@@ -33,11 +35,35 @@ fn budget() -> WorkBudget {
 }
 
 fn expected_order_steps() -> Vec<u32> {
+    let first = u32::from(std::env::var(ASSIGN_LABOR).as_deref() != Ok("0"));
     if std::env::var(ONE_ORDER).as_deref() == Ok("1") {
-        vec![1]
+        vec![first]
     } else {
-        vec![1, 2]
+        vec![first, first + 1]
     }
+}
+
+fn publication_case(requested: &str) -> (bool, bool, &str) {
+    let portfolio = requested.starts_with("portfolio_");
+    let case = requested.strip_prefix("portfolio_").unwrap_or(requested);
+    match case.strip_prefix("reopened_") {
+        Some(case) => (portfolio, true, case),
+        None if case == "reopened" => (portfolio, true, "published"),
+        None => (portfolio, false, case),
+    }
+}
+
+fn foreign_clock_file(path: &Path) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|_| invalid("cannot inject foreign project clock"))?;
+    file.write_all(FOREIGN_CLOCK)
+        .map_err(|_| invalid("cannot write foreign project clock"))
 }
 
 fn check_portfolio_clocks(reference: &Value, order: bool, inventory: bool) -> TestResult {
@@ -264,12 +290,7 @@ fn bind_project(config: &mut Config, goal: &ProjectStockGoal, origin: Digest32) 
 }
 
 fn control(requested_case: &str) -> TestResult {
-    let portfolio = requested_case.starts_with("portfolio_");
-    let case = requested_case
-        .strip_prefix("portfolio_")
-        .unwrap_or(requested_case);
-    let reopening = matches!(case, "reopened" | "reopened_refusal");
-    let case = if case == "reopened" { "published" } else { case };
+    let (portfolio, reopening, case) = publication_case(requested_case);
     let retained: Option<Value> = if reopening {
         Some(serde_json::from_slice(&std::fs::read(std::env::var(
             INPUT,
@@ -337,7 +358,8 @@ fn control(requested_case: &str) -> TestResult {
     } else {
         let mut value = json!({
             "deadline_tick":runtime.anchor.tick.get() + 300,
-            "poll_interval_ticks":5,"stable_samples":2,"assign_labor":true,
+            "poll_interval_ticks":5,"stable_samples":2,
+            "assign_labor":std::env::var(ASSIGN_LABOR).as_deref() != Ok("0"),
         });
         if portfolio {
             value["targets"] = json!([
@@ -383,6 +405,15 @@ fn control(requested_case: &str) -> TestResult {
     let order_directory = Path::new(order_config["directory"].as_str().ok_or("missing order directory")?);
     let order_clock = runtime.config.clock.is_some();
     let inventory_clock = runtime.config.inventory_clock.is_some();
+    let collision_path = order_directory.join(if inventory_clock {
+        "portfolio-2-inventory-clock.journal"
+    } else {
+        "portfolio-2-clock.journal"
+    });
+    if case == "existing_slot" {
+        assert!(portfolio && (order_clock || inventory_clock));
+        foreign_clock_file(&collision_path)?;
+    }
     let before_plan = custody_bytes()?;
     let mut recorded = None;
     let mut calls = 0_u32;
@@ -413,6 +444,9 @@ fn control(requested_case: &str) -> TestResult {
         recorded = Some(intended);
         if case == "ack_refusal" {
             return Err(denied("injected parent ACK refusal"));
+        }
+        if case == "slot_collision" {
+            foreign_clock_file(&collision_path)?;
         }
         if case == "partial" {
             // A successful parent ACK followed by a competing/incomplete child
@@ -474,14 +508,28 @@ fn control(requested_case: &str) -> TestResult {
                 no_work_parent_floor(&mut runtime, &goal)?;
             }
         }
-        "reopened_refusal" => {
+        "existing_slot" | "missing_authority" => {
             assert!(portfolio && (order_clock || inventory_clock));
             assert!(result.is_err());
-            assert_eq!(calls, 0, "reopen refused only after parent ACK");
+            assert_eq!(calls, 0, "invalid new-slot publication reached parent ACK");
             assert!(recorded.is_none());
             assert!(!runtime.initialization_failed);
             assert!(runtime.original.is_none());
             assert_eq!(custody_bytes()?, before_plan);
+        }
+        "slot_collision" => {
+            assert!(result.is_err());
+            assert_eq!(calls, 1);
+            assert!(runtime.initialization_failed);
+            assert!(directory.join("original.plan").is_file());
+            assert!(directory.join("execution.journal").is_file());
+            if order_clock && inventory_clock {
+                assert!(
+                    order_directory.join("portfolio-2-clock.journal").is_file(),
+                    "fixture must fail after creating the first additional header"
+                );
+            }
+            assert_eq!(std::fs::read(&collision_path)?, FOREIGN_CLOCK);
         }
         "ack_refusal" => {
             assert!(result.is_err());
@@ -577,14 +625,7 @@ fn control(requested_case: &str) -> TestResult {
 }
 
 fn recover(requested_case: &str) -> TestResult {
-    let case = requested_case
-        .strip_prefix("portfolio_")
-        .unwrap_or(requested_case);
-    let case = if case == "reopened" {
-        "published"
-    } else {
-        case
-    };
+    let (_, _, case) = publication_case(requested_case);
     let retained: Value = serde_json::from_slice(&std::fs::read(std::env::var(INPUT)?)?)?;
     let goal: ProjectStockGoal = serde_json::from_value(retained["goal"].clone())?;
     let intent = match ProjectProductionIntent::from_json(&retained["intent"]) {

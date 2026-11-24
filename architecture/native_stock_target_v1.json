@@ -242,7 +242,21 @@
       "recovery_validates_complete_assignment_layout": true
     },
     "runtime_peer_existing_worker_cases": 11,
-    "runtime_peer_assignment_cases": 14
+    "runtime_peer_assignment_cases": 14,
+    "fixed_project_preplan_restart": {
+      "supported": true,
+      "requires_acknowledged_first_original_publication": true,
+      "configured_clock_families": [
+        "order",
+        "inventory"
+      ],
+      "exact_new_fixed_slot_identities_bound_before_creation": true,
+      "independent_current_and_opening_clock_authority_required": true,
+      "exclusive_creation": true,
+      "retained_original_recovery_creates_missing_journals": false,
+      "partial_publication_repaired": false,
+      "execution_evidence": "source_review_and_authored_regressions; compilation_and_execution_unavailable"
+    }
   },
   "no_work_watch": {
     "owner_bead": "df-native-stock-target-3m9",
