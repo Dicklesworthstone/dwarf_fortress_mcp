@@ -534,7 +534,8 @@ fn session_tasks_with(
             payload["schema"] = json!("dfmcp.lab-tasks/1");
             payload["session_id"] = json!(session_id_hex);
             payload["resource"] = json!(uri);
-            payload["max_active"] = json!(1);
+            payload["max_active"] = json!(crate::task_store::MAX_ACTIVE_TASKS);
+                payload["max_active_per_session"] = json!(1);
             payload["max_retained"] = json!(crate::task_store::MAX_RETAINED_TASKS);
             payload["retention"] = json!("process_lifetime");
             payload["scope"] = json!("laboratory_process_only");

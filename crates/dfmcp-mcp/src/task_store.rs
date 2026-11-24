@@ -1,17 +1,20 @@
 //! Bounded process-local Tasks custody for the laboratory only.
 //!
 //! The pinned upstream store owns every Tasks state transition and dispatch
-//! fence. This wrapper adds the application's one-active-monitor admission
-//! bound and session-bound discovery; it does not redefine the wire protocol.
+//! fence. This wrapper bounds concurrent monitors globally and per session,
+//! preserving session-bound discovery and original game-work custody.
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration as StdDuration;
+use std::time::{Duration as StdDuration, Instant};
 
+use asupersync::Cx;
 use fastmcp_core::crypto::Sha256Digest;
 use fastmcp_rust::{
-    FinalTask, FinalTaskId, FinalTaskInputResponses, FinalTaskSnapshot,
-    FinalTaskStatusNotification, FinalTaskStore, FinalTaskWorkDescriptor, InMemoryFinalTaskStore,
-    McpError, McpResult,
+    FinalTask, FinalTaskAcceptedInputClaim, FinalTaskAccessMetadata, FinalTaskExecutionBudget,
+    FinalTaskExecutionLimits, FinalTaskId, FinalTaskInitialWorkClaim, FinalTaskInputResponses,
+    FinalTaskOperation, FinalTaskRetentionDeadline, FinalTaskSnapshot, FinalTaskStatusNotification,
+    FinalTaskStore, FinalTaskWorkDescriptor, InMemoryFinalTaskStore, McpError, McpResult,
+    TaskRetentionAuditPage, TaskRetentionPolicy, TaskRetentionReason, TaskRetentionReclamation,
 };
 use serde_json::{Value, json};
 
@@ -20,6 +23,8 @@ use crate::task_service::TaskWork;
 /// Terminal task history is retained until process exit, with an explicit
 /// hard bound. Task TTL therefore cannot erase an unfinished game obligation.
 pub(crate) const MAX_RETAINED_TASKS: usize = 256;
+/// One monitor owns each session; independent sessions share a bounded runner.
+pub(crate) const MAX_ACTIVE_TASKS: usize = 8;
 
 #[derive(Clone)]
 struct TaskRecord {
@@ -30,6 +35,9 @@ struct TaskRecord {
     ordinal: usize,
     final_evidence: Option<Value>,
     terminal_failure: Option<String>,
+    /// Framework execution expiry ends the monitor, never its original game
+    /// work. Keep that failure separate from immutable game-proof evidence.
+    execution_failure: Option<Value>,
     dispatch_started: bool,
     /// The application supervisor future still owns this monitor, even if its
     /// terminal wire transition has just been published.
@@ -62,10 +70,38 @@ impl Drop for MonitorScope {
 
 impl LabTaskStore {
     pub(crate) fn new() -> McpResult<Arc<Self>> {
+        Self::with_clock(Arc::new(Instant::now))
+    }
+
+    fn with_clock(clock: Arc<dyn Fn() -> Instant + Send + Sync>) -> McpResult<Arc<Self>> {
+        let inner = InMemoryFinalTaskStore::with_clock_payload_and_execution_limits(
+            MAX_RETAINED_TASKS,
+            InMemoryFinalTaskStore::DEFAULT_MAX_PAYLOAD_BYTES,
+            FinalTaskExecutionLimits::new(
+                StdDuration::from_secs(24 * 60 * 60),
+                StdDuration::from_secs(60 * 60),
+                8,
+            )?,
+            clock,
+        )?
+        // Upstream owners are authenticated principals. All unprotected
+        // sessions share one principal; local session admission is below.
+        .with_execution_capacity(MAX_ACTIVE_TASKS, MAX_ACTIVE_TASKS)?
+        .with_owner_capacity(
+            MAX_RETAINED_TASKS,
+            InMemoryFinalTaskStore::DEFAULT_MAX_PAYLOAD_BYTES,
+        )?;
         Ok(Arc::new(Self {
-            inner: InMemoryFinalTaskStore::new(MAX_RETAINED_TASKS)?,
+            inner,
             records: Mutex::new(BTreeMap::new()),
         }))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_clock(
+        clock: Arc<dyn Fn() -> Instant + Send + Sync>,
+    ) -> McpResult<Arc<Self>> {
+        Self::with_clock(clock)
     }
 
     fn records(&self) -> McpResult<MutexGuard<'_, BTreeMap<FinalTaskId, TaskRecord>>> {
@@ -80,7 +116,8 @@ impl LabTaskStore {
         notification: FinalTaskStatusNotification,
         descriptor: FinalTaskWorkDescriptor,
         principal: Option<Sha256Digest>,
-    ) -> McpResult<()> {
+        operation: Option<FinalTaskOperation>,
+    ) -> McpResult<FinalTaskSnapshot> {
         let work = TaskWork::parse(descriptor.as_value())?;
         let observation_binding = if work.is_set_observer() {
             let observed = work
@@ -95,8 +132,8 @@ impl LabTaskStore {
         } else {
             None
         };
-        // Admission and the upstream create share this lock. A concurrent
-        // task call cannot slip past the single-monitor bound.
+        // Admission and the upstream create share this lock. Concurrent task
+        // calls cannot exceed the process or canonical-session allowance.
         let mut records = self.records()?;
         // Validation can finish before a concurrent explicit session close.
         // Close holds this custody lock through registration removal, so this
@@ -108,31 +145,52 @@ impl LabTaskStore {
                 "laboratory retained task capacity reached; no plan was dispatched",
             ));
         }
-        for id in records.keys() {
-            if self.inner.get_task(id)?.is_some_and(|task| {
-                matches!(
-                    task,
+        let mut active = 0;
+        for (id, record) in records.iter() {
+            let retained = self.inner.get_task(id)?.ok_or_else(|| {
+                McpError::internal_error(
+                    "retained laboratory task is unavailable; creation refused",
+                )
+            })?;
+            if record.supervisor_active
+                || matches!(
+                    retained,
                     FinalTask::Working(_) | FinalTask::InputRequired { .. }
                 )
-            }) {
-                return Err(McpError::invalid_params(
-                    "one laboratory task monitor is already active; finish or cancel it before creating another task; no plan was dispatched",
-                ));
+            {
+                if record.work.session_id() == work.session_id() {
+                    return Err(McpError::invalid_params(
+                        "one laboratory task monitor already owns this session; finish or cancel it before creating another task; no plan was dispatched",
+                    ));
+                }
+                active += 1;
             }
+        }
+        if active >= MAX_ACTIVE_TASKS {
+            return Err(McpError::invalid_params(
+                "laboratory active task capacity reached; at most eight session monitors may run; no plan was dispatched",
+            ));
         }
         let id = task.base().task_id.clone();
         let ordinal = records.len();
-        match principal {
-            Some(principal) => self.inner.create_task_with_authenticated_work(
+        let committed = match (operation, principal) {
+            (Some(operation), principal) => self.inner.create_task_with_operation(
+                task,
+                notification,
+                descriptor,
+                principal,
+                operation,
+            )?,
+            (None, Some(principal)) => self.inner.create_task_with_authenticated_work(
                 task,
                 notification,
                 descriptor,
                 principal,
             )?,
-            None => self
+            (None, None) => self
                 .inner
                 .create_task_with_work(task, notification, descriptor)?,
-        }
+        };
         records.insert(
             id,
             TaskRecord {
@@ -142,11 +200,12 @@ impl LabTaskStore {
                 ordinal,
                 final_evidence: None,
                 terminal_failure: None,
+                execution_failure: None,
                 dispatch_started: false,
                 supervisor_active: false,
             },
         );
-        Ok(())
+        Ok(committed)
     }
 
     pub(crate) fn monitor_scope(self: &Arc<Self>, id: &FinalTaskId) -> McpResult<MonitorScope> {
@@ -223,6 +282,20 @@ impl LabTaskStore {
             .get(id)
             .map(|record| record.work.clone())
             .ok_or_else(|| McpError::invalid_params("Task not found"))
+    }
+
+    /// Access metadata must not clone original work or observation payloads.
+    fn readable_task(&self, id: &FinalTaskId) -> McpResult<bool> {
+        let session_id = {
+            let records = self.records()?;
+            let Some(record) = records.get(id) else {
+                return Ok(false);
+            };
+            record.work.session_id().to_owned()
+        };
+        crate::server::task_session::read_authority(&session_id)
+            .map_err(|error| McpError::invalid_params(error.to_string()))?;
+        Ok(true)
     }
 
     pub(crate) fn terminal_evidence(
@@ -421,10 +494,11 @@ impl LabTaskStore {
                 .inner
                 .get_task(id)?
                 .ok_or_else(|| McpError::internal_error("retained laboratory task missing"))?;
-            let active = matches!(
-                task,
-                FinalTask::Working(_) | FinalTask::InputRequired { .. }
-            );
+            let active = record.supervisor_active
+                || matches!(
+                    task,
+                    FinalTask::Working(_) | FinalTask::InputRequired { .. }
+                );
             let mut row = json!({
                 "task_id": id.as_str(), "plan_digest": record.work.plan_digest(),
                 "monitor_kind":record.work.monitor_kind(),
@@ -433,6 +507,13 @@ impl LabTaskStore {
                 "get": {"method": "tasks/get", "params": {"taskId": id.as_str()}},
                 "details": format!("df://session/{}/task-{}", record.work.session_id(), id.as_str()),
             });
+            if record.execution_failure.is_some() {
+                row["stage"] = json!("monitor_expired");
+                row["execution_failure"] = json!({
+                    "scope":"task_monitor_only", "original_work_preserved":true,
+                    "physical_quiescence_certified":false, "blind_retry_allowed":false,
+                });
+            }
             record.work.attach_selection(&mut row);
             if let Some(binding) = &record.observation_binding {
                 row["actual_plan_digests"] = binding["plan_digests"].clone();
@@ -479,6 +560,10 @@ impl LabTaskStore {
             "monitor_kind":record.work.monitor_kind(),"cancellation_scope":record.work.cancellation_scope(),
             "task": task, "progress": record.progress, "final_evidence": record.final_evidence,
             "scope": "laboratory_process_only"});
+        if let Some(failure) = &record.execution_failure {
+            detail["execution_failure"] = failure.clone();
+            detail["progress_scope"] = json!("historical_retained_monitor_observations");
+        }
         record.work.attach_selection(&mut detail);
         if let Some(binding) = &record.observation_binding {
             detail["observation_binding"] = binding.clone();
@@ -512,6 +597,113 @@ fn same_drained_receipts(prior: &Value, current: &Value) -> bool {
 }
 
 impl FinalTaskStore for LabTaskStore {
+    fn retention_administration_policy(&self) -> McpResult<TaskRetentionPolicy> {
+        self.inner.retention_administration_policy()
+    }
+
+    fn reclaim_terminal_task_if_current(
+        &self,
+        cx: &Cx,
+        task_id: &FinalTaskId,
+        generation: u64,
+        reason: TaskRetentionReason,
+    ) -> McpResult<TaskRetentionReclamation> {
+        // The installed administrator denies public reclamation. Keep this
+        // trusted backend contract coherent without releasing a live tail.
+        let mut records = self.records()?;
+        if records
+            .get(task_id)
+            .is_some_and(|record| record.supervisor_active)
+        {
+            return Ok(TaskRetentionReclamation::NotCurrent);
+        }
+        let outcome = self
+            .inner
+            .reclaim_terminal_task_if_current(cx, task_id, generation, reason)?;
+        if matches!(&outcome, TaskRetentionReclamation::Reclaimed(_)) {
+            records.remove(task_id);
+        }
+        Ok(outcome)
+    }
+
+    fn task_retention_audit(
+        &self,
+        cx: &Cx,
+        after: Option<u64>,
+        limit: usize,
+    ) -> McpResult<TaskRetentionAuditPage> {
+        self.inner.task_retention_audit(cx, after, limit)
+    }
+
+    fn execution_limits(&self) -> McpResult<FinalTaskExecutionLimits> {
+        self.inner.execution_limits()
+    }
+
+    fn task_execution_budget_if_current(
+        &self,
+        expected: &FinalTaskSnapshot,
+    ) -> McpResult<Option<FinalTaskExecutionBudget>> {
+        self.inner.task_execution_budget_if_current(expected)
+    }
+
+    fn expire_task_execution_if_current(
+        &self,
+        expected: &FinalTaskSnapshot,
+    ) -> McpResult<Option<FinalTaskSnapshot>> {
+        let id = &expected.task().base().task_id;
+        let mut records = self.records()?;
+        let Some(record) = records.get_mut(id) else {
+            return Ok(None);
+        };
+        let committed = self.inner.expire_task_execution_if_current(expected)?;
+        if let Some(snapshot) = &committed {
+            // Framework expiry retires only the monitor. Its original work
+            // and any already captured terminal proof keep their identities.
+            let message = match snapshot.task() {
+                FinalTask::Failed { error, .. } => error.message.as_str(),
+                _ => "Task execution budget exhausted",
+            };
+            let mut failure = json!({
+                "schema":"dfmcp.lab-task-execution-failure/1",
+                "task_id":id.as_str(), "session_id":record.work.session_id(),
+                "plan_digest":record.work.plan_digest(),
+                "monitor_kind":record.work.monitor_kind(),
+                "cancellation_scope":record.work.cancellation_scope(),
+                "scope":"task_monitor_only", "status":"failed",
+                "reason":{"code":"task_execution_budget_exhausted", "message":message},
+                "proof_status":"unknown", "physical_quiescent":null,
+                "physical_quiescence_certified":false,
+                "effect_cancellation_requested":false, "physical_work_changed":false,
+                "original_work_preserved":true, "original_receipts_changed":false,
+                "blind_retry_allowed":false, "dispatch_started":record.dispatch_started,
+                "last_observation":{
+                    "scope":"historical_retained_monitor_progress",
+                    "stage":record.progress["stage"],
+                    "observed_anchor":record.progress["obligation"]["observed_anchor"],
+                    "details":format!("df://session/{}/task-{}", record.work.session_id(), id.as_str()),
+                },
+                "final_evidence_preserved":true,
+                "final_evidence_available_at_expiry":record.final_evidence.is_some(),
+                "next_step":{
+                    "tool":"fortress.observe",
+                    "arguments":{"session_id":record.work.session_id()},
+                    "note":"Inspect retained original work before separately authorized continuation or cancellation.",
+                },
+            });
+            record.work.attach_selection(&mut failure);
+            if let Some(binding) = &record.observation_binding {
+                failure["actual_plan_digests"] = binding["plan_digests"].clone();
+                failure["observation_binding"] = binding.clone();
+            }
+            record.execution_failure = Some(failure);
+        }
+        Ok(committed)
+    }
+
+    fn next_expired_execution_snapshot(&self) -> McpResult<Option<FinalTaskSnapshot>> {
+        self.inner.next_expired_execution_snapshot()
+    }
+
     fn create_task(
         &self,
         _task: FinalTask,
@@ -527,8 +719,8 @@ impl FinalTaskStore for LabTaskStore {
         task: FinalTask,
         notification: FinalTaskStatusNotification,
         descriptor: FinalTaskWorkDescriptor,
-    ) -> McpResult<()> {
-        self.create_owned(task, notification, descriptor, None)
+    ) -> McpResult<FinalTaskSnapshot> {
+        self.create_owned(task, notification, descriptor, None, None)
     }
 
     fn create_task_with_authenticated_work(
@@ -537,27 +729,42 @@ impl FinalTaskStore for LabTaskStore {
         notification: FinalTaskStatusNotification,
         descriptor: FinalTaskWorkDescriptor,
         principal: Sha256Digest,
-    ) -> McpResult<()> {
-        self.create_owned(task, notification, descriptor, Some(principal))
+    ) -> McpResult<FinalTaskSnapshot> {
+        self.create_owned(task, notification, descriptor, Some(principal), None)
+    }
+
+    fn create_task_with_operation(
+        &self,
+        task: FinalTask,
+        notification: FinalTaskStatusNotification,
+        descriptor: FinalTaskWorkDescriptor,
+        principal: Option<Sha256Digest>,
+        operation: FinalTaskOperation,
+    ) -> McpResult<FinalTaskSnapshot> {
+        self.create_owned(task, notification, descriptor, principal, Some(operation))
+    }
+
+    fn get_task_access_metadata(
+        &self,
+        task_id: &FinalTaskId,
+    ) -> McpResult<Option<FinalTaskAccessMetadata>> {
+        if !self.readable_task(task_id)? {
+            return Ok(None);
+        }
+        self.inner.get_task_access_metadata(task_id)
     }
 
     fn get_task(&self, task_id: &FinalTaskId) -> McpResult<Option<FinalTask>> {
-        if !self.records()?.contains_key(task_id) {
+        if !self.readable_task(task_id)? {
             return Ok(None);
         }
-        let work = self.original_work(task_id)?;
-        crate::server::task_session::read_authority(work.session_id())
-            .map_err(|error| McpError::invalid_params(error.to_string()))?;
         self.inner.get_task(task_id)
     }
 
     fn get_task_snapshot(&self, task_id: &FinalTaskId) -> McpResult<Option<FinalTaskSnapshot>> {
-        if !self.records()?.contains_key(task_id) {
+        if !self.readable_task(task_id)? {
             return Ok(None);
         }
-        let work = self.original_work(task_id)?;
-        crate::server::task_session::read_authority(work.session_id())
-            .map_err(|error| McpError::invalid_params(error.to_string()))?;
         self.inner.get_task_snapshot(task_id)
     }
 
@@ -585,7 +792,7 @@ impl FinalTaskStore for LabTaskStore {
         task: FinalTask,
         notification: FinalTaskStatusNotification,
         input_responses: FinalTaskInputResponses,
-    ) -> McpResult<bool> {
+    ) -> McpResult<Option<FinalTaskSnapshot>> {
         self.inner.replace_task_and_append_input_if_current(
             expected,
             task,
@@ -599,7 +806,7 @@ impl FinalTaskStore for LabTaskStore {
         expected: &FinalTaskSnapshot,
         task: FinalTask,
         notification: FinalTaskStatusNotification,
-    ) -> McpResult<bool> {
+    ) -> McpResult<Option<FinalTaskSnapshot>> {
         self.inner
             .replace_task_and_clear_input_if_current(expected, task, notification)
     }
@@ -612,7 +819,7 @@ impl FinalTaskStore for LabTaskStore {
         cancellation_required: bool,
         task: FinalTask,
         notification: FinalTaskStatusNotification,
-    ) -> McpResult<bool> {
+    ) -> McpResult<Option<FinalTaskSnapshot>> {
         if cancellation_required {
             self.ensure_drained(&expected.task().base().task_id)?;
         }
@@ -625,6 +832,48 @@ impl FinalTaskStore for LabTaskStore {
                 task,
                 notification,
             )
+    }
+
+    fn update_working_status_for_handoff_if_current(
+        &self,
+        expected: &FinalTaskSnapshot,
+        owner_id: &str,
+        dispatch_fence: u64,
+        task: FinalTask,
+        notification: FinalTaskStatusNotification,
+    ) -> McpResult<Option<FinalTaskSnapshot>> {
+        self.inner.update_working_status_for_handoff_if_current(
+            expected,
+            owner_id,
+            dispatch_fence,
+            task,
+            notification,
+        )
+    }
+
+    fn get_handoff_access_metadata(
+        &self,
+        task_id: &FinalTaskId,
+        claim_generation: u64,
+        owner_id: &str,
+        dispatch_fence: u64,
+    ) -> McpResult<Option<FinalTaskAccessMetadata>> {
+        if !self.readable_task(task_id)? {
+            return Ok(None);
+        }
+        self.inner
+            .get_handoff_access_metadata(task_id, claim_generation, owner_id, dispatch_fence)
+    }
+
+    fn take_input_handoff_for_owner_if_current(
+        &self,
+        expected: &FinalTaskSnapshot,
+        owner_id: &str,
+    ) -> McpResult<Option<FinalTaskAcceptedInputClaim>> {
+        // Forward the attested claim intact: reconstructing it would discard
+        // the upstream execution-permit custody of this owner.
+        self.inner
+            .take_input_handoff_for_owner_if_current(expected, owner_id)
     }
 
     fn take_input_if_current(
@@ -659,6 +908,15 @@ impl FinalTaskStore for LabTaskStore {
         after_task_id: Option<&FinalTaskId>,
     ) -> McpResult<Option<FinalTaskSnapshot>> {
         self.inner.next_initial_work_snapshot_after(after_task_id)
+    }
+
+    fn take_initial_work_handoff_for_owner_if_current(
+        &self,
+        expected: &FinalTaskSnapshot,
+        owner_id: &str,
+    ) -> McpResult<Option<FinalTaskInitialWorkClaim>> {
+        self.inner
+            .take_initial_work_handoff_for_owner_if_current(expected, owner_id)
     }
 
     fn take_initial_work_if_current(
@@ -851,6 +1109,19 @@ impl FinalTaskStore for LabTaskStore {
 
     fn is_cancellation_requested(&self, task_id: &FinalTaskId) -> McpResult<bool> {
         self.inner.is_cancellation_requested(task_id)
+    }
+
+    fn retention_clock_now(&self) -> Instant {
+        self.inner.retention_clock_now()
+    }
+
+    fn task_retention_deadline_if_current(
+        &self,
+        task_id: &FinalTaskId,
+        generation: u64,
+    ) -> McpResult<Option<FinalTaskRetentionDeadline>> {
+        self.inner
+            .task_retention_deadline_if_current(task_id, generation)
     }
 }
 

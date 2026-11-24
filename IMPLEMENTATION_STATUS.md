@@ -1,5 +1,57 @@
 # Implementation Status
 
+## Unreleased — Supervise independent laboratory Tasks concurrently
+
+Modern MCP Tasks now share a bounded concurrent application service: up to
+eight monitors across independent fortress sessions, with one monitor per
+canonical session. Commit, scalar observation and selected-set observation
+share the same admission limits. Queued and running Tasks count against
+capacity, and a terminal Task keeps its slot until its supervisor scope closes.
+Admission still precedes effects and preserves pending review on refusal.
+
+Each monitor owns a separate foreground-progress registration. A paused
+original cannot occupy the runner's only worker or replace another monitor's
+waker. Foreground changes wake every retained supervisor; monitors themselves
+do not advance time, poll effects or dispatch successors. Recovery uses a
+separate owned registration and a generation check to retain progress arriving
+around registration. Closing or cancelling one monitor does not drop another
+session's ownership or stop its physical work.
+
+The exact FastMCP pin advances to
+`5c675454609dc7919d6385bd7d8b62a38968d813` (0.14.0), consuming the upstream
+owned concurrent runner and execution-permit fixes. The actual Cargo-produced
+lock uses Asupersync 0.6.2 and serde_json 1.0.154. The wrapper forwards exact
+committed snapshots, typed handoff claims, current access metadata and the real
+retention contract; private execution permits are never reconstructed.
+
+Execution is finite: 24 hours total, one hour per supervisor attempt and eight
+claims. Expiry fails only monitoring, retains exact original selection and
+historical observation diagnostics, preserves previously captured terminal
+proof, and makes no new success or physical-quiescence claim. Original game
+work and receipts remain unchanged. The installed retention administrator
+refuses reclamation, preserving `ttlMs: null` history with a 256-record limit.
+Execution expiry cannot silently erase unfinished work or release history.
+
+Five actual-source progress-registration tests pass on nightly 2026-11-24.
+The exact locked dependency graph resolves and fetches; dependency policy and
+locked metadata checks pass. Source review covers every new FastMCP store
+method and retained default. The existing process capacity case now fills all eight slots before
+checking refusal and verifies per-session capacity discovery. Executable MCP
+and subprocess validation is not yet established.
+
+Both single-job locked/offline MCP checks were killed by SIGKILL while
+compiling Asupersync 0.6.2, before application diagnostics; the second used
+single-frontend-thread and lower-MIR-optimization compiler flags with the same
+exact sources. Repository verification passed its source, schema, admission
+and dependency checks before stopping because the Beads CLI `br` is absent.
+Local release qualification refused the dirty worktree as designed. No full Rust,
+native/live or admission qualification is claimed. Task handles remain
+process local; restart-persistent supervision and independently observable
+asynchronous drain phases remain open.
+
+Owners: `df-fastmcp-conformance-5pj.3`, `df-tasks-projection-tests-yy4`
+(in progress).
+
 ## Unreleased — Compare complete selected project portfolios
 
 Opt-in laboratory comparison version 5 combines each production or room

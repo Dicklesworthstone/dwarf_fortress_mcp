@@ -435,24 +435,42 @@ not process-local Task identities, Task notifications or native game behavior.
 
 ## Capacity and retention
 
-The first implementation admits **one active task monitor per server process**
-and retains at most **256 task records**, shared by commit, scalar observation and set observation
-Tasks. The upstream runner owns one active
-supervisor handoff at a time, and this bound is enforced before dispatch so a
-second accepted task cannot starve behind an unfinished monitor. Ordinary
-fortress tools can still operate on multiple plans and sessions.
+The laboratory admits **up to eight active Task monitors per server process**,
+with **one active monitor per canonical fortress session**. Commit, scalar
+observation and selected-set observation Tasks share these limits. The upstream
+runner owns eight concurrent supervisor handoffs; a paused or unfinished Task
+does not hold every other session behind it. Each supervisor owns its own
+foreground-progress wakeup, so one explicit change to a shared fortress can
+wake every affected monitor. Monitors themselves still advance no game time.
+
+Admission counts queued, working and input-required Tasks, and also a terminal
+Task whose supervisor scope has not yet closed. That final scope must settle
+before its slot can be reused or its session can close. Session aliases use the
+same canonical identity. Reaching either active bound refuses before commit,
+observer effects or changes to pending review. Ordinary fortress tools can
+continue to operate on multiple plans in each session.
 
 Task admission accepts at most 64 original actions and requires at least
 1,500 output tokens and 6,000 bytes so a complete bounded summary can be
 returned. The ordinary conservative session defaults satisfy these bounds.
 
-Tasks have process-lifetime retention (`ttlMs: null`), bounded by the record
-limit. A time-to-live must not silently erase an unfinished game obligation.
-Once the retained-record limit is reached, new task creation is refused before
-effects; retained evidence remains readable. Larger concurrent supervision
-and restart-persistent task identities remain future work, as do independently
-observable asynchronous drain stages for adapters that cannot drain in one
-bounded call.
+Execution and history have separate lifetimes. The store enforces a **24-hour
+total execution lifetime**, **one hour per supervisor attempt**, and **eight
+execution claims**. Expiry fails the monitor; it does not cancel, drain, advance
+or redispatch the original game work. The Task detail retains the exact
+selection, framework expiry reason and any last observation as historical
+evidence, with no new success or physical-quiescence claim. Review the original
+through the explicit foreground tools before deciding how to continue.
+
+Tasks retain process-lifetime history (`ttlMs: null`), bounded by **256 records**.
+The embedding installs a separate retention administrator that refuses
+reclamation, preserving this policy under the newer framework contract. Once
+history is full, new creation refuses before effects; existing evidence stays
+readable. Supervisor execution expiry does not free this history allowance.
+
+Restart-persistent Task identities and independently observable asynchronous
+drain stages for adapters that cannot drain in one bounded call remain future
+work.
 
 ## Regression entry points
 
@@ -460,6 +478,7 @@ bounded call.
 cargo test --locked --offline -p dfmcp-mcp --test tasks_tests
 cargo test --locked --offline -p dfmcp-mcp --lib server::task_session
 cargo test --locked --offline -p dfmcp-mcp --lib task_service::observer_request_tests
+cargo test --locked --offline -p dfmcp-mcp --lib task_service::task_progress
 cargo test --locked --offline -p dfmcp-mcp --lib replay::task_tests
 python scripts/test_replay_bundle_schema.py
 cargo test --locked --offline -p dwarf-fortress-mcp --test modern_tasks_golden
@@ -468,7 +487,11 @@ cargo test --locked --offline -p dwarf-fortress-mcp --test modern_tasks_golden
 The process tests use the real `serve` binary and explicit laboratory game
 ticks, with bounded response waits and owned reader cleanup. They cover
 negotiation, task discovery, original-plan progress, completion evidence,
-idempotent effects, capacity refusal, cancellation and deadline failure. Test
+idempotent effects, capacity refusal, cancellation and deadline failure. The
+concurrency cases cover a paused Task beside a separately completing Task,
+isolated monitor cancellation and shared-world foreground wakeups. Store
+regressions cover canonical per-session limits, global capacity, supervisor-tail
+custody, session close and execution-expiry evidence. Test
 results qualify only their exercised laboratory behavior; they do not replace
 the repository's full qualification gates.
 
@@ -492,5 +515,5 @@ A session can call `fortress.cancel` with `scope: "plan:<original-plan-digest>"`
 to stop one exact retained commit independently of which plan is latest or
 which monitor is active. The complete original action set and current scoped
 authority are checked before effects, and physical drain evidence remains
-separate from historical proof. This does not add Task owners or change the
-single-active-monitor contract. See `LAB_PLAN_CANCELLATION.md`.
+separate from historical proof. This does not change Task ownership or the
+one-active-monitor-per-session bound. See `LAB_PLAN_CANCELLATION.md`.

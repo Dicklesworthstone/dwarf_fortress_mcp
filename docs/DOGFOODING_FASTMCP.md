@@ -58,13 +58,30 @@ which upstream regression forced it.
 | 2026-09-12 | `180a7c88890705217bb8e202d19555adabf24187` (main) | v0.0.1 / `dfmcp-k2y` | Upstream range `12d3469..180a7c8`; Asupersync 0.5.0 migration | Keeps modern-only `tasks`; replaces the removed implicit stdio entry with explicit owned runtime/context calls. Current conformance execution is pending; historical failures below are retained. |
 | 2026-11-03 | `13461caf1f23bef675e0588b5e0c5ba8cf81b9f8` (reviewed branch, direct child of `180a7c8`) | `dfmcp-reality-wiring-proof-4bf.25` | [#100](https://github.com/Dicklesworthstone/fastmcp_rust/issues/100): cooperative cancellation readback race | Narrow `tasks.rs` repair and regressions only; deterministic RED/GREEN below. Exact Git-pin downstream Tasks 7/7 and full clean `4ed1091` qualification pass; 43 gates and 5255 tests in each profile. The later evidence-documentation head is not implicitly qualified. |
 
+| 2026-11-24 | `5c675454609dc7919d6385bd7d8b62a38968d813` (main) | `df-fastmcp-conformance-5pj.3` | Upstream `13461caf..5c675454`: bounded concurrent handoffs (`3c9a85f4`), owner capacity (`92ccce89`), owned child-region execution (`210136f5`) and subsequent safety fixes | Consumes FastMCP 0.14.0 with Asupersync 0.6.2 and serde_json 1.0.154. Exact Cargo lock resolved and fetched; selected Tasks/modern-only profile retained. Application integration adds eight owned session monitors with independent progress registration, finite execution bounds and preserved history. Exact execution status below; older qualification does not transfer. |
+
 ## Conformance status
 
-The current pin is `13461caf`, the reviewed narrow cancellation repair directly
-on `180a7c8`, using published Asupersync 0.5.0. The earlier migration
-retains the existing wire assertions and adds bounded response waits with owned
-reader cleanup. Neither the pin bump nor its compilation resolves the historical
-findings below without executing their corresponding real subprocess tests.
+The current exact pin is `5c675454` (FastMCP 0.14.0), using published
+Asupersync 0.6.2. The wrapper forwards committed snapshots, attested execution
+claims, access metadata, execution clocks and the actual retention contract.
+The retained runner explicitly admits eight concurrent owned handoffs; the
+default single-worker setting is not used. A separate administrator denies
+history reclamation, while finite execution expiry stops only monitoring and
+preserves original work and proof.
+
+The selected dependency features remain modern-only Tasks. Actual locked
+metadata resolves upstream protocol-internal default JOSE support without
+enabling an authentication server, proxy or legacy MCP surface. The dependency
+policy check passes, and the exact graph was fetched with the Cargo-produced
+lockfile. Five tests of the actual new progress-registration module pass on
+nightly 2026-11-24. Both exact single-job locked/offline checks were killed
+by SIGKILL inside Asupersync 0.6.2, before application diagnostics; the retry
+used one compiler frontend thread and MIR optimization level zero. Full MCP
+compilation and subprocess conformance remain unestablished. Repository
+verification reached the Beads coverage gate and stopped because `br` is
+absent; local release qualification refused the dirty worktree. Neither the
+pin bump nor static checks transfer the historical qualification below.
 
 As of 2026-08-31, the v0.8.0 pin (`12d3469`) **fails the modern handshake
 golden tests in CI**: `test_negative_era_refusal_and_marker_validations`

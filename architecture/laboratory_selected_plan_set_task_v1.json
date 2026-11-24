@@ -86,11 +86,13 @@
   },
   "compatibility": {
     "logical_tool_count": 11,
-    "maximum_active_monitors": 1,
+    "maximum_active_monitors": 8,
+    "maximum_active_monitors_per_session": 1,
     "maximum_retained_tasks": 256,
     "existing_commit_task_effect_ownership": "unchanged",
     "existing_scalar_observer_behavior": "unchanged",
-    "upstream_pin_change": false,
+    "upstream_pin_change": true,
+    "upstream_pin": "5c675454609dc7919d6385bd7d8b62a38968d813",
     "native_protocol_change": false,
     "production_admission_change": false
   }

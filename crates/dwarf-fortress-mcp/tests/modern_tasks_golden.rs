@@ -175,11 +175,22 @@ impl StdioClient {
         paused: bool,
         max_output_tokens: u32,
     ) -> TestResult<String> {
+        self.open_configured(fortress, paused, max_output_tokens, false)
+    }
+
+    fn open_configured(
+        &mut self,
+        fortress: &str,
+        paused: bool,
+        max_output_tokens: u32,
+        shared: bool,
+    ) -> TestResult<String> {
         let opened = self.tool(
             "fortress_open_session",
             json!({
                 "fortress_selector": fortress,
                 "paused": paused,
+                "shared": shared,
                 "scenario": "starter_fortress",
                 "max_wall_millis": 60_000,
                 "max_game_ticks": 2_000,
@@ -453,7 +464,8 @@ fn modern_task_proves_every_original_step_and_preserves_terminal_evidence() -> T
     let initial = client.await_dispatch(&session, &id)?;
     assert_eq!(initial["plan_digest"], digest);
     let discovery = client.resource(&session, "tasks")?;
-    assert_eq!(discovery["max_active"], 1);
+    assert_eq!(discovery["max_active"], 8);
+    assert_eq!(discovery["max_active_per_session"], 1);
     assert_eq!(discovery["retention"], "process_lifetime");
     assert_eq!(discovery["tasks"].as_array().map(Vec::len), Some(1));
     assert_eq!(discovery["tasks"][0]["task_id"], id);
@@ -599,40 +611,66 @@ fn unnegotiated_task_refuses_without_consuming_the_sealed_plan() -> TestResult {
 fn task_capacity_refuses_before_effects_in_an_independent_session() -> TestResult {
     let mut client = StdioClient::spawn(true)?;
     client.discover()?;
-    let first = client.open("903", true)?;
-    let first_plan = client.plan(&first, false)?;
-    let id = client.start_task(&first, plan_digest(&first_plan)?)?;
-    client.await_dispatch(&first, &id)?;
-    let second = client.open("904", true)?;
+    let mut admitted = Vec::new();
+    for index in 0..8 {
+        let session = client.open(&(9030 + index).to_string(), true)?;
+        let plan = client.plan(&session, false)?;
+        let id = client.start_task(&session, plan_digest(&plan)?)?;
+        client.await_dispatch(&session, &id)?;
+        let page = client.resource(&session, "tasks")?;
+        assert_eq!(page["max_active"], 8);
+        assert_eq!(page["max_active_per_session"], 1);
+        assert_eq!(page["total"], 1);
+        admitted.push((session, id));
+    }
+    let first_id = &admitted[0].1;
+    let ninth = client.open("9038", true)?;
     assert_refused(&client.rpc(
         "resources/read",
-        json!({
-            "uri": format!("df://session/{second}/task-{id}")
-        }),
+        json!({"uri":format!("df://session/{ninth}/task-{first_id}")}),
     )?);
-    let second_plan = client.tool("fortress_plan", json!({
-        "session_id": second, "summary": "resume only if admission succeeds", "paused_target": false
-    }))?;
-    let digest = plan_digest(&second_plan)?;
-    let before = client.terrain(&second)?;
-    let refused = client.rpc(
-        "tools/call",
-        json!({"name": "fortress_commit", "arguments": {
-            "session_id": second, "plan_digest": digest, "as_task": true
-        }}),
+    let plan = client.tool(
+        "fortress_plan",
+        json!({
+            "session_id":ninth,"summary":"resume only if admission succeeds","paused_target":false,
+        }),
     )?;
-    assert_refused(&refused);
-    assert_eq!(client.terrain(&second)?["anchor"], before["anchor"]);
-    assert_eq!(client.resource(&second, "tasks")?["tasks"], json!([]));
-    assert_eq!(client.task(&id)?["status"], "working");
+    let digest = plan_digest(&plan)?.to_owned();
+    let before = client.terrain(&ninth)?;
+    assert_refused(&client.rpc(
+        "tools/call",
+        json!({"name":"fortress_commit","arguments":{
+            "session_id":ninth,"plan_digest":digest,"as_task":true,
+        }}),
+    )?);
+    assert_eq!(client.terrain(&ninth)?["anchor"], before["anchor"]);
+    assert_eq!(client.resource(&ninth, "tasks")?["tasks"], json!([]));
+    for (_, id) in &admitted {
+        assert_eq!(client.task(id)?["status"], "working");
+    }
+
+    // Capacity refusal must preserve the exact pending executable plan.
     let ordinary = client.tool(
         "fortress_commit",
-        json!({"session_id": second, "plan_digest": digest}),
+        json!({"session_id":ninth,"plan_digest":digest}),
     )?;
     assert_eq!(ordinary["actions"][0]["state"], "Verified");
     assert_eq!(ordinary["paused"], false);
-    client.method("tasks/cancel", json!({"taskId": id}))?;
-    client.await_terminal(&id, "cancelled")?;
+    client.method("tasks/cancel", json!({"taskId":first_id}))?;
+    client.await_terminal(first_id, "cancelled")?;
+    let replacement = client.start_task(&ninth, &digest)?;
+    let completed = client.await_terminal(&replacement, "completed")?;
+    let evidence = tool_payload(&completed["result"])?;
+    assert_actions_proven(&evidence, &digest, "Verified", 1)?;
+    assert_eq!(
+        evidence["actions"][0]["action_id"],
+        ordinary["actions"][0]["action_id"]
+    );
+    for (_, id) in admitted.iter().skip(1) {
+        assert_eq!(client.task(id)?["status"], "working");
+        client.method("tasks/cancel", json!({"taskId":id}))?;
+        client.await_terminal(id, "cancelled")?;
+    }
     Ok(())
 }
 

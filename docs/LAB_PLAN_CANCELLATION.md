@@ -227,7 +227,8 @@ change that changes the available stop invalidates an old explanation page.
 An offer is not a grant; cancellation checks current authority again.
 
 This foreground operation is independent of modern Tasks monitoring. It does
-not change the pinned runtime's single-active-monitor ownership contract.
+not change monitor ownership or the one-active-monitor-per-session bound.
+See [Task capacity](LAB_MCP_TASKS.md#capacity-and-retention).
 
 ## Stop pursuing a quiet goal
 

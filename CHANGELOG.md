@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Run independent laboratory Task monitors together
+
+- Supervise up to eight independent session monitors concurrently, with one per
+  canonical session and terminal supervisor tails included in capacity.
+- Give each owned monitor an independent progress wakeup; retain a separate
+  recovery registration and release only the ending supervisor's slot.
+- Consume exact FastMCP 0.14.0 pin `5c675454`, Asupersync 0.6.2 and the real
+  generated lock. Preserve typed execution permits, committed snapshots,
+  current authority checks and original-plan cancellation custody.
+- Bound execution to 24 hours total, one hour per attempt and eight claims.
+  Expiry preserves original work, immutable proof and explicit reconciliation
+  evidence. Retain up to 256 process-local histories without automatic reclaim.
+- Pass five actual-source wakeup tests and update existing process capacity
+  expectations. Complete MCP compilation and process execution remain
+  unestablished after both exact dependency builds were SIGKILLed before MCP.
+
 ## Unreleased — Compare candidates with complete selected peer projects
 
 - Add explicit version 5 portfolio comparisons to the existing Plan blueprint

@@ -60,7 +60,7 @@ dfmcp-lab (now) → DFHack bridge (later phases)
 `dfmcp/0` semantic negotiation remains authoritative above MCP negotiation: a client that speaks
 MCP but refuses `dfmcp/0` gets a session that can observe and plan nothing.
 
-The current framework pin uses published Asupersync 0.5.0 and explicit
+The current framework pin uses published Asupersync 0.6.2 and explicit
 `run_stdio_with_cx` startup. The stdio composition roots share one private
 runtime owner in `dfmcp-mcp`: one scheduler worker, a platform reactor, and at
 most sixteen on-demand blocking workers. The blocking pool keeps the receive
@@ -122,7 +122,7 @@ modern-only. Every request must supply modern era markers in `params._meta`:
 ```
 
 These laboratory examples target the exact
-`13461caf1f23bef675e0588b5e0c5ba8cf81b9f8` pin. The real subprocess lifecycle test
+`5c675454609dc7919d6385bd7d8b62a38968d813` pin. The real subprocess lifecycle test
 now covers discovery followed by all eleven tools, plan/commit and idempotent
 replay; it is no longer ignored. Historical v0.8.0 findings, including omitted
 `clientInfo`, remain recorded in `docs/DOGFOODING_FASTMCP.md` with their exact
@@ -202,8 +202,14 @@ cannot overwrite obligation state. Modern Tasks on this pin have no
 `tasks/list` or `tasks/result`: session handoffs and bounded
 `df://session/{id}/tasks` resources supply discovery.
 
-The initial implementation admits one active monitor per process and retains
-at most 256 task records until process exit. Cancellation proves the bounded
+The laboratory admits up to eight active monitors across independent sessions,
+with one monitor per canonical fortress session, and retains at most 256 Task
+records until process exit. The sanctioned upstream runner owns up to eight
+concurrent handoffs. Every monitor owns its foreground-progress registration,
+and a terminal Task retains its capacity until its supervisor scope has closed.
+Task execution has finite bounds (24 hours total, one hour per attempt, eight
+claims); expiry ends monitoring and preserves the original game work and
+reconciliation evidence. Execution expiry never proves goal success or drain. Cancellation proves the bounded
 laboratory drain before forwarding cancellation intent to the upstream store,
 retaining ordered request and finalization evidence. Separate client polls
 between those phases are not guaranteed. Full wire examples and the remaining
@@ -218,10 +224,11 @@ scope are in [`LAB_MCP_TASKS.md`](LAB_MCP_TASKS.md).
 3. **Gate 3: obligations as MCP Tasks.** The laboratory now has a bounded
    application-owned Tasks store (`ServerBuilder::final_tasks`) and sanctioned
    supervisor. `tasks/get|update|cancel` use the pinned modern protocol, while
-   original-plan evidence and cancellation remain engine-owned. One active
-   monitor, process-local history, and synchronous bounded cancellation are
-   the implemented scope; concurrent durable supervision and independently
-   observable asynchronous drain stages remain future work.
+   original-plan evidence and cancellation remain engine-owned. Eight concurrent
+   monitors, one per canonical session, process-local history, finite execution
+   bounds and synchronous bounded cancellation are the implemented scope.
+   Restart-persistent supervision and independently observable asynchronous
+   drain stages remain future work.
 4. **Gate 4: Streamable HTTP.** Same dfmcp semantics over the facade's HTTP transport, still
    modern-only, localhost-first.
 5. **Gate 5 (WP-21): conformance evidence.** Run the MCP 2026-07-28 conformance suite in local
@@ -233,8 +240,10 @@ scope are in [`LAB_MCP_TASKS.md`](LAB_MCP_TASKS.md).
 
 - Transport identity grants nothing: capability scopes come from `dfmcp-core` grants negotiated in
   `open_session`, never from the connection.
-- No auth/JOSE/OAuth features are enabled; the admitted profile is stdio/localhost-first. Remote
-  deployment is out of scope until a transport-boundary admission design exists.
+- The embedding selects only the Tasks feature and remains stdio/localhost-first;
+  it enables no remote authentication, OAuth server or proxy surface. Upstream
+  protocol internals include their default JOSE support in the resolved graph.
+  Remote deployment is out of scope until a transport-boundary admission design exists.
 - Untrusted-content rules are unchanged: game text, mod text, and MCP arguments are data; they
   cannot become commands or authority through the transport layer.
 

@@ -2,20 +2,20 @@
 //! The supervisor never advances game time. The original commit and every
 //! cancellation still enter the session's normal capability gates.
 use std::future::Future;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::task::{Poll, Waker};
+use std::task::Poll;
 
 use asupersync::Cx;
 use fastmcp_rust::{
     ApplicationTaskSupervisor, AuthorizedTaskServiceRunner, Content, FinalTaskCallToolResult,
     FinalTaskError, FinalTaskRetentionAuthority, FinalTaskRuntime, FinalTaskRuntimeConfig,
     FinalTaskSupervisorFuture, FinalTaskSupervisorHandoff, FinalTaskWorkDescriptor,
-    FinalToolOutcome, McpContext, McpError, McpResult, Tool, ToolHandler,
+    FinalToolOutcome, McpContext, McpError, McpResult, TaskRetentionAdministrator,
+    TaskRetentionAuthorization, Tool, ToolHandler,
 };
 use serde_json::{Value, json};
 
-use crate::task_store::LabTaskStore;
+use crate::task_store::{LabTaskStore, MAX_ACTIVE_TASKS};
 use crate::tasks::McpTaskStatus;
 
 const WORK_SCHEMA: &str = "dfmcp.lab-plan-task-work/1";
@@ -111,26 +111,9 @@ fn compact_selected_outcome(payload: &Value) -> Value {
     })
 }
 
-#[derive(Default)]
-struct ProgressSignal {
-    waker: Mutex<Option<Waker>>,
-    generation: AtomicU64,
-}
-
-impl ProgressSignal {
-    fn register(&self, waker: &Waker) {
-        if let Ok(mut current) = self.waker.lock() {
-            *current = Some(waker.clone());
-        }
-    }
-    fn wake(&self) {
-        self.generation.fetch_add(1, Ordering::Release);
-        let waker = self.waker.lock().ok().and_then(|current| current.clone());
-        if let Some(waker) = waker {
-            waker.wake();
-        }
-    }
-}
+#[path = "task_progress.rs"]
+mod task_progress;
+use task_progress::ProgressSignal;
 
 pub(crate) struct LabTaskService {
     pub(crate) runtime: FinalTaskRuntime,
@@ -148,6 +131,19 @@ impl FinalTaskRetentionAuthority for BoundedRetention {
     }
 }
 
+impl TaskRetentionAdministrator for BoundedRetention {
+    fn authorize(
+        &self,
+        ctx: &McpContext,
+        _action: &TaskRetentionAuthorization<'_>,
+    ) -> McpResult<()> {
+        ctx.checkpoint()?;
+        Err(McpError::invalid_request(
+            "laboratory Task history is retained until process exit",
+        ))
+    }
+}
+
 impl LabTaskService {
     pub(crate) fn new() -> McpResult<(Arc<Self>, AuthorizedTaskServiceRunner)> {
         let store = LabTaskStore::new()?;
@@ -156,10 +152,13 @@ impl LabTaskService {
         let service = Arc::new(Self {
             runtime,
             store,
-            signal: Arc::new(ProgressSignal::default()),
+            signal: Arc::new(ProgressSignal::new(MAX_ACTIVE_TASKS)),
             service_error: Mutex::new(None),
         });
-        let runner = service.runtime.install_task_service(8, service.clone())?;
+        let runner = service
+            .runtime
+            .install_task_service(MAX_ACTIVE_TASKS, service.clone())?
+            .with_max_concurrent_handoffs(MAX_ACTIVE_TASKS)?;
         Ok((service, runner))
     }
 
@@ -304,8 +303,8 @@ impl LabTaskService {
     }
 }
 
-/// A foreground semantic tool changed the known engine state. Wake only the
-/// owned supervisor; this is neither a timer nor detached game work.
+/// A foreground semantic tool changed the known engine state. Wake every
+/// bounded owned supervisor without advancing time or starting detached work.
 pub(crate) fn notify_progress() {
     if let Some(service) = SERVICE.get() {
         service.signal.wake();
@@ -415,6 +414,10 @@ impl ApplicationTaskSupervisor for LabTaskService {
             };
             let definition = TaskWork::parse(work.work_descriptor().as_value())?;
             let _monitor_scope = self.store.monitor_scope(work.task_id())?;
+            let monitor_wake = self
+                .signal
+                .monitor(work.task_id().as_str())
+                .map_err(McpError::internal_error)?;
             cx.checkpoint()
                 .map_err(|error| McpError::internal_error(error.to_string()))?;
             if work.is_cancellation_requested()? {
@@ -530,8 +533,9 @@ impl ApplicationTaskSupervisor for LabTaskService {
                 }
             }
             std::future::poll_fn(|task_context| {
-                self.signal.register(task_context.waker());
                 let result = (|| -> McpResult<Option<()>> {
+                    monitor_wake.register(task_context.waker())
+                        .map_err(McpError::internal_error)?;
                     if work.is_cancellation_requested()? {
                         // Admission already retained both ordered drain
                         // phases and proved quiescence before the upstream
@@ -675,7 +679,7 @@ impl ToolHandler for TaskAwareCommit {
             .get_mut("properties")
             .and_then(Value::as_object_mut)
         {
-            properties.insert("as_task".to_owned(), json!({"type": "boolean", "description": "Retain and supervise this original sealed plan as a modern MCP Task; laboratory only, one active monitor per process, game time advances only through fortress_wait."}));
+            properties.insert("as_task".to_owned(), json!({"type": "boolean", "description": "Retain and supervise this original sealed plan as a modern MCP Task; laboratory only, up to eight active monitors across independent sessions and one per session, game time advances only through fortress_wait."}));
         }
         definition
     }
@@ -815,7 +819,7 @@ impl ToolHandler for TaskAwareWait {
             .and_then(Value::as_object_mut)
         {
             properties.insert("as_task".to_owned(), json!({"type":"boolean",
-                "description":"Observe exact committed or durable recovered originals as one modern MCP Task. Requires explicit session_id, either plan_digest or 1..8 plan_digests with optional plan_policy all/any, omitted or zero max_game_ticks, no watch selector, and current Observe/Query. One active monitor per process. This Task never commits, advances time, captures reserve endpoints or cancels original work; tasks/cancel stops only its observation."}));
+                "description":"Observe exact committed or durable recovered originals as one modern MCP Task. Requires explicit session_id, either plan_digest or 1..8 plan_digests with optional plan_policy all/any, omitted or zero max_game_ticks, no watch selector, and current Observe/Query. Up to eight active monitors across independent sessions, one per session. This Task never commits, advances time, captures reserve endpoints or cancels original work; tasks/cancel stops only its observation."}));
         }
         definition
     }
@@ -878,6 +882,9 @@ pub(crate) async fn serve_with_tasks(
     owner: Arc<LabTaskService>,
     cx: &Cx,
 ) -> McpResult<()> {
+    owner
+        .runtime
+        .install_retention_administrator(cx, Arc::new(BoundedRetention))?;
     let mut serving = std::pin::pin!(server.run_stdio_with_cx(cx));
     loop {
         let result = {
@@ -902,18 +909,22 @@ pub(crate) async fn serve_with_tasks(
                 // A failed drain keeps its retained handoff. Keep diagnostics
                 // and ordinary tools available, then re-enter recovery only
                 // after new foreground evidence; never spin blind retries.
-                let generation = owner.signal.generation.load(Ordering::Acquire);
+                let generation = owner.signal.generation();
+                let recovery_wake = owner.signal.recovery().map_err(McpError::internal_error)?;
                 std::future::poll_fn(|context| {
-                    owner.signal.register(context.waker());
-                    if owner.signal.generation.load(Ordering::Acquire) != generation {
-                        return Poll::Ready(());
+                    if let Err(error) = recovery_wake.register(context.waker()) {
+                        return Poll::Ready(Err(McpError::internal_error(error)));
+                    }
+                    if owner.signal.generation() != generation {
+                        return Poll::Ready(Ok(()));
                     }
                     match serving.as_mut().poll(context) {
                         Poll::Ready(never) => never,
                         Poll::Pending => Poll::Pending,
                     }
                 })
-                .await;
+                .await?;
+                drop(recovery_wake);
                 if let Ok(mut fault) = owner.service_error.lock() {
                     *fault = None;
                 }
