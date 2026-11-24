@@ -158,13 +158,6 @@ impl Runtime {
     fn project_workshop_origin(&self, goal: &ProjectStockGoal) -> Result<Digest32> {
         goal.validate()?;
         self.config.current()?;
-        if goal.is_portfolio()
-            && (self.config.clock.is_some() || self.config.inventory_clock.is_some())
-        {
-            return Err(denied(
-                "project stock portfolios require externally advanced production time",
-            ));
-        }
         let binding = self.config.project_binding.ok_or_else(|| {
             denied("production child is not bound to its original native project")
         })?;
@@ -302,6 +295,60 @@ impl Runtime {
         self.plan_stock_targets_recorded(request, c, Some(ProjectPublication { goal, acknowledge }))
     }
 
+    /// Pin every future fixed clock header without publishing its file. The
+    /// first slot already exists; later slots share its verified source binding
+    /// and the native owner's exact path/session/request identity derivation.
+    fn prospective_project_portfolio_clocks(
+        &self,
+        layout: &ProductionLayout,
+        c: &OperationContext,
+    ) -> Result<Option<Vec<super::config::ProjectPortfolioClockRecovery>>> {
+        if self.clock.is_some() != self.config.clock.is_some()
+            || self.inventory_clock.is_some() != self.config.inventory_clock.is_some()
+        {
+            return Err(denied("project publication lost its configured clock owner"));
+        }
+        if self.clock.is_none() && self.inventory_clock.is_none() {
+            return Ok(None);
+        }
+        let mut pins = Vec::with_capacity(layout.order_steps().len());
+        for (ordinal, step) in layout.order_steps().iter().enumerate() {
+            let (clock, inventory_clock) = if ordinal == 0 {
+                (
+                    self.clock.as_ref().map(ProductionClock::project_recovery_checkpoint),
+                    self.inventory_clock.as_ref()
+                        .map(ProductionInventoryClock::project_recovery_checkpoint),
+                )
+            } else {
+                let slot = u32::try_from(ordinal + 1)
+                    .map_err(|_| invalid("project portfolio clock slot exceeds its bound"))?;
+                let (clock_request, inventory_request) = self.config.orders
+                    .prospective_portfolio_clock_requests(slot, c)?;
+                let clock = match (&self.clock, clock_request) {
+                    (Some(owner), Some(request)) => {
+                        Some(owner.prospective_project_checkpoint(c, request)?)
+                    }
+                    (None, None) => None,
+                    _ => return Err(denied("project publication changed its order clock source")),
+                };
+                let inventory = match (&self.inventory_clock, inventory_request) {
+                    (Some(owner), Some(request)) => {
+                        Some(owner.prospective_project_checkpoint(c, request))
+                    }
+                    (None, None) => None,
+                    _ => return Err(denied("project publication changed its inventory clock source")),
+                };
+                (clock, inventory)
+            };
+            pins.push(super::config::ProjectPortfolioClockRecovery {
+                step_id: step.get(),
+                clock,
+                inventory_clock,
+            });
+        }
+        Ok(Some(pins))
+    }
+
     /// All values below come from the completed compiler and retained source
     /// owners. The future archive, capsule and associations have not been
     /// created. The exact header identity is reused by their later publication.
@@ -342,21 +389,33 @@ impl Runtime {
             "inventory_clock_journal_id": reference["inventory_clock"]["journal_id"],
         });
         if goal.is_portfolio() {
-            // Prospective immutable leaf identities exist before child writes.
-            // No leaf has execution history or clock custody at publication.
+            // Every original slot and exact prospective clock header is
+            // acknowledged before any original or additional clock file write.
             let layout = ProductionLayout::from_plan(plan)?;
+            let clocks = self.prospective_project_portfolio_clocks(&layout, c)?;
             recovery["portfolio"] = serde_json::json!(
                 layout
                     .order_steps()
                     .iter()
-                    .map(|step| serde_json::json!({
-                        "step_id": step.get(),
-                        "goal_history_present": false,
-                        "clock_journal_id": null,
-                        "inventory_clock_journal_id": null,
-                    }))
+                    .enumerate()
+                    .map(|(index, step)| {
+                        let pin = clocks.as_ref().and_then(|slots| slots.get(index));
+                        serde_json::json!({
+                            "step_id": step.get(),
+                            "goal_history_present": false,
+                            "clock_journal_id": pin.and_then(|slot| slot.clock)
+                                .map(|clock| clock.journal_id.to_hex()),
+                            "inventory_clock_journal_id": pin.and_then(|slot| slot.inventory_clock)
+                                .map(|clock| clock.journal_id.to_hex()),
+                        })
+                    })
                     .collect::<Vec<_>>()
             );
+            if let Some(clocks) = clocks {
+                reference["portfolio_clocks"] = serde_json::json!(
+                    clocks.into_iter().map(|slot| slot.to_json()).collect::<Vec<_>>()
+                );
+            }
         }
         if let Some(owner) = &self.workshop {
             recovery["workshop_prerequisite_digest"] = serde_json::json!(
@@ -473,6 +532,7 @@ impl Runtime {
         }
         let clocks_settled = self.clock_review.is_none()
             && self.inventory_clock_review.is_none()
+            && !self.any_portfolio_clock_pending()
             && !self.clock.as_ref().is_some_and(|clock| {
                 ProductionClock::pending(clock) || ProductionClock::may_be_running(clock)
             })

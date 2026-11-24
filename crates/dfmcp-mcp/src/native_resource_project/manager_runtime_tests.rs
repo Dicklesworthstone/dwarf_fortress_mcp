@@ -121,6 +121,7 @@ fn control(case: &str) -> TestResult {
         seal: text(&original["review_seal"])?.into(),
         confirmed: true,
         scope: Some("goal".into()),
+        order_step_id: None,
     });
     if matches!(case, "lost_commit" | "parent_ack") {
         assert!(

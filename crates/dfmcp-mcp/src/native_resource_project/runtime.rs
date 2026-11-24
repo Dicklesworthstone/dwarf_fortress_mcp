@@ -108,9 +108,13 @@ pub(super) enum Action {
         seal: String,
         confirmed: bool,
         scope: Option<String>,
+        order_step_id: Option<u32>,
     },
     Wait(Option<String>),
-    Cancel(Option<String>),
+    Cancel {
+        scope: Option<String>,
+        order_step_id: Option<u32>,
+    },
 }
 
 impl Action {
@@ -141,8 +145,75 @@ impl Action {
         Ok(())
     }
 
+    fn validate_order_scope(&self, production: bool, portfolio: bool) -> Result<()> {
+        self.validate_query_scope(production, portfolio)?;
+        let (scope, order_step_id) = match self {
+            Self::Commit { scope, order_step_id, .. }
+            | Self::Cancel { scope, order_step_id } => (scope.as_deref(), *order_step_id),
+            _ => return Ok(()),
+        };
+        if production && matches!(scope, Some("clock" | "inventory_clock")) {
+            validate_clock_order(order_step_id, portfolio)
+        } else if order_step_id.is_some() {
+            Err(invalid("order_step_id is only valid for an original production portfolio clock"))
+        } else {
+            Ok(())
+        }
+    }
+
     fn is_inspection(&self) -> bool {
         matches!(self, Self::Inspect | Self::InspectOrder(_) | Self::InspectProduction(..))
+    }
+}
+
+fn validate_clock_order(order_step_id: Option<u32>, portfolio: bool) -> Result<()> {
+    if order_step_id.is_some_and(|step| step > 4)
+        || portfolio != order_step_id.is_some()
+    {
+        return Err(invalid(
+            "portfolio clocks require an explicit original order_step_id; scalar clocks have no order selector",
+        ));
+    }
+    Ok(())
+}
+
+/// Preserve the native clock's closed request grammar while selecting its
+/// original portfolio owner. Parsing never creates a target or clock authority.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProductionClockRequest {
+    kind: String,
+    original_paired_seal: String,
+    game_ticks: u32,
+    wall_millis: u32,
+    #[serde(default, deserialize_with = "explicit_order_step")]
+    order_step_id: Option<u32>,
+}
+
+fn explicit_order_step<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<u32>, D::Error> {
+    u32::deserialize(deserializer).map(Some)
+}
+
+impl ProductionClockRequest {
+    fn parse(raw: &str, portfolio: bool) -> Result<(String, Option<u32>)> {
+        if raw.len() > 2048 {
+            return Err(invalid("production clock request exceeds 2048 bytes"));
+        }
+        let request: Self = serde_json::from_str(raw)
+            .map_err(|_| invalid("invalid closed original production clock request"))?;
+        if !matches!(request.kind.as_str(), "run" | "inventory_run") {
+            return Err(invalid("production clock kind must be run or inventory_run"));
+        }
+        validate_clock_order(request.order_step_id, portfolio)?;
+        let canonical = json!({
+            "kind":request.kind,
+            "original_paired_seal":request.original_paired_seal,
+            "game_ticks":request.game_ticks,
+            "wall_millis":request.wall_millis,
+        }).to_string();
+        Ok((canonical, request.order_step_id))
     }
 }
 
@@ -620,13 +691,6 @@ impl Runtime {
     }
 
     fn open_production(&mut self, mut config: ProductionConfig, work: &mut Work) -> Result<()> {
-        if self.config.goal.is_portfolio()
-            && (config.clock.is_some() || config.inventory_clock.is_some())
-        {
-            return Err(denied(
-                "stock portfolio projects cannot open production clock custody",
-            ));
-        }
         let intent = self
             .journal
             .snapshot()
@@ -849,7 +913,7 @@ impl Runtime {
     }
 
     fn child_call(&mut self, action: Action, work: &mut Work) -> Result<Value> {
-        action.validate_query_scope(
+        action.validate_order_scope(
             matches!(&self.child, Some(Child::Production(_))),
             self.config.goal.is_portfolio(),
         )?;
@@ -894,7 +958,7 @@ impl Runtime {
         }
         if self.child.is_none() {
             return match action {
-                Action::Inspect | Action::Wait(_) | Action::Cancel(_) => Ok(json!({
+                Action::Inspect | Action::Wait(_) | Action::Cancel { .. } => Ok(json!({
                     "local_parent_only":true, "child_opening_may_be_incomplete":!matches!(self.effective_stage(), Stage::ManagerTransition | Stage::TreeTransition | Stage::Transition),
                     "native_effects_cancelled":false,
                 })),
@@ -978,8 +1042,11 @@ impl Runtime {
                         seal,
                         confirmed,
                         scope,
+                        order_step_id,
                     } => {
-                        if !matches!(scope.as_deref().unwrap_or("goal"), "goal" | "clock") {
+                        if order_step_id.is_some()
+                            || !matches!(scope.as_deref().unwrap_or("goal"), "goal" | "clock")
+                        {
                             return Err(invalid("unknown Workshop commit scope"));
                         }
                         WorkshopAction::Commit { seal, confirmed }
@@ -990,7 +1057,10 @@ impl Runtime {
                         "clock" => WorkshopAction::WaitClock,
                         _ => return Err(invalid("unknown Workshop wait scope")),
                     },
-                    Action::Cancel(scope) => match scope.as_deref().unwrap_or("project") {
+                    Action::Cancel { scope, order_step_id } => match scope.as_deref().unwrap_or("project") {
+                        _ if order_step_id.is_some() => {
+                            return Err(invalid("Workshop has no production order selector"));
+                        }
                         "goal" | "project" => WorkshopAction::Cancel,
                         "clock" => WorkshopAction::CancelClock,
                         _ => return Err(invalid("unknown Workshop cancellation scope")),
@@ -1031,14 +1101,20 @@ impl Runtime {
                                     "stock targets require their parent publication intent",
                                 ));
                             }
-                            Some("run" | "inventory_run") if goal.is_portfolio() => {
-                                return Err(denied(
-                                    "stock portfolio projects have no production clock authority",
-                                ));
+                            Some("run") => {
+                                let (canonical, order) =
+                                    ProductionClockRequest::parse(&raw, goal.is_portfolio())?;
+                                let request = RunRequest::parse(&canonical)?;
+                                child.select_order(order, &current)?;
+                                child.plan_run(request, &current)
                             }
-                            Some("run") => child.plan_run(RunRequest::parse(&raw)?, &current),
-                            Some("inventory_run") => child
-                                .plan_inventory_run(InventoryRunRequest::parse(&raw)?, &current),
+                            Some("inventory_run") => {
+                                let (canonical, order) =
+                                    ProductionClockRequest::parse(&raw, goal.is_portfolio())?;
+                                let request = InventoryRunRequest::parse(&canonical)?;
+                                child.select_order(order, &current)?;
+                                child.plan_inventory_run(request, &current)
+                            }
                             Some("step" | "review_prepared") => {
                                 #[derive(Deserialize)]
                                 #[serde(deny_unknown_fields)]
@@ -1073,17 +1149,17 @@ impl Runtime {
                         seal,
                         confirmed,
                         scope,
+                        order_step_id,
                     } => {
                         let seal = digest(&seal)?;
                         match scope.as_deref().unwrap_or("goal") {
                             "goal" => child.commit(seal, confirmed, &current),
-                            "clock" | "inventory_clock" if goal.is_portfolio() => {
-                                return Err(denied(
-                                    "stock portfolio projects have no production clock authority",
-                                ));
+                            "clock" => {
+                                child.select_order(order_step_id, &current)?;
+                                child.commit_run(seal, confirmed, &current)
                             }
-                            "clock" => child.commit_run(seal, confirmed, &current),
                             "inventory_clock" => {
+                                child.select_order(order_step_id, &current)?;
                                 child.commit_inventory_run(seal, confirmed, &current)
                             }
                             _ => return Err(invalid("unknown production commit scope")),
@@ -1096,28 +1172,22 @@ impl Runtime {
                         ) {
                             return Err(invalid("unknown production wait scope"));
                         }
-                        if goal.is_portfolio()
-                            && matches!(scope.as_deref(), Some("clock" | "inventory_clock"))
-                        {
-                            return Err(denied(
-                                "stock portfolio projects have no production clock authority",
-                            ));
-                        }
                         if offline {
                             child.inspect(&current)
                         } else {
                             child.wait(&current)
                         }
                     }
-                    Action::Cancel(scope) => match scope.as_deref().unwrap_or("project") {
+                    Action::Cancel { scope, order_step_id } => match scope.as_deref().unwrap_or("project") {
                         "goal" | "project" => child.cancel(&current),
-                        "clock" | "inventory_clock" if goal.is_portfolio() => {
-                            return Err(denied(
-                                "stock portfolio projects have no production clock authority",
-                            ));
+                        "clock" => {
+                            child.select_order(order_step_id, &current)?;
+                            child.cancel_run(&current)
                         }
-                        "clock" => child.cancel_run(&current),
-                        "inventory_clock" => child.cancel_inventory_run(&current),
+                        "inventory_clock" => {
+                            child.select_order(order_step_id, &current)?;
+                            child.cancel_inventory_run(&current)
+                        }
                         _ => return Err(invalid("unknown production cancellation scope")),
                     },
                 }?;
@@ -1134,7 +1204,13 @@ impl Runtime {
         self.publication_started = Instant::now();
         let mut work = Work::new(self.budget, self.publication_started)?;
         let outcome = (|| {
-            let stopping = matches!(&action, Action::Cancel(scope)
+            // Reject foreign selectors before a project cancellation can
+            // consume its reserved durable terminal frame.
+            action.validate_order_scope(
+                matches!(&self.child, Some(Child::Production(_))),
+                self.config.goal.is_portfolio(),
+            )?;
+            let stopping = matches!(&action, Action::Cancel { scope, .. }
                 if matches!(scope.as_deref().unwrap_or("project"), "goal" | "project"));
             // The reserved terminal frame must remain usable even when there
             // is no space for another active-stage checkpoint.

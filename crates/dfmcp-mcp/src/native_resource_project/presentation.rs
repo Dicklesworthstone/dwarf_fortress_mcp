@@ -36,10 +36,120 @@ fn publication_pending(reference: &Value) -> bool {
     checkpoint["production_intent"].is_object() && checkpoint["production"]["recovery"].is_null()
 }
 
+
+/// A portfolio clock review belongs to the exact currently selected original
+/// order. The top-level view is only a selection convenience; an absent,
+/// duplicate or mismatched row must never silently become scalar authority.
+fn portfolio_clock_review_step(result: &Value, scope: &str) -> Option<(u32, usize)> {
+    if !matches!(scope, "clock" | "inventory_clock") {
+        return None;
+    }
+    let child = &result["child"];
+    let portfolio = &child["portfolio"];
+    if portfolio["schema"] != "dfmcp.production-portfolio/1" {
+        return None;
+    }
+    let orders = portfolio["orders"].as_array()?;
+    if !(1..=4).contains(&orders.len()) {
+        return None;
+    }
+    let first = orders.first()?["step_id"].as_u64().filter(|step| *step <= 1)?;
+    if !orders
+        .iter()
+        .enumerate()
+        .all(|(index, row)| row["step_id"].as_u64() == Some(first + index as u64))
+    {
+        return None;
+    }
+    let selected = portfolio["selected_order_step_id"].as_u64()?;
+    let (index, row) = orders
+        .iter()
+        .enumerate()
+        .find(|(_, row)| row["step_id"].as_u64() == Some(selected))?;
+    if !row[scope].is_object() || row[scope] != child[scope] {
+        return None;
+    }
+    Some((u32::try_from(selected).ok()?, index))
+}
+
+fn portfolio_clock_selector_required(result: &Value) -> bool {
+    !result["child"]["portfolio"].is_null()
+        || (result["stage"] == "production" && result["original"]["goal"]["targets"].is_array())
+}
+
+fn clock_action(clock: &Value, scope: &str, path: String, step: Option<u64>) -> Value {
+    let mut action = json!({
+        "scope":scope, "pending":clock["pending"], "unresolved":clock["unresolved"],
+        "may_be_running":clock["may_be_running"], "advancement_fenced":clock["advancement_fenced"],
+        "journal_id":clock["journal_id"], "head":clock["head"],
+        "authority_tick_floor":clock.get("authority_tick_floor").unwrap_or(&clock["high_tick"]),
+        "high_source_sequence":clock["high_source_sequence"],
+        "target_id":clock["target_id"], "target_digest":clock["target_digest"],
+        "original_key":clock["active_run"]["key"], "state":clock["active_run"]["state"],
+        "run_count":clock["run_count"],
+        "native_unpause_attempted":clock["active_run"].get("native_unpause_attempted")
+            .unwrap_or(&clock["active_run"]["native"]["unpause_attempted"]),
+        "current_pause_proven":false, "automatic_redispatch":false,
+        "complete_custody_pointer":"/retained_reference",
+        "complete_evidence_pointer":path,
+    });
+    if let Some(step) = step {
+        action["order_step_id"] = json!(step);
+    }
+    action
+}
+
+/// Retain every original clock owner, including inactive leaves and compact
+/// recovery pins. Only the separately checked current selected review may
+/// appear in confirmations; these custody summaries carry no review seal.
+fn clock_actions(child: &Value, child_path: &str) -> Vec<Value> {
+    let mut actions = Vec::new();
+    if let Some(orders) = child["portfolio"]["orders"].as_array() {
+        for (index, order) in orders.iter().take(4).enumerate() {
+            for scope in ["clock", "inventory_clock"] {
+                if order[scope].is_object() {
+                    actions.push(clock_action(
+                        &order[scope],
+                        scope,
+                        format!("{child_path}/portfolio/orders/{index}/{scope}"),
+                        order["step_id"].as_u64(),
+                    ));
+                }
+            }
+        }
+    } else if let Some(slots) = child["portfolio_clocks"].as_array() {
+        for (index, slot) in slots.iter().take(4).enumerate() {
+            for scope in ["clock", "inventory_clock"] {
+                if slot[scope].is_object() {
+                    actions.push(clock_action(
+                        &slot[scope],
+                        scope,
+                        format!("{child_path}/portfolio_clocks/{index}/{scope}"),
+                        slot["step_id"].as_u64(),
+                    ));
+                }
+            }
+        }
+    } else {
+        for scope in ["clock", "inventory_clock"] {
+            if child[scope].is_object() {
+                actions.push(clock_action(
+                    &child[scope],
+                    scope,
+                    format!("{child_path}/{scope}"),
+                    None,
+                ));
+            }
+        }
+    }
+    actions
+}
+
 fn review(result: &Value) -> Option<(&str, Value)> {
     if result["ok"] != true
         || result["project_cancelled"] == true
         || result["session_closed"] == true
+        || matches!(result["mode"].as_str(), Some("offline" | "recover"))
     {
         return None;
     }
@@ -58,6 +168,8 @@ fn review(result: &Value) -> Option<(&str, Value)> {
     ] {
         if (clock["review_available"] == true || clock["commit_available"] == true)
             && clock["active_run"]["review_seal"].is_string()
+            && (!portfolio_clock_selector_required(result)
+                || portfolio_clock_review_step(result, scope).is_some())
         {
             return Some((scope, clock["active_run"]["review_seal"].clone()));
         }
@@ -282,6 +394,9 @@ fn next_step(
         arguments["scope"] = json!(scope);
         arguments["review_seal"] = seal;
         arguments["confirmed"] = json!(true);
+        if let Some((step, _)) = portfolio_clock_review_step(result, scope) {
+            arguments["order_step_id"] = json!(step);
+        }
         (
             "fortress_commit",
             "Review the complete child evidence and confirm only this current exact native review.",
@@ -486,10 +601,16 @@ pub(super) fn packet(
         .then(|| review(&result))
         .flatten()
         .map(|(scope, seal)| {
-            json!({
+            let mut confirmation = json!({
                 "scope":scope, "review_seal":seal, "requires_confirmation":true,
                 "complete_evidence_pointer":"/result/child", "restored_from_recovery":false,
-            })
+            });
+            if let Some((step, index)) = portfolio_clock_review_step(&result, scope) {
+                confirmation["order_step_id"] = json!(step);
+                confirmation["complete_evidence_pointer"] =
+                    json!(format!("/result/child/portfolio/orders/{index}/{scope}"));
+            }
+            confirmation
         });
     let original = &reference["retained_stage"]["checkpoint"];
     let goal = result.get("original").unwrap_or(&reference["original"]);
@@ -546,17 +667,12 @@ pub(super) fn packet(
     let manager_original = manager::original(manager_state);
     let manager_verified =
         manager_active && manager::verified(&result) && reference["controller_fenced"] != true;
-    let mut actions = ["clock", "inventory_clock"].into_iter().filter_map(|scope| {
-        let clock = &child[scope];
-        clock.is_object().then(|| json!({
-            "scope":scope, "pending":clock["pending"], "unresolved":clock["unresolved"],
-            "may_be_running":clock["may_be_running"], "advancement_fenced":clock["advancement_fenced"],
-            "target_id":clock["target_id"], "original_key":clock["active_run"]["key"],
-            "native_unpause_attempted":clock["active_run"]["native_unpause_attempted"],
-            "current_pause_proven":false, "complete_custody_pointer":"/retained_reference",
-            "complete_evidence_pointer":format!("{child_path}/{scope}"),
-        }))
-    }).collect::<Vec<_>>();
+    let (clock_child, clock_path) = if child["local_parent_only"] == true {
+        (&reference["child_reference"], "/retained_reference/child_reference")
+    } else {
+        (child, child_path)
+    };
+    let mut actions = clock_actions(clock_child, clock_path);
     if let Some(original) = &manager_original {
         actions.push(json!({
             "scope":"manager", "original":original,
@@ -571,11 +687,21 @@ pub(super) fn packet(
     } else {
         Vec::new()
     };
-    if tree_active && child["clock"]["unresolved"] == true {
-        indeterminate.push(json!({"scope":"clock", "current_pause_proven":false,
-            "complete_custody_pointer":"/retained_reference",
-            "complete_evidence_pointer":format!("{child_path}/clock"),
-            "automatic_redispatch":false}));
+    for action in &actions {
+        if matches!(action["scope"].as_str(), Some("clock" | "inventory_clock"))
+            && (action["unresolved"] == true || action["may_be_running"] == true)
+        {
+            let mut effect = json!({
+                "scope":action["scope"], "current_pause_proven":false,
+                "complete_custody_pointer":"/retained_reference",
+                "complete_evidence_pointer":action["complete_evidence_pointer"],
+                "automatic_redispatch":false,
+            });
+            if let Some(step) = action.get("order_step_id") {
+                effect["order_step_id"] = step.clone();
+            }
+            indeterminate.push(effect);
+        }
     }
     if manager_visible && manager::uncertain(manager_state) {
         indeterminate.push(json!({"scope":"manager",
@@ -620,7 +746,7 @@ pub(super) fn packet(
     ];
     if goal["goal"]["targets"].is_array() {
         uncertainty.push(json!({"uncertainty_id":"portfolio_time_control","epistemic_state":"observed",
-            "statement":"This fixed stock portfolio has no production or inventory clock. Foreground goal samples require separately managed game time and jointly preserve every original minimum, cadence and deadline. Optional Tree and Workshop prefix clocks keep their independent authority."}));
+            "statement":"This fixed stock portfolio preserves every original minimum, cadence and deadline. Configured order and inventory clocks belong to an explicit original order StepId and require independent review and confirmation. Foreground wait reconciles every retained owner without implicitly advancing time. Optional Tree and Workshop prefix clocks keep their separate authority."}));
     }
     if manager_visible {
         uncertainty.push(json!({"uncertainty_id":"manager_appointment_and_readiness","epistemic_state":"unknown",

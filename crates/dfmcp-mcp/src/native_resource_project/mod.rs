@@ -331,7 +331,7 @@ pub fn fortress_query(
 
 #[tool(
     name = "fortress_plan",
-    description = "Plan within the active original child. Optional Manager uses appoint_vacant_manager with its observed witness and fixed project deadline. Optional Tree uses fell_one_visible_tree with that deadline or separately configured run_tree. Workshop uses its observed material request or run_workshop. advance_from_manager, advance_to_workshop and advance_to_production require exact expected_head, freshly verify the completed original donor and durably transfer ownership without a native mutation. Production accepts stock_target or stock_targets matching every immutable root goal term, then step/review_prepared with original_plan_digest. Single-target roots also accept independently configured run or inventory_run; portfolio production clocks are unavailable. Each native effect requires its own current review and explicit Commit."
+    description = "Plan within the active original child. Optional Manager uses appoint_vacant_manager with its observed witness and fixed project deadline. Optional Tree uses fell_one_visible_tree with that deadline or separately configured run_tree. Workshop uses its observed material request or run_workshop. advance_from_manager, advance_to_workshop and advance_to_production require exact expected_head, freshly verify the completed original donor and durably transfer ownership without a native mutation. Production accepts stock_target or stock_targets matching every immutable root goal term, then step/review_prepared with original_plan_digest. Independently configured run or inventory_run require original_paired_seal, game_ticks and wall_millis; portfolio production clocks additionally require the exact original order_step_id. Planning a clock only prepares its separate review and never unpauses. Each native effect requires its own current review and explicit Commit."
 )]
 pub fn fortress_plan(
     session_id: String,
@@ -342,13 +342,14 @@ pub fn fortress_plan(
 
 #[tool(
     name = "fortress_commit",
-    description = "Confirm one complete current child review. scope=goal for Manager appointment, Tree designation, Workshop construction or original labor/order step; scope=clock for a separately reviewed Tree/Workshop/order clock; scope=inventory_clock for production stability. Manager accepts only goal scope. The project never renews the original deadline or restores confirmation after restart."
+    description = "Confirm one complete current child review. scope=goal for Manager appointment, Tree designation, Workshop construction or original labor/order step; scope=clock for a separately reviewed Tree/Workshop/order clock; scope=inventory_clock for production stability. Portfolio clock confirmation additionally requires its exact original order_step_id; goal and scalar confirmation have no selector. Manager accepts only goal scope. The project never renews the original deadline or restores confirmation after restart."
 )]
 pub fn fortress_commit(
     session_id: String,
     review_seal: String,
     confirmed: bool,
     scope: Option<String>,
+    order_step_id: Option<u32>,
 ) -> McpResult<CompleteResult<FinalCallToolResult>> {
     call(
         "fortress.commit",
@@ -357,6 +358,7 @@ pub fn fortress_commit(
             seal: review_seal,
             confirmed,
             scope,
+            order_step_id,
         },
     )
 }
@@ -374,14 +376,26 @@ pub fn fortress_wait(
 
 #[tool(
     name = "fortress_cancel",
-    description = "Default scope=project (goal is an alias) durably stops future stages/reviews, then retires the current undispatched preparation. It does not remove an appointed Manager or undo a designation, construction or inserted order. scope=clock or inventory_clock requests the active child's separately authorized safety stop; Manager has no clock scope. scope=session releases local ownership while preserving all custody; it does not claim a native pause or effect cancellation."
+    description = "Default scope=project (goal is an alias) durably stops future stages/reviews, then retires the current undispatched preparation. It does not remove an appointed Manager or undo a designation, construction or inserted order. scope=clock or inventory_clock requests the active child's separately authorized safety stop; portfolio clock cancellation requires its exact original order_step_id; scalar clocks and project cancellation have no selector. Manager has no clock scope. scope=session releases local ownership while preserving all custody; it does not claim a native pause or effect cancellation."
 )]
 pub fn fortress_cancel(
     session_id: String,
     scope: Option<String>,
+    order_step_id: Option<u32>,
 ) -> McpResult<CompleteResult<FinalCallToolResult>> {
     if scope.as_deref() != Some("session") {
-        return call("fortress.cancel", session_id, Action::Cancel(scope));
+        return call(
+            "fortress.cancel",
+            session_id,
+            Action::Cancel { scope, order_step_id },
+        );
+    }
+    if order_step_id.is_some() {
+        return rejected(
+            "fortress.cancel",
+            session_id,
+            error(ErrorCode::InvalidRequest, "session cancellation has no order selector"),
+        );
     }
     let closed = (|| -> Result<_> {
         let session = parse_id(&session_id)?;
@@ -482,7 +496,7 @@ pub fn run_stdio() {
         .tool(FortressPlan).tool(FortressCommit).tool(FortressWait)
         .tool(FortressCancel).tool(FortressExplain).tool(FortressDoctor)
         .tool(FortressCheckpoint).tool(FortressRestore)
-        .instructions("One explicitly unadmitted resource project with a fixed host stock goal or one-to-four-target portfolio and absolute deadline. The parent owns an optional Manager/1.23 appointment, an optional Tree harvest, Workshop construction and actual stock-target production, one child at a time. Review and confirm every native effect separately. Advance from Manager, to Workshop or to production only with the current parent head; each transition acquires fresh original donor evidence and any settled clock custody, then acknowledges the transition before releasing its writer. Production independently imports the exact Manager and Workshop donors Offline and freshly revalidates their readiness; historical appointment is not present production proof. Tree supply remains subject to current Workshop material validation. Defaults forbid game-time advancement. Stock portfolio roots require absent production and inventory clocks; their original minima are sampled together using separately managed game time. Optional Tree and Workshop clocks retain their own review and authority. Project cancellation durably stops new work but does not remove an appointed Manager or undo other existing native effects; explicitly reconcile/cancel active clocks. Retain every returned parent/child recovery reference, including after errors. Never initialize an existing opening marker again. Complete evidence may use numbered text blocks with byte counts, SHA-256 and exact JSON paths; reassemble them before confirming. Manager and Tree semantic reviews name capsule commitments; raw capsule bytes remain with their indicated owner or custody and are not inline evidence chunks. No world restore or production admission.")
+        .instructions("One explicitly unadmitted resource project with a fixed host stock goal or one-to-four-target portfolio and absolute deadline. The parent owns an optional Manager/1.23 appointment, an optional Tree harvest, Workshop construction and actual stock-target production, one child at a time. Review and confirm every native effect separately. Advance from Manager, to Workshop or to production only with the current parent head; each transition acquires fresh original donor evidence and any settled clock custody, then acknowledges the transition before releasing its writer. Production independently imports the exact Manager and Workshop donors Offline and freshly revalidates their readiness; historical appointment is not present production proof. Tree supply remains subject to current Workshop material validation. Defaults forbid game-time advancement. Configured production and inventory clocks retain independent authority for every original order; portfolio clock planning, confirmation and cancellation require the exact original order_step_id. Every interval has its own current review. Joint stock proof still requires fresh samples of all original minima. Optional Tree and Workshop clocks retain their own review and authority. Project cancellation durably stops new work but does not remove an appointed Manager or undo other existing native effects; explicitly reconcile/cancel active clocks. Retain every returned parent/child recovery reference, including after errors. Never initialize an existing opening marker again. Complete evidence may use numbered text blocks with byte counts, SHA-256 and exact JSON paths; reassemble them before confirming. Manager and Tree semantic reviews name capsule commitments; raw capsule bytes remain with their indicated owner or custody and are not inline evidence chunks. No world restore or production admission.")
         .build();
     crate::run_modern_stdio(server);
 }

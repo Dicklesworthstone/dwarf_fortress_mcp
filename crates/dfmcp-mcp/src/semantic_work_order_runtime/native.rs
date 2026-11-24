@@ -452,6 +452,25 @@ fn nonce(c: &OperationContext, family: &[u8]) -> Vec<u8> {
     Digest32::of_bytes(&bytes).as_bytes()[..16].to_vec()
 }
 
+/// The fixed private filename separates portfolio owners without changing
+/// either native journal codec. Prospective publication and actual creation
+/// must use this one request mapping with the original session and request.
+fn portfolio_clock_request_id(
+    path: &std::path::Path,
+    request_id: dfmcp_core::RequestId,
+    inventory: bool,
+) -> dfmcp_core::RequestId {
+    let domain = if inventory {
+        b"dfmcp-portfolio-inventory-clock-slot/1\0".as_slice()
+    } else {
+        b"dfmcp-portfolio-clock-slot/1\0".as_slice()
+    };
+    let mut identity = domain.to_vec();
+    identity.extend_from_slice(&request_id.get().to_be_bytes());
+    identity.extend_from_slice(path.as_os_str().as_encoded_bytes());
+    dfmcp_core::RequestId::new(Digest32::of_bytes(&identity).first_u128().max(1))
+}
+
 /// Actual mutation transport with the operator gate checked at every edge,
 /// including the insertion edge after the coordinator's DispatchStarted sync.
 pub struct PinnedNative {
@@ -623,6 +642,34 @@ impl NativeShell {
             expected,
         )
     }
+    /// Pure intended header salts for unopened fixed slots. This validates the
+    /// same creation mode as open_portfolio_* before the parent ACK, and never
+    /// creates a file, connects a source, or grants clock control.
+    pub(crate) fn prospective_portfolio_clock_requests(
+        &self,
+        step: u32,
+        c: &OperationContext,
+    ) -> Result<(Option<dfmcp_core::RequestId>, Option<dfmcp_core::RequestId>)> {
+        self.portfolio_slot(step, true, None, self.config.clock.is_some())?;
+        self.portfolio_slot(step, true, None, self.config.inventory_clock.is_some())?;
+        Ok((
+            self.config.clock.as_ref().map(|_| {
+                portfolio_clock_request_id(
+                    &self.config.path(&format!("portfolio-{step}-clock.journal")),
+                    c.request_id,
+                    false,
+                )
+            }),
+            self.config.inventory_clock.as_ref().map(|_| {
+                portfolio_clock_request_id(
+                    &self.config.path(&format!("portfolio-{step}-inventory-clock.journal")),
+                    c.request_id,
+                    true,
+                )
+            }),
+        ))
+    }
+
     fn portfolio_slot(
         &self,
         step: u32,
@@ -964,6 +1011,40 @@ mod runtime_checkpoint_tests {
     use std::net::TcpListener;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    #[test]
+    fn portfolio_clock_request_salts_preserve_fixed_paths_and_separate_every_slot() {
+        let request = RequestId::new(902);
+        let directory = std::path::Path::new("/tmp/dfmcp-original-clock-salts");
+        let mut ids = std::collections::BTreeSet::new();
+        for step in 2..=4 {
+            for inventory in [false, true] {
+                let suffix = if inventory { "inventory-clock.journal" } else { "clock.journal" };
+                let path = directory.join(format!("portfolio-{step}-{suffix}"));
+                let actual = portfolio_clock_request_id(&path, request, inventory);
+                let mut prior = if inventory {
+                    b"dfmcp-portfolio-inventory-clock-slot/1\0".to_vec()
+                } else {
+                    b"dfmcp-portfolio-clock-slot/1\0".to_vec()
+                };
+                prior.extend_from_slice(&request.get().to_be_bytes());
+                prior.extend_from_slice(path.as_os_str().as_encoded_bytes());
+                assert_eq!(actual.get(), Digest32::of_bytes(&prior).first_u128().max(1));
+                assert!(ids.insert(actual.get()));
+                assert_ne!(actual, request);
+                assert_ne!(actual, portfolio_clock_request_id(
+                    &path, RequestId::new(request.get() + 1), inventory,
+                ));
+                assert_ne!(actual, portfolio_clock_request_id(
+                    &path, request, !inventory,
+                ));
+                assert_ne!(actual, portfolio_clock_request_id(
+                    &directory.join(format!("moved-portfolio-{step}-{suffix}")),
+                    request, inventory,
+                ));
+            }
+        }
+    }
+
     static CHECKS: AtomicUsize = AtomicUsize::new(0);
     fn reject_runtime() -> Result<()> {
         CHECKS.fetch_add(1, Ordering::SeqCst);
@@ -1273,6 +1354,27 @@ mod runtime_checkpoint_tests {
                 config: Arc::new(config),
             };
             let retained = Digest32::of_bytes(b"retained original portfolio clock");
+            for slot in 2..=4 {
+                let requests = shell.prospective_portfolio_clock_requests(slot, &c);
+                if configured && !initializing {
+                    assert!(requests.is_err(), "reopen cannot initialize new clock slots");
+                } else {
+                    let (order, inventory) = requests?;
+                    assert_eq!(order.is_some(), configured);
+                    assert_eq!(inventory.is_some(), configured);
+                    if configured {
+                        assert_eq!(order, Some(portfolio_clock_request_id(
+                            &directory.join(format!("portfolio-{slot}-clock.journal")),
+                            c.request_id, false,
+                        )));
+                        assert_eq!(inventory, Some(portfolio_clock_request_id(
+                            &directory.join(format!("portfolio-{slot}-inventory-clock.journal")),
+                            c.request_id, true,
+                        )));
+                    }
+                }
+                assert!(!directory.exists(), "prospective custody wrote a private file");
+            }
             if !configured {
                 // In particular, reopened native owners have initialize=false
                 // while the first newly compiled portfolio requests true.
@@ -1396,6 +1498,7 @@ mod runtime_checkpoint_tests {
                 }
             }
             for invalid_slot in [0, 1, 5, u32::MAX] {
+                assert!(shell.prospective_portfolio_clock_requests(invalid_slot, &c).is_err());
                 assert!(
                     shell
                         .open_portfolio_clock(invalid_slot, Mode::Offline, true, None, &c)

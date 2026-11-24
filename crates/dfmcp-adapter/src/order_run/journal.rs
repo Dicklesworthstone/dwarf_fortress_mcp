@@ -6,7 +6,7 @@ use super::{
 };
 use crate::bounded_run::{Reader, error, hash, require, validate_key};
 use crate::control_effect_journal::EffectJournalStorage;
-use dfmcp_core::{Digest32, ErrorCode, OperationContext, Result, SessionId};
+use dfmcp_core::{Digest32, ErrorCode, OperationContext, RequestId, Result, SessionId};
 use std::collections::BTreeMap;
 use std::io::{self, SeekFrom};
 use std::net::SocketAddr;
@@ -76,6 +76,28 @@ impl OrderRunBinding {
     }
     pub fn fortress(&self) -> &FortressIdentity {
         &self.fortress
+    }
+    /// Exact empty-journal identity, available before a parent acknowledges
+    /// child publication. It proves neither durable creation nor clock authority.
+    pub fn initial_journal_id(
+        &self,
+        session_id: SessionId,
+        request_id: RequestId,
+    ) -> Result<Digest32> {
+        self.initial_header(session_id, request_id).map(|(_, id)| id)
+    }
+    fn initial_header(
+        &self,
+        session_id: SessionId,
+        request_id: RequestId,
+    ) -> Result<(Vec<u8>, Digest32)> {
+        let mut bytes = b"DFMOJ014".to_vec();
+        put_field(&mut bytes, &self.encode()?);
+        bytes.extend_from_slice(&session_id.get().to_be_bytes());
+        bytes.extend_from_slice(&request_id.get().to_be_bytes());
+        let id = hash(b"dfmcp-order-run-rust-journal/1", &bytes);
+        bytes.extend_from_slice(id.as_bytes());
+        Ok((bytes, id))
     }
     fn encode(&self) -> Result<Vec<u8>> {
         require(
@@ -396,12 +418,7 @@ impl<S: EffectJournalStorage> OrderRunJournal<S> {
                 binding.fortress() == fortress,
                 "new journal fortress mismatch",
             )?;
-            bytes = b"DFMOJ014".to_vec();
-            put_field(&mut bytes, &binding.encode()?);
-            bytes.extend_from_slice(&c.session_id.get().to_be_bytes());
-            bytes.extend_from_slice(&c.request_id.get().to_be_bytes());
-            let proof = hash(b"dfmcp-order-run-rust-journal/1", &bytes);
-            bytes.extend_from_slice(proof.as_bytes());
+            bytes = binding.initial_header(c.session_id, c.request_id)?.0;
             budget.charge(bytes.len() as u64)?;
             storage.seek(SeekFrom::Start(0)).map_err(storage_error)?;
             storage

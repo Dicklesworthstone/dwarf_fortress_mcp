@@ -114,9 +114,10 @@ The dedicated profile requires:
 All existing independent family opt-ins and permission flags remain required.
 Configured Tree ownership/material, Tree clock, Workshop clock, production clock, inventory clock and
 Manager credentials are accepted only for the corresponding configured feature.
-Portfolio roots currently reject configured production and inventory clocks
-before any child opens. Optional Tree and Workshop clocks remain supported;
-production time for a portfolio must advance outside this owner.
+Scalar and portfolio roots accept independently configured production and
+inventory clocks. Each original order retains its own custody and current
+review. Optional Tree and Workshop clocks keep their separate authority.
+Game-time allowance still defaults to zero.
 Production launch/admission variables and unrelated `DFMCP_` profiles refuse.
 
 The parent and each child retain exact byte hashes of their live configuration
@@ -209,11 +210,24 @@ only for a positive bounded deficit. Four orders plus one optional labor-enable
 step fit the existing five-action ceiling; no per-target timing or extra action
 authority is introduced.
 
-Leave both combined-production `clock` and `inventory_clock` unconfigured
-for a portfolio. This restriction also applies to recovered metadata, including
-inactive order slots. It avoids claiming per-order clock recovery authority the
-parent does not yet retain. Optional Tree and Workshop clocks keep their normal
-configuration, current review and fixed project deadline.
+Combined-production `clock` and `inventory_clock` remain independently optional.
+When configured, each compiled original order receives its own fixed clock
+custody; initially met minima do not create extra orders or clock targets.
+The parent acknowledges every prospective clock identity before additional
+clock files are created. All targets retain the same original deadline and
+joint stock-proof requirement.
+
+Existing-worker order StepIds start at zero; a portfolio with an original
+labor-enable step starts its order StepIds at one. Use the StepIds published in
+the child's `portfolio.orders`, not native manager-order IDs or custody-file
+ordinals. Planning, confirming or cancelling a portfolio clock requires that
+explicit StepId. Scalar clock actions reject it.
+
+A configured owner reopened before its first multi-order original cannot
+initialize new clock slots. Such planning refuses before the parent publication
+ACK; recovery never grants initialization permission. A one-order portfolio
+uses the already retained first clock owner. An all-met stock watch has no
+original order or clock target and does not gain clock authority.
 
 ### Optional Manager stage
 
@@ -560,8 +574,8 @@ under the existing joint portfolio monitor; selected-order or per-leaf success
 is insufficient. Settled clocks are required. An order insertion
 receipt or a retired order cannot alone produce this flag.
 
-For scalar roots, independently configured production clocks retain their
-existing requests:
+Independently configured production clocks use these requests for scalar and
+portfolio roots:
 
 | Plan kind | Commit/cancel scope | Purpose |
 | --- | --- | --- |
@@ -570,9 +584,36 @@ existing requests:
 
 Each interval needs a separate current review and explicit confirmation.
 Neither changes the parent deadline or grants another native mutation.
-Portfolio production refuses `run`, `inventory_run` and production clock
-scopes. Fresh stock samples still require actual observed game-tick progress;
-repeated foreground calls do not advance time.
+A portfolio Plan request includes `order_step_id` alongside the unchanged
+`original_paired_seal`, `game_ticks` and `wall_millis` fields. For example,
+after the original effects have settled, the request string for a published
+original order with StepId 1 has this shape:
+
+```json
+{
+  "kind": "run",
+  "original_paired_seal": "<that original order's published paired seal>",
+  "game_ticks": 10,
+  "wall_millis": 1000,
+  "order_step_id": 1
+}
+```
+
+Use the new clock review's `review_seal` for `fortress_commit`, with
+`scope: "clock"`, `confirmed: true` and the same `order_step_id`.
+For `inventory_run`, use `scope: "inventory_clock"`. The independent child
+owner still checks the exact target, settled original effects, observed goal,
+current authority, budgets and current review; a selector grants none of them.
+Missing, null, duplicate, foreign or out-of-range Plan selectors refuse.
+Goal-effect confirmation has no selector.
+
+The Agent Turn includes the exact selected StepId in clock confirmations and
+commit recommendations. It lists every original clock owner, including
+inactive and unresolved owners. A retained recovery pin never becomes a live
+review. A pending clock prevents incompatible order selection.
+`fortress_wait` reconciles the original clock owners without a selector before
+qualified goal sampling. Fresh stock samples require actual observed
+game-tick progress; repeated foreground calls do not advance time.
 
 ## Stop, close and recover
 
@@ -580,8 +621,10 @@ Default `fortress_cancel` uses `scope: "project"`; `goal` is an alias.
 It first acknowledges the terminal parent stop, then retires the child's
 undispatched preparation. It cannot undo a designation or construction or remove an already
 inserted order. Explicit `clock`/`inventory_clock` cancellation delegates to
-the existing independently authorized safety-stop owner. Continue original
-reconciliation until the relevant child state is known.
+the existing independently authorized safety-stop owner. Portfolio clock
+cancellation also requires the exact original `order_step_id`; project, goal
+and session cancellation reject selectors. Continue original reconciliation
+until the relevant child state is known.
 
 `scope: "session"` releases local sockets and locks while retaining files. It
 does not claim that an external native effect stopped or that the game paused.
@@ -647,9 +690,10 @@ original order slots, including the assignment-dependent first StepId. The
 complete goal vector also retains minima that created no order. Each leaf's
 historical goal marker is monotone; changing selection cannot drop or roll back
 an inactive leaf. The top-level historical marker remains tied to the first
-original order. Adding, removing, reordering or replacing slots refuses, as does
-any retained production or inventory clock identity. Fresh and recovered
-scalar originals cannot be adopted by portfolio roots, or vice versa.
+original order. Adding, removing, reordering or replacing slots or configured
+clock families refuses. Every order and inventory clock identity must equal
+its originally acknowledged slot. Fresh and recovered scalar originals cannot
+be adopted by portfolio roots, or vice versa.
 
 This pending-publication recovery requires the exact original archive, citizen
 capsule, prerequisite associations and initial execution journal. Native effect
@@ -691,11 +735,18 @@ proof. An unacknowledged original publication can adopt only its exact
 untouched clock headers. None of these checkpoints restores a review,
 permission to unpause, current pause proof or current stock proof.
 
-This custody support is independently source-reviewed, with regression groups
-for child validation, continuity and actual parent journal plus independent ACK
-replay. The new tests have not executed because the execution environment is
-unavailable. At this checkpoint the parent configuration still rejects
-portfolio clocks pending prospective publication and explicit order routing.
+The prospective identity calculation shares the actual clock journal header
+codec and fixed-slot request mapping. It creates no files or native contact.
+After original publication, the child must match every acknowledged initial
+header exactly before the parent can retain the completed publication. A lost
+reply can recover only complete existing custody, and pending publication
+rejects advanced clocks, goal history or native effects in every original slot.
+
+This custody and routing support is independently source-reviewed. Regression
+sources cover child validation, actual parent journal plus independent ACK
+replay, prospective header identity, explicit selectors, presentation and the
+actual combined-production Runtime/native-TCP publication campaign. The new
+tests have not executed because the execution environment is unavailable.
 
 ## Shared request and output bounds
 
@@ -752,6 +803,23 @@ historical custody and current production goal anchors remain explicit and
 separate.
 
 ## Validation record
+
+### Current per-order inspection and portfolio-clock increment
+
+The existing Query now exposes bounded source-anchored production inspection
+and explicit original order inspection. The complete clock extension adds
+per-slot real-owner custody, prospective identities acknowledged before child
+writes, explicit Plan/Commit/Cancel selection and selected-order confirmations.
+
+Independent source reviews cover the child recovery and header calculation,
+parent routing, actual journal/ACK replay regressions, presentation and the
+native-TCP fixture extensions. The five initial inspection Rust files passed a
+parser check using the available September nightly rustfmt during a brief host
+recovery. No new Cargo build, Rust test execution, formatter pass, integrated
+MCP/stdio or live DFHack result is claimed. The execution environment repeatedly
+failed during latest-nightly provisioning and is unavailable. Earlier receipts
+below concern their exact earlier source revisions and do not qualify these
+changes.
 
 ### Current parent-portfolio increment
 

@@ -171,3 +171,119 @@ fn production_query_parser_rejects_foreign_authority_and_unbounded_envelopes() {
     );
     assert!(Action::query(Some(&oversized), None).is_err());
 }
+
+#[test]
+fn portfolio_clock_actions_require_an_exact_order_without_retargeting_goal_actions() -> Result<()> {
+    for scope in [None, Some("goal"), Some("project"), Some("session"), Some("unknown")] {
+        for step in [Some(0), Some(1), Some(4), Some(5)] {
+            let commit = Action::Commit {
+                seal: "review".into(),
+                confirmed: true,
+                scope: scope.map(str::to_owned),
+                order_step_id: step,
+            };
+            let cancel = Action::Cancel {
+                scope: scope.map(str::to_owned),
+                order_step_id: step,
+            };
+            for (production, portfolio) in [(false, false), (false, true), (true, false), (true, true)] {
+                assert!(commit.validate_order_scope(production, portfolio).is_err());
+                assert!(cancel.validate_order_scope(production, portfolio).is_err());
+            }
+        }
+    }
+    for scope in ["clock", "inventory_clock"] {
+        for step in [None, Some(0), Some(1), Some(4), Some(5), Some(u32::MAX)] {
+            let commit = Action::Commit {
+                seal: "review".into(),
+                confirmed: true,
+                scope: Some(scope.into()),
+                order_step_id: step,
+            };
+            let cancel = Action::Cancel {
+                scope: Some(scope.into()),
+                order_step_id: step,
+            };
+            for action in [commit, cancel] {
+                assert_eq!(
+                    action.validate_order_scope(true, true).is_ok(),
+                    step.is_some_and(|value| value <= 4)
+                );
+                assert_eq!(action.validate_order_scope(true, false).is_ok(), step.is_none());
+                assert_eq!(action.validate_order_scope(false, true).is_ok(), step.is_none());
+            }
+        }
+    }
+    Action::Commit {
+        seal: "goal-review".into(),
+        confirmed: true,
+        scope: None,
+        order_step_id: None,
+    }.validate_order_scope(true, true)?;
+    Action::Cancel { scope: None, order_step_id: None }.validate_order_scope(true, true)?;
+    Ok(())
+}
+
+#[test]
+fn portfolio_clock_requests_preserve_the_original_native_request() -> Result<()> {
+    let seal = Digest32::of_bytes(b"exact original order review").to_hex();
+    for kind in ["run", "inventory_run"] {
+        let native = json!({
+            "kind":kind,
+            "original_paired_seal":seal,
+            "game_ticks":10,
+            "wall_millis":1000,
+        });
+        let (scalar, selected) = ProductionClockRequest::parse(&native.to_string(), false)?;
+        assert!(selected.is_none());
+        assert_eq!(serde_json::from_str::<Value>(&scalar).ok(), Some(native.clone()));
+        assert!(ProductionClockRequest::parse(&native.to_string(), true).is_err());
+        for step in 0..=4 {
+            let mut scoped = native.clone();
+            scoped["order_step_id"] = json!(step);
+            let (canonical, selected) = ProductionClockRequest::parse(&scoped.to_string(), true)?;
+            assert_eq!(selected, Some(step));
+            assert_eq!(serde_json::from_str::<Value>(&canonical).ok(), Some(native.clone()));
+            if kind == "run" {
+                RunRequest::parse(&canonical)?;
+            } else {
+                InventoryRunRequest::parse(&canonical)?;
+            }
+            assert!(ProductionClockRequest::parse(&scoped.to_string(), false).is_err());
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn portfolio_clock_requests_reject_ambiguous_selectors_and_extra_authority() {
+    let native = json!({
+        "kind":"run",
+        "original_paired_seal":Digest32::of_bytes(b"exact original order review").to_hex(),
+        "game_ticks":10,
+        "wall_millis":1000,
+        "order_step_id":1,
+    });
+    for selector in [Value::Null, json!(-1), json!(1.5), json!("1"), json!(5), json!(u64::MAX)] {
+        let mut request = native.clone();
+        request["order_step_id"] = selector;
+        assert!(ProductionClockRequest::parse(&request.to_string(), true).is_err());
+    }
+    for field in ["confirmed", "target", "deadline_tick", "journal_id", "generation"] {
+        let mut request = native.clone();
+        request[field] = json!(true);
+        assert!(ProductionClockRequest::parse(&request.to_string(), true).is_err(), "{field}");
+    }
+    let raw = native.to_string();
+    for duplicate in [
+        raw.replacen("\"order_step_id\":1", "\"order_step_id\":0,\"order_step_id\":1", 1),
+        raw.replacen("\"kind\":\"run\"", "\"kind\":\"inventory_run\",\"kind\":\"run\"", 1),
+    ] {
+        assert_ne!(duplicate, raw);
+        assert!(ProductionClockRequest::parse(&duplicate, true).is_err());
+    }
+    let mut foreign = native;
+    foreign["kind"] = json!("stock_targets");
+    assert!(ProductionClockRequest::parse(&foreign.to_string(), true).is_err());
+    assert!(ProductionClockRequest::parse(&" ".repeat(2049), true).is_err());
+}

@@ -272,21 +272,6 @@ fn disjoint(paths: &[&Path]) -> Result<()> {
     Ok(())
 }
 
-/// The fixed vector root does not yet retain every production leaf's clock
-/// acknowledgement. Refuse those policies before any child custody opens;
-/// Tree and Workshop clocks remain independent prefix features.
-fn validate_goal_clocks(goal: &ProjectStockGoal, production: &str) -> Result<()> {
-    if goal.is_portfolio() {
-        let config: Value = serde_json::from_str(production)
-            .map_err(|_| invalid("invalid production configuration"))?;
-        if !config["clock"].is_null() || !config["inventory_clock"].is_null() {
-            return Err(denied(
-                "stock portfolio projects require production clock and inventory_clock to be absent",
-            ));
-        }
-    }
-    Ok(())
-}
 
 impl Config {
     pub(super) fn load() -> Result<(Self, ProjectWorkshopTemplate)> {
@@ -299,7 +284,6 @@ impl Config {
         let mut input: Input = serde_json::from_str(&raw[0])
             .map_err(|_| invalid("invalid closed resource project configuration"))?;
         input.goal.canonicalize()?;
-        validate_goal_clocks(&input.goal, &raw[2])?;
         directory(&input.directory)?;
         if input.schema != "dfmcp.native-resource-project-development/1"
             || input.initialize == input.acknowledged.is_some()
@@ -477,52 +461,53 @@ mod tests {
     use super::*;
 
     #[test]
-    fn portfolio_clock_policy_refuses_both_production_families_before_child_open()
+    fn portfolio_clock_credentials_follow_only_the_configured_original_families()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut goal: ProjectStockGoal = serde_json::from_value(json!({
-            "targets":[
-                {"recipe":"wooden_door","minimum_stack_units":2,"max_order_amount":3},
-                {"recipe":"wooden_bed","minimum_stack_units":5,"max_order_amount":8}
-            ],
-            "deadline_tick":900,"poll_interval_ticks":5,"stable_samples":2,"assign_labor":false
-        }))?;
-        goal.canonicalize()?;
-        assert!(validate_goal_clocks(&goal, "{}").is_ok());
-        assert!(validate_goal_clocks(&goal, r#"{"clock":null,"inventory_clock":null}"#).is_ok());
-        for production in [
-            r#"{"clock":{"generation":1}}"#,
-            r#"{"inventory_clock":{"generation":2}}"#,
-            r#"{"clock":{"generation":1},"inventory_clock":{"generation":2}}"#,
-            r#"{"clock":false}"#,
-        ] {
-            assert!(
-                validate_goal_clocks(&goal, production).is_err(),
-                "{production}"
-            );
+        let parent = json!({
+            "goal":{
+                "targets":[
+                    {"recipe":"wooden_door","minimum_stack_units":2,"max_order_amount":3},
+                    {"recipe":"wooden_bed","minimum_stack_units":5,"max_order_amount":8}
+                ],
+                "deadline_tick":900,"poll_interval_ticks":5,"stable_samples":2,"assign_labor":false
+            },
+            "harvest_tree":true,
+        }).to_string();
+        for (order, inventory) in [(false, false), (true, false), (false, true), (true, true)] {
+            let mut production = json!({});
+            if order {
+                production["clock"] = json!({"generation":1});
+            }
+            if inventory {
+                production["inventory_clock"] = json!({"generation":2});
+            }
+            let features = Features::from_raw(
+                r#"{"clock":{}}"#,
+                &production.to_string(),
+                Some(&parent),
+                Some(r#"{"clock":{}}"#),
+            )?;
+            for key in [
+                "DFMCP_ALLOW_UNADMITTED_TREE_CLOCK",
+                "DFMCP_ALLOW_UNADMITTED_WORKSHOP_CLOCK",
+                "DFMCP_RUN_TOKEN",
+                "DFMCP_RUN_ALLOW_CLOCK",
+            ] {
+                assert!(features.allows(key), "{key}");
+            }
+            for key in [
+                "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK",
+                "DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN",
+            ] {
+                assert_eq!(features.allows(key), order, "{key}");
+            }
+            for key in [
+                "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK",
+                "DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN",
+            ] {
+                assert_eq!(features.allows(key), inventory, "{key}");
+            }
         }
-        let scalar: ProjectStockGoal = serde_json::from_value(json!({
-            "recipe":"wooden_bed","minimum_stack_units":5,"max_order_amount":8,
-            "deadline_tick":900,"poll_interval_ticks":5,"stable_samples":2,"assign_labor":false
-        }))?;
-        assert!(validate_goal_clocks(&scalar, r#"{"clock":{},"inventory_clock":{}}"#).is_ok());
-
-        let parent = json!({"goal":goal,"harvest_tree":true}).to_string();
-        let features = Features::from_raw(
-            r#"{"clock":{}}"#,
-            "{}",
-            Some(&parent),
-            Some(r#"{"clock":{}}"#),
-        )?;
-        for key in [
-            "DFMCP_ALLOW_UNADMITTED_TREE_CLOCK",
-            "DFMCP_ALLOW_UNADMITTED_WORKSHOP_CLOCK",
-            "DFMCP_RUN_TOKEN",
-            "DFMCP_RUN_ALLOW_CLOCK",
-        ] {
-            assert!(features.allows(key), "{key}");
-        }
-        assert!(!features.allows("DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN"));
-        assert!(!features.allows("DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN"));
         Ok(())
     }
 

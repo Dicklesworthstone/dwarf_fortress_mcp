@@ -11,6 +11,8 @@ const CASE: &str = "PROJECT_PUBLICATION_RUNTIME_CASE";
 const INPUT: &str = "PROJECT_PUBLICATION_RUNTIME_INPUT";
 const OUTPUT: &str = "PROJECT_PUBLICATION_RUNTIME_OUTPUT";
 const STAGE: &str = "PROJECT_PUBLICATION_RUNTIME_STAGE";
+const CLOCKS: &str = "PROJECT_PUBLICATION_RUNTIME_CLOCKS";
+const ONE_ORDER: &str = "PROJECT_PUBLICATION_RUNTIME_ONE_ORDER";
 const ORIGINAL_FILES: &[&str] = &[
     "original.plan",
     "original.citizens",
@@ -26,8 +28,54 @@ fn budget() -> WorkBudget {
         max_entities: 8192,
         max_actions: 5,
         max_output_tokens: MAX_OUTPUT_TOKENS,
-        max_game_ticks: 0,
+        max_game_ticks: if std::env::var(CLOCKS).is_ok() { 1200 } else { 0 },
     }
+}
+
+fn expected_order_steps() -> Vec<u32> {
+    if std::env::var(ONE_ORDER).as_deref() == Ok("1") {
+        vec![1]
+    } else {
+        vec![1, 2]
+    }
+}
+
+fn check_portfolio_clocks(reference: &Value, order: bool, inventory: bool) -> TestResult {
+    let slots = reference["recovery"]["portfolio"].as_array().ok_or("missing original slots")?;
+    assert_eq!(slots.len(), expected_order_steps().len());
+    assert_eq!(reference["clock"].is_object(), order);
+    assert_eq!(reference["inventory_clock"].is_object(), inventory);
+    if !order && !inventory {
+        assert!(reference.get("portfolio_clocks").is_none());
+        for slot in slots {
+            assert!(slot["clock_journal_id"].is_null());
+            assert!(slot["inventory_clock_journal_id"].is_null());
+        }
+        return Ok(());
+    }
+    let clocks = reference["portfolio_clocks"].as_array().ok_or("missing complete clock pins")?;
+    assert_eq!(clocks.len(), slots.len());
+    assert_eq!(reference["clock"], clocks[0]["clock"]);
+    assert_eq!(reference["inventory_clock"], clocks[0]["inventory_clock"]);
+    let mut ids = std::collections::BTreeSet::new();
+    for (slot, clocks) in slots.iter().zip(clocks) {
+        assert_eq!(slot["step_id"], clocks["step_id"]);
+        for (family, field, configured) in [
+            ("clock", "clock_journal_id", order),
+            ("inventory_clock", "inventory_clock_journal_id", inventory),
+        ] {
+            let pin = &clocks[family];
+            assert_eq!(pin.is_object(), configured);
+            assert_eq!(slot[field], pin["journal_id"]);
+            if configured {
+                let id = pin["journal_id"].as_str().ok_or("missing clock identity")?;
+                assert!(ids.insert(id.to_owned()), "two original clocks share a journal");
+                assert_eq!(pin["head"], pin["journal_id"], "publication advanced a clock");
+                assert_eq!(pin["high_source_sequence"], 0);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn output(value: &Value) -> TestResult {
@@ -220,8 +268,8 @@ fn control(requested_case: &str) -> TestResult {
     let case = requested_case
         .strip_prefix("portfolio_")
         .unwrap_or(requested_case);
-    let reopening = case == "reopened";
-    let case = if reopening { "published" } else { case };
+    let reopening = matches!(case, "reopened" | "reopened_refusal");
+    let case = if case == "reopened" { "published" } else { case };
     let retained: Option<Value> = if reopening {
         Some(serde_json::from_slice(&std::fs::read(std::env::var(
             INPUT,
@@ -331,6 +379,11 @@ fn control(requested_case: &str) -> TestResult {
     let prior = runtime.project_recovery_reference();
     assert!(prior["recovery"].is_null());
     let directory = runtime.config.directory.clone();
+    let order_config: Value = serde_json::from_str(&std::env::var("DFMCP_SEMANTIC_WORK_ORDER_CONFIG")?)?;
+    let order_directory = Path::new(order_config["directory"].as_str().ok_or("missing order directory")?);
+    let order_clock = runtime.config.clock.is_some();
+    let inventory_clock = runtime.config.inventory_clock.is_some();
+    let before_plan = custody_bytes()?;
     let mut recorded = None;
     let mut calls = 0_u32;
     let mut record = |intent: &ProjectProductionIntent, _: &OperationContext| -> Result<()> {
@@ -341,8 +394,23 @@ fn control(requested_case: &str) -> TestResult {
                 "child wrote {name} before parent ACK"
             );
         }
+        for slot in 2..=4 {
+            for family in ["clock", "inventory-clock"] {
+                assert!(
+                    !order_directory.join(format!("portfolio-{slot}-{family}.journal")).exists(),
+                    "child wrote an additional clock before parent ACK"
+                );
+            }
+        }
         intent.validate_checkpoint(&prior)?;
-        recorded = Some(intent.to_json());
+        let intended = intent.to_json();
+        if portfolio {
+            check_portfolio_clocks(&intended["recovery_reference"], order_clock, inventory_clock)
+                .map_err(|_| invalid("prospective clock publication fixture"))?;
+            assert_eq!(intended["recovery_reference"]["clock"], prior["clock"]);
+            assert_eq!(intended["recovery_reference"]["inventory_clock"], prior["inventory_clock"]);
+        }
+        recorded = Some(intended);
         if case == "ack_refusal" {
             return Err(denied("injected parent ACK refusal"));
         }
@@ -406,10 +474,20 @@ fn control(requested_case: &str) -> TestResult {
                 no_work_parent_floor(&mut runtime, &goal)?;
             }
         }
+        "reopened_refusal" => {
+            assert!(portfolio && (order_clock || inventory_clock));
+            assert!(result.is_err());
+            assert_eq!(calls, 0, "reopen refused only after parent ACK");
+            assert!(recorded.is_none());
+            assert!(!runtime.initialization_failed);
+            assert!(runtime.original.is_none());
+            assert_eq!(custody_bytes()?, before_plan);
+        }
         "ack_refusal" => {
             assert!(result.is_err());
             assert_eq!(calls, 1);
             assert!(!runtime.initialization_failed);
+            assert_eq!(custody_bytes()?, before_plan, "ACK refusal wrote child custody");
             for name in ORIGINAL_FILES {
                 assert!(!directory.join(name).exists());
             }
@@ -442,7 +520,7 @@ fn control(requested_case: &str) -> TestResult {
                         .iter()
                         .map(|step| step.get())
                         .collect::<Vec<_>>(),
-                    [1, 2]
+                    expected_order_steps()
                 );
                 assert_eq!(
                     layout.inventory_minima().len(),
@@ -452,7 +530,7 @@ fn control(requested_case: &str) -> TestResult {
                 let reference = runtime.project_recovery_reference();
                 assert_eq!(
                     reference["recovery"]["portfolio"].as_array().map(Vec::len),
-                    Some(2)
+                    Some(expected_order_steps().len())
                 );
                 assert_eq!(
                     recorded.as_ref().ok_or("missing portfolio intent")?["goal"]["targets"]
@@ -460,9 +538,10 @@ fn control(requested_case: &str) -> TestResult {
                         .map(Vec::len),
                     Some(3)
                 );
-                assert!(reference["clock"].is_null() && reference["inventory_clock"].is_null());
+                check_portfolio_clocks(&reference, order_clock, inventory_clock)?;
+                let selected = *expected_order_steps().last().ok_or("missing original selector")?;
                 let c = runtime.context(false)?;
-                runtime.select_order(Some(2), &c)?;
+                runtime.select_order(Some(selected), &c)?;
                 assert_eq!(
                     runtime.project_recovery_reference(),
                     reference,
@@ -475,10 +554,8 @@ fn control(requested_case: &str) -> TestResult {
                     .ok_or("missing slots")?
                 {
                     assert_eq!(entry["goal_history_present"], false);
-                    assert!(
-                        entry["clock_journal_id"].is_null()
-                            && entry["inventory_clock_journal_id"].is_null()
-                    );
+                    assert_eq!(entry["clock_journal_id"].is_string(), order_clock);
+                    assert_eq!(entry["inventory_clock_journal_id"].is_string(), inventory_clock);
                 }
             }
             if case == "advanced" {
@@ -510,7 +587,11 @@ fn recover(requested_case: &str) -> TestResult {
     };
     let retained: Value = serde_json::from_slice(&std::fs::read(std::env::var(INPUT)?)?)?;
     let goal: ProjectStockGoal = serde_json::from_value(retained["goal"].clone())?;
-    let intent = ProjectProductionIntent::from_json(&retained["intent"])?;
+    let intent = match ProjectProductionIntent::from_json(&retained["intent"]) {
+        Ok(intent) => intent,
+        Err(_) if !matches!(case, "published" | "published_floor") => return Ok(()),
+        Err(cause) => return Err(cause.into()),
+    };
     let origin = workforce::digest(retained["intent"]["recovery_reference"]
         ["workshop_prerequisite"]["checkpoint"]["origin_witness"].as_str().ok_or("missing origin")?)?;
     let mut config = Config::from_environment(|| Ok(()))?;
@@ -575,7 +656,7 @@ fn recover(requested_case: &str) -> TestResult {
     if goal.is_portfolio() {
         assert_eq!(
             reference["recovery"]["portfolio"].as_array().map(Vec::len),
-            Some(2)
+            Some(expected_order_steps().len())
         );
         assert_eq!(
             runtime
@@ -586,8 +667,15 @@ fn recover(requested_case: &str) -> TestResult {
                 .len(),
             3
         );
+        check_portfolio_clocks(
+            &reference,
+            runtime.config.clock.is_some(),
+            runtime.config.inventory_clock.is_some(),
+        )?;
+        assert_eq!(reference["portfolio_clocks"], expected["portfolio_clocks"]);
+        let selected = *expected_order_steps().last().ok_or("missing recovered selector")?;
         let c = runtime.context(false)?;
-        runtime.select_order(Some(2), &c)?;
+        runtime.select_order(Some(selected), &c)?;
         assert_eq!(runtime.project_recovery_reference(), reference);
         runtime.validate_project_publication(&goal, &intent)?;
     }

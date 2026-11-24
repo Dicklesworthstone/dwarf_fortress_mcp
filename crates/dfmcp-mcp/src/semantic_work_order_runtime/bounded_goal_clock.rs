@@ -248,6 +248,16 @@ impl<J: EffectJournalStorage, T: GoalClockTarget> Clock<J, T> {
             target: PhantomData,
         }
     }
+    /// Pure prospective identity using this owner's already verified source.
+    /// The native initializer shares the same header codec.
+    pub(crate) fn initial_journal_id(
+        &self,
+        session_id: dfmcp_core::SessionId,
+        request_id: dfmcp_core::RequestId,
+    ) -> Digest32 {
+        self.journal.binding().initial_journal_id(session_id, request_id)
+    }
+
     /// Recovery metadata comes from the actual journal, never a retained view.
     pub(crate) fn recovery_checkpoint(&self) -> (Digest32, Digest32, u64, u64) {
         (

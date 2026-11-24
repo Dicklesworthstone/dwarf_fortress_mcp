@@ -1,5 +1,45 @@
 # Implementation Status
 
+## Unreleased — Run and recover each original portfolio clock through the project
+
+Native resource projects now route independently configured order and inventory
+clocks for their fixed stock portfolios. Plan, Commit and clock Cancel require
+the exact original order StepId. Scalar clocks and goal/project/session actions
+reject that selector. Closed clock requests reject unknown, duplicate, null and
+out-of-range fields before selection; the existing native owners still enforce
+the target, current review, separate authority, deadline and work budgets.
+
+The parent publication intent now acknowledges every additional clock journal
+identity before any additional clock file is created. Prediction shares the
+actual native header codec and fixed-slot request mapping, with no native
+contact or initialization. Completed publication must match every untouched
+header; lost replies recover complete existing custody only. Parent completion
+also accounts for inactive prepared clocks.
+
+Agent Turns bind clock confirmations and recommendations to the exact selected
+order and show every original clock owner, including inactive and retained
+owners after a fenced local query. Recovery references never restore a review.
+Existing Query production inspection and all eleven public tools remain.
+
+The real combined-production Runtime/native-TCP campaign retains its 15 cases
+and adds 16 configured-clock publication/recovery cases across order,
+inventory and dual-family policies, one/multiple original orders, already-met
+minima, before-write ACK refusal, lost replies, partial publication and missing,
+corrupt or substituted inactive journals. Header/salt, request/scope and seven
+presentation regression groups are also authored. Independent source reviews
+found and resolved stale server instructions and hidden retained-clock
+presentation. The new tests remain unexecuted: the host reports no usable
+execution environment. No new Cargo build, formatter pass, integrated MCP,
+native clock-dispatch or live DFHack qualification is claimed.
+
+A configured pre-plan owner reopened before a multi-order original still
+cannot initialize additional clocks; it refuses before the parent ACK. A
+one-order portfolio reuses its existing first owner. An all-met watch creates
+no order target and gains no clock authority. Production admission remains
+unchanged.
+
+Owner: `df-native-stock-target-3m9` (in progress).
+
 ## Unreleased — Retain every original portfolio clock through recovery
 
 Combined-production project custody now exports an ordered checkpoint for every

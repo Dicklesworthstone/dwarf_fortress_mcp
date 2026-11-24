@@ -295,11 +295,8 @@ pub(super) fn open_at(
     }
     let mut journal_context = work.rest()?;
     if initialize && path != config.path("clock.journal") {
-        let mut identity = b"dfmcp-portfolio-clock-slot/1\0".to_vec();
-        identity.extend_from_slice(&journal_context.request_id.get().to_be_bytes());
-        identity.extend_from_slice(path.as_os_str().as_encoded_bytes());
         journal_context.request_id =
-            dfmcp_core::RequestId::new(Digest32::of_bytes(&identity).first_u128().max(1));
+            super::portfolio_clock_request_id(path, journal_context.request_id, false);
     }
     let mut journal = open_private_order_journal_exact(
         &path,

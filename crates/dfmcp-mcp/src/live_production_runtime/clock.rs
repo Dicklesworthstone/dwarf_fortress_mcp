@@ -57,6 +57,20 @@ impl ProductionClock {
         let target = ClockTarget::for_selected_original(original, archive, journal, result)?;
         self.bind_target(target)
     }
+    pub(super) fn prospective_project_checkpoint(
+        &self,
+        c: &OperationContext,
+        request_id: dfmcp_core::RequestId,
+    ) -> Result<config::ProjectClockRecovery> {
+        let journal_id = self.inner.initial_journal_id(c.session_id, request_id)?;
+        Ok(config::ProjectClockRecovery {
+            journal_id,
+            head: journal_id,
+            authority_tick_floor: 0,
+            high_source_sequence: 0,
+        })
+    }
+
     pub(super) fn project_recovery_checkpoint(&self) -> config::ProjectClockRecovery {
         let (journal_id, head, high_tick, high_source_sequence) =
             self.inner.recovery_checkpoint();

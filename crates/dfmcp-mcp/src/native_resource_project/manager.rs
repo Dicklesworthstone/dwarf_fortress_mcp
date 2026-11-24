@@ -208,6 +208,7 @@ impl Runtime {
 }
 
 pub(super) fn action(action: Action, offline: bool, deadline: u64) -> Result<ManagerAction> {
+    action.validate_order_scope(false, false)?;
     Ok(match action {
         Action::Observe(None) => ManagerAction::Observe,
         Action::Observe(Some(_)) => {
@@ -241,6 +242,7 @@ pub(super) fn action(action: Action, offline: bool, deadline: u64) -> Result<Man
             seal,
             confirmed,
             scope,
+            order_step_id: _,
         } => {
             if scope.as_deref().unwrap_or("goal") != "goal" {
                 return Err(invalid(
@@ -254,7 +256,7 @@ pub(super) fn action(action: Action, offline: bool, deadline: u64) -> Result<Man
             "goal" | "project" => ManagerAction::Wait,
             _ => return Err(invalid("Manager appointment has no clock wait scope")),
         },
-        Action::Cancel(scope) => match scope.as_deref().unwrap_or("project") {
+        Action::Cancel { scope, .. } => match scope.as_deref().unwrap_or("project") {
             "goal" | "project" => ManagerAction::Cancel,
             _ => {
                 return Err(invalid(
@@ -307,18 +309,19 @@ mod tests {
             ManagerAction::Wait
         ));
         assert!(matches!(
-            action(Action::Cancel(None), false, 200)?,
+            action(Action::Cancel { scope: None, order_step_id: None }, false, 200)?,
             ManagerAction::Cancel
         ));
         for scope in ["clock", "inventory_clock", "session"] {
             assert!(action(Action::Wait(Some(scope.into())), false, 200).is_err());
-            assert!(action(Action::Cancel(Some(scope.into())), false, 200).is_err());
+            assert!(action(Action::Cancel { scope: Some(scope.into()), order_step_id: None }, false, 200).is_err());
             assert!(
                 action(
                     Action::Commit {
                         seal: "seal".into(),
                         confirmed: true,
-                        scope: Some(scope.into())
+                        scope: Some(scope.into()),
+                        order_step_id: None,
                     },
                     false,
                     200

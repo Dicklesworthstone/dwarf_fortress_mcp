@@ -387,6 +387,16 @@ impl<J: EffectJournalStorage> Clock<J> {
             observed_sequence_floor: 0,
         }
     }
+    /// Pure prospective identity using this owner's already verified source.
+    /// The native initializer shares the same header codec.
+    pub(crate) fn initial_journal_id(
+        &self,
+        session_id: dfmcp_core::SessionId,
+        request_id: dfmcp_core::RequestId,
+    ) -> Result<Digest32> {
+        self.journal.binding().initial_journal_id(session_id, request_id)
+    }
+
     /// Exact inner custody and consumed source floors, including a failed
     /// operation whose last published ClockView predates its durable marker.
     pub(crate) fn recovery_checkpoint(&self) -> (Digest32, Digest32, u64, u64) {

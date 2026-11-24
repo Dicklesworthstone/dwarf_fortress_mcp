@@ -57,11 +57,25 @@ def portfolio_inventory(combined, tick, stocks):
     return raw + struct.pack(">I", 0)
 
 
-def run_case(executable, test, requested_case):
+def pending_environment(combined, environment, retained):
+    """Pin first clock IDs while deliberately omitting the lost original selector."""
+    reference = (retained["intent"]["recovery_reference"]
+                 if retained["intent"] is not None else retained["actual"])
+    first = {family + "_journal_id": reference[family]["journal_id"]
+             for family in ("clock", "inventory_clock") if reference[family] is not None}
+    reopened = combined.reopen_environment(
+        environment, first, retained["workforce_journal_id"])
+    parent = json.loads(reopened["DFMCP_COMBINED_PRODUCTION_CONFIG"])
+    parent["recovery"] = None
+    reopened["DFMCP_COMBINED_PRODUCTION_CONFIG"] = json.dumps(parent)
+    return reopened
+
+
+def run_case(executable, test, requested_case, clocks=(), one_order=False):
     portfolio = requested_case.startswith("portfolio_")
     case = requested_case.removeprefix("portfolio_")
-    reopening = case == "reopened"
-    case = "published" if reopening else case
+    reopening = case in ("reopened", "reopened_refusal")
+    case = "published" if case == "reopened" else case
     prefix = "portfolio_" if portfolio else ""
     combined = load("project_publication_production_peer", "combined_production.py")
     stock = load("project_publication_workshop_seed", "combined_stock_target_runtime_peer.py")
@@ -105,9 +119,25 @@ def run_case(executable, test, requested_case):
         try:
             met = case in ("no_work", "no_work_floor") or reopening
             peer.inventory_stack = 6 if met else 2
-            peer.chair_stack = 2 if met else 1
+            peer.chair_stack = 2 if met or one_order else 1
             environment = combined.environment(production, peer.endpoint)
             environment["PROJECT_PUBLICATION_RUNTIME_STAGE"] = str(stage)
+            if one_order:
+                environment["PROJECT_PUBLICATION_RUNTIME_ONE_ORDER"] = "1"
+            if clocks:
+                environment["PROJECT_PUBLICATION_RUNTIME_CLOCKS"] = ",".join(clocks)
+                for family, generation, flag in (
+                    ("clock", combined.CLOCK_GENERATION, "CLOCK"),
+                    ("inventory_clock", combined.INVENTORY_CLOCK_GENERATION, "INVENTORY_CLOCK"),
+                ):
+                    if family not in clocks:
+                        continue
+                    for name in ("DFMCP_COMBINED_PRODUCTION_CONFIG", "DFMCP_SEMANTIC_WORK_ORDER_CONFIG"):
+                        configured = json.loads(environment[name])
+                        configured[family] = {"generation": generation}
+                        environment[name] = json.dumps(configured)
+                    environment[f"DFMCP_SEMANTIC_WORK_ORDER_ALLOW_{flag}"] = "1"
+                    environment[f"DFMCP_SEMANTIC_WORK_ORDER_{flag}_TOKEN"] = combined.TOKEN.decode()
             parent = json.loads(environment["DFMCP_COMBINED_PRODUCTION_CONFIG"])
             parent["workshop_prerequisite"] = prerequisite
             environment["DFMCP_COMBINED_PRODUCTION_CONFIG"] = json.dumps(parent)
@@ -121,13 +151,12 @@ def run_case(executable, test, requested_case):
                       retained_path, retained_path)
                 preplan = json.loads(retained_path.read_text())
                 assert preplan["intent"] is None and preplan["actual"]["recovery"] is None
-                environment = combined.reopen_environment(
-                    environment, None, preplan["workforce_journal_id"])
+                environment = pending_environment(combined, environment, preplan)
                 parent = json.loads(environment["DFMCP_COMBINED_PRODUCTION_CONFIG"])
                 parent["workshop_prerequisite_checkpoint"] = \
                     preplan["actual"]["workshop_prerequisite"]["checkpoint"]
                 environment["DFMCP_COMBINED_PRODUCTION_CONFIG"] = json.dumps(parent)
-                peer.inventory_stack, peer.chair_stack = 2, 1
+                peer.inventory_stack, peer.chair_stack = 2, 2 if one_order else 1
             child(executable, test, "control", requested_case, environment,
                   retained_path, retained_path)
             retained = json.loads(retained_path.read_text())
@@ -137,19 +166,31 @@ def run_case(executable, test, requested_case):
             if portfolio and retained["intent"] is not None:
                 assert len(retained["intent"]["goal"]["targets"]) == 3
                 assert [slot["step_id"] for slot in
-                        retained["intent"]["recovery_reference"]["recovery"]["portfolio"]] == [1, 2]
+                        retained["intent"]["recovery_reference"]["recovery"]["portfolio"]] == ([1] if one_order else [1, 2])
+                reference = retained["intent"]["recovery_reference"]
+                if clocks:
+                    pins = reference["portfolio_clocks"]
+                    assert len(pins) == (1 if one_order else 2)
+                    for family in ("clock", "inventory_clock"):
+                        assert reference[family] == pins[0][family]
+                        for pin in pins:
+                            assert (pin[family] is not None) == (family in clocks)
+                            if family in clocks:
+                                assert pin[family]["head"] == pin[family]["journal_id"]
+                else:
+                    assert "portfolio_clocks" not in reference
             calls = [operation for _, operation in peer.calls]
             assert calls.count("PrepareAssignment") == int(case in ("advanced", "prepared_floor"))
             assert not any(operation.startswith("Commit") for operation in calls)
             assert "PrepareOrder" not in calls
             assert not peer.workforce_applied and not peer.order_created
             if case in ("published", "partial", "advanced"):
-                reopened = combined.reopen_environment(
-                    environment, None, retained["workforce_journal_id"])
+                reopened = pending_environment(combined, environment, retained)
                 offline = {key: value for key, value in reopened.items()
                            if not (key.startswith("DFMCP_") and (
                                key.endswith("_TOKEN") or key.endswith("_ALLOW_LABOR")
-                               or key.endswith("_ALLOW_PRODUCTION")))}
+                               or key.endswith("_ALLOW_PRODUCTION") or key.endswith("_ALLOW_CLOCK")
+                               or key.endswith("_ALLOW_INVENTORY_CLOCK")))}
                 calls_before = (list(peer.calls), list(workshop.calls))
                 files_before = combined.custody_files(production)
                 child(executable, test, "recover", requested_case, offline, retained_path,
@@ -161,9 +202,16 @@ def run_case(executable, test, requested_case):
                           retained_path, directory / "floor-recovered.json")
                     assert calls_before == (peer.calls, workshop.calls), "parent-floor recovery contacted a source"
                     assert files_before == combined.custody_files(production), "parent-floor recovery rewrote custody"
-                    for name in ("original.plan", "original.citizens", "original.workshop", "execution.journal"):
-                        path = production / "parent" / name
-                        hidden = directory / f"saved-{name}"
+                    retained_files = [production / "parent" / name for name in (
+                        "original.plan", "original.citizens", "original.workshop", "execution.journal")]
+                    for slot in range(1, (1 if one_order else 2) + 1):
+                        for family in clocks:
+                            basename = family.replace("_", "-") + ".journal"
+                            name = basename if slot == 1 else f"portfolio-{slot}-{basename}"
+                            retained_files.append(production / "orders" / name)
+                    for path in retained_files:
+                        name = path.name
+                        hidden = directory / f"saved-{path.parent.name}-{name}"
                         path.rename(hidden)
                         try:
                             absent = combined.custody_files(production)
@@ -183,6 +231,18 @@ def run_case(executable, test, requested_case):
                             assert corrupt == combined.custody_files(production)
                         finally:
                             path.write_bytes(original)
+                        if path.parent.name == "orders" and name.startswith("portfolio-"):
+                            # A valid complete header belonging to the first
+                            # slot must not replace an inactive slot's custody.
+                            first = path.with_name(name.removeprefix("portfolio-2-"))
+                            try:
+                                path.write_bytes(first.read_bytes())
+                                swapped = combined.custody_files(production)
+                                child(executable, test, "recover", prefix + f"substituted-{name}", offline,
+                                      retained_path, directory / "refused.json")
+                                assert swapped == combined.custody_files(production)
+                            finally:
+                                path.write_bytes(original)
                     foreign = json.loads(retained_path.read_text())
                     foreign["intent"]["recovery_reference"]["recovery"]["object_digest"] = \
                         hashlib.sha256(b"another complete stock-target original").hexdigest()
@@ -226,6 +286,12 @@ def main():
         run_case(executable, test, case)
     for case in (*cases, "reopened"):
         run_case(executable, test, "portfolio_" + case)
+    for clocks in (("clock",), ("inventory_clock",), ("clock", "inventory_clock")):
+        for one_order in (False, True):
+            run_case(executable, test, "portfolio_published", clocks, one_order)
+        for case in ("ack_refusal", "partial", "reopened_refusal"):
+            run_case(executable, test, "portfolio_" + case, clocks)
+    run_case(executable, test, "portfolio_no_work", ("clock", "inventory_clock"))
     print("project-publication-campaign:checked")
 
 

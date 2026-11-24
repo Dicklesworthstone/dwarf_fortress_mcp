@@ -1918,12 +1918,12 @@ impl Runtime {
         if portfolio && publication_intent.is_some() {
             // The descriptor retains every original order slot, including a
             // one-order portfolio with other already-met minima. Initialize
-            // these clockless project slots before comparing the actual
+            // these exact project slots before comparing the actual
             // publication with the parent's acknowledged complete original.
             self.initialize_portfolio(None, &mut work)?;
         }
         if let Some(intent) = &publication_intent {
-            intent.validate_checkpoint(&self.project_recovery_reference())?;
+            intent.validate_pending_checkpoint(&self.project_recovery_reference())?;
         }
         self.create_executor(&mut work)?;
         if let Some(basis) = &mut self.basis {

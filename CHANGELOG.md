@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Per-order clocks in native resource projects
+
+- Enable independently configured order and inventory clocks for fixed stock
+  portfolios, with explicit original StepId selection for Plan, Commit and clock
+  Cancel and separate current reviews for every interval.
+- Acknowledge every prospective journal identity before creating extra clock
+  custody; share native header encoding and fixed-slot identity mapping, then
+  verify exact initial headers after publication and on lost-reply recovery.
+- Bind clock confirmation guidance to its exact selected order, expose inactive
+  and retained clock owners, and prevent inactive prepared clocks from satisfying
+  the parent's settled-clock requirement.
+- Add 16 real Runtime/native-TCP publication/recovery scenarios while preserving
+  15 existing cases, plus header, selector and presentation regressions.
+  Independently source-reviewed; execution is blocked by the unavailable host.
+- Preserve zero default time allowance, original deadlines, independent native
+  authority and production-admission gates. Reopened pre-plan custody cannot
+  create new multi-order clock slots; all-met watches gain no clock target.
+
 ## Unreleased — Complete portfolio clock recovery custody
 
 - Export every original order and inventory clock's real journal head and

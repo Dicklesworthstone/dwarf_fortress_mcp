@@ -806,3 +806,75 @@ fn failed_receipt_append_retains_actual_dispatch_pin_instead_of_old_view() -> Re
     assert_eq!(native.commits, 1);
     Ok(())
 }
+
+#[test]
+fn prospective_header_identity_matches_unchanged_codec_without_native_calls() -> Result<()> {
+    let memory = Memory::default();
+    let native = Native::new(memory.clone())?;
+    let c = context()?;
+    let binding = OrderRunBinding::from_source(&native)?;
+    let intended = binding.initial_journal_id(c.session_id, c.request_id)?;
+    assert!(memory.data.borrow().is_empty());
+    assert_eq!(memory.syncs.get(), 0);
+
+    // Independent reconstruction of the existing DFMOJ014 header prevents a
+    // prospective-identity helper from silently changing stored custody bytes.
+    let mut original = b"DFMOJ014".to_vec();
+    put_field(&mut original, &binding.encode()?);
+    original.extend_from_slice(&c.session_id.get().to_be_bytes());
+    original.extend_from_slice(&c.request_id.get().to_be_bytes());
+    let original_id = hash(b"dfmcp-order-run-rust-journal/1", &original);
+    original.extend_from_slice(original_id.as_bytes());
+    assert_eq!(intended, original_id);
+
+    let mut journal = open(memory.clone(), &native, &c, OrderRunMode::Control, true)?;
+    assert_eq!(journal.view(&c)?.id, intended);
+    assert_eq!(journal.recovery_pin(), (intended, intended));
+    assert_eq!(*memory.data.borrow(), original);
+    assert_eq!((native.reads, native.prepares, native.commits, native.cancels), (0, 0, 0, 0));
+
+    assert_ne!(intended, binding.initial_journal_id(
+        SessionId::new(c.session_id.get() + 1), c.request_id,
+    )?);
+    assert_ne!(intended, binding.initial_journal_id(
+        c.session_id, RequestId::new(c.request_id.get() + 1),
+    )?);
+    let mut changed = binding.clone();
+    changed.manifest.generation += 1;
+    assert_ne!(intended, changed.initial_journal_id(c.session_id, c.request_id)?);
+    changed = binding.clone();
+    changed.fortress = FortressIdentity::new("another-region", 7)?;
+    assert_ne!(intended, changed.initial_journal_id(c.session_id, c.request_id)?);
+    changed = binding;
+    changed.endpoint = SocketAddr::from(([127, 0, 0, 1], 5001));
+    assert_ne!(intended, changed.initial_journal_id(c.session_id, c.request_id)?);
+    Ok(())
+}
+
+#[test]
+fn lost_header_sync_reply_recovers_only_the_acknowledged_prospective_identity() -> Result<()> {
+    let memory = Memory::default();
+    let native = Native::new(memory.clone())?;
+    let c = context()?;
+    let intended = OrderRunBinding::from_source(&native)?
+        .initial_journal_id(c.session_id, c.request_id)?;
+    memory.fail_sync.set(true);
+    assert!(open(memory.clone(), &native, &c, OrderRunMode::Control, true).is_err());
+    let persisted = memory.data.borrow().clone();
+    assert!(!persisted.is_empty());
+    memory.fail_sync.set(false);
+
+    let mut query = c.clone();
+    query.session_id = SessionId::new(c.session_id.get() + 1);
+    query.request_id = RequestId::new(c.request_id.get() + 1);
+    query.grants.retain(|grant| grant.capability == Capability::Query);
+    let mut recovered = open(memory.clone(), &native, &query, OrderRunMode::Offline, false)?;
+    recovered.verify_recovery(intended, intended, &query)?;
+    assert_eq!(recovered.recovery_pin(), (intended, intended));
+    let substitute = OrderRunBinding::from_source(&native)?
+        .initial_journal_id(query.session_id, query.request_id)?;
+    assert!(recovered.verify_recovery(substitute, substitute, &query).is_err());
+    assert_eq!(*memory.data.borrow(), persisted);
+    assert_eq!((native.reads, native.prepares, native.commits, native.cancels), (0, 0, 0, 0));
+    Ok(())
+}

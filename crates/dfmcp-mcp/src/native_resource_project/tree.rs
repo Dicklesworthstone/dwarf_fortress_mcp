@@ -181,6 +181,7 @@ impl Runtime {
 }
 
 pub(super) fn action(action: Action, offline: bool) -> Result<TreeAction> {
+    action.validate_order_scope(false, false)?;
     Ok(match action {
         Action::Observe(None) => TreeAction::Observe,
         Action::Observe(Some(_)) => {
@@ -207,6 +208,7 @@ pub(super) fn action(action: Action, offline: bool) -> Result<TreeAction> {
             seal,
             confirmed,
             scope,
+            order_step_id: _,
         } => match scope.as_deref().unwrap_or("goal") {
             "goal" => TreeAction::Commit(seal, confirmed),
             "clock" => TreeAction::ClockCommit(seal, confirmed),
@@ -218,7 +220,7 @@ pub(super) fn action(action: Action, offline: bool) -> Result<TreeAction> {
             "clock" => TreeAction::ClockWait,
             _ => return Err(invalid("unknown Tree wait scope")),
         },
-        Action::Cancel(scope) => match scope.as_deref().unwrap_or("project") {
+        Action::Cancel { scope, .. } => match scope.as_deref().unwrap_or("project") {
             "goal" | "project" => TreeAction::Cancel,
             "clock" => TreeAction::ClockCancel,
             _ => return Err(invalid("unknown Tree cancellation scope")),
@@ -268,7 +270,8 @@ mod tests {
                 Action::Commit {
                     seal: "s".into(),
                     confirmed: true,
-                    scope: Some("clock".into())
+                    scope: Some("clock".into()),
+                    order_step_id: None,
                 },
                 false
             )?,
@@ -279,18 +282,19 @@ mod tests {
                 Action::Commit {
                     seal: "s".into(),
                     confirmed: true,
-                    scope: None
+                    scope: None,
+                    order_step_id: None,
                 },
                 false
             )?,
             TreeAction::Commit(_, true)
         ));
         assert!(matches!(
-            action(Action::Cancel(None), false)?,
+            action(Action::Cancel { scope: None, order_step_id: None }, false)?,
             TreeAction::Cancel
         ));
         assert!(matches!(
-            action(Action::Cancel(Some("clock".into())), false)?,
+            action(Action::Cancel { scope: Some("clock".into()), order_step_id: None }, false)?,
             TreeAction::ClockCancel
         ));
         assert!(matches!(
@@ -315,13 +319,14 @@ mod tests {
                 Action::Commit {
                     seal: "s".into(),
                     confirmed: true,
-                    scope: Some("inventory_clock".into())
+                    scope: Some("inventory_clock".into()),
+                    order_step_id: None,
                 },
                 false
             )
             .is_err()
         );
         assert!(action(Action::Wait(Some("inventory_clock".into())), false).is_err());
-        assert!(action(Action::Cancel(Some("inventory_clock".into())), false).is_err());
+        assert!(action(Action::Cancel { scope: Some("inventory_clock".into()), order_step_id: None }, false).is_err());
     }
 }

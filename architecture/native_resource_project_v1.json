@@ -156,7 +156,11 @@
     "pending_adoption_rejects_history_in_any_slot": true,
     "portfolio_leaf_history_monotone": true,
     "portfolio_clock_custody_supported": true,
-    "pending_portfolio_clock_heads_must_equal_initial_headers": true
+    "pending_portfolio_clock_heads_must_equal_initial_headers": true,
+    "prospective_portfolio_clock_ids_acknowledged_before_creation": true,
+    "prospective_clock_ids_share_native_header_codec": true,
+    "prospective_clock_ids_share_fixed_slot_request_salt": true,
+    "published_clock_headers_must_match_intent": true
   },
   "bounds": {
     "max_wall_millis": 60000,
@@ -187,7 +191,8 @@
     "portfolio_order_slots": 4,
     "stock_targets_request_bytes": 8192,
     "other_plan_request_bytes": 4096,
-    "production_inspection_request_bytes": 65536
+    "production_inspection_request_bytes": 65536,
+    "production_clock_request_bytes": 2048
   },
   "output": {
     "agent_turn_schema": "dfmcp.agent_turn/1",
@@ -217,7 +222,9 @@
       "raw_bytes_inline": false,
       "exact_capsule_retained_in_native_owner_or_journal": true,
       "complete_semantic_approval_projection": true
-    }
+    },
+    "portfolio_clock_confirmations_require_exact_selected_order": true,
+    "inactive_portfolio_clocks_remain_visible": true
   },
   "unsupported": [
     "automatic_native_effect_without_current_review",
@@ -225,9 +232,7 @@
     "generic_mixed_family_plan",
     "world_checkpoint_restore",
     "adoption_of_production_original_without_acknowledged_prior_intent",
-    "production_admission",
-    "portfolio_production_clock",
-    "portfolio_inventory_clock"
+    "production_admission"
   ],
   "production_admitted": false,
   "bridge_methods_added": false,
@@ -317,7 +322,9 @@
     "crates/dfmcp-mcp/src/semantic_work_order_runtime/native.rs",
     "crates/dfmcp-mcp/src/live_production_runtime/inspection.rs",
     "crates/dfmcp-mcp/src/live_production_runtime/planning_inspection.rs",
-    "crates/dfmcp-mcp/src/live_production_runtime/portfolio.rs"
+    "crates/dfmcp-mcp/src/live_production_runtime/portfolio.rs",
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/native_clock.rs",
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/native_inventory_clock.rs"
   ],
   "qualification": {
     "pre_outage_ledger_component_cases_passed": 17,
@@ -506,7 +513,46 @@
     "tests_executed": false,
     "integrated_rust_qualified": false,
     "live_dfhack_qualified": false,
-    "parent_clock_routing_enabled": false,
-    "blocker": "execution environment unavailable; prospective publication and explicit order routing remain separate"
+    "parent_clock_routing_enabled": true,
+    "blocker": "execution environment unavailable; source reviews do not establish integrated Rust or live qualification"
+  },
+  "portfolio_clocks": {
+    "configuration": "independent original clock and inventory_clock families",
+    "order_selector": "original StepId in child.portfolio.orders",
+    "plan_kinds": [
+      "run",
+      "inventory_run"
+    ],
+    "commit_cancel_scopes": [
+      "clock",
+      "inventory_clock"
+    ],
+    "portfolio_plan_commit_cancel_require_order_step_id": true,
+    "scalar_and_goal_selectors_rejected": true,
+    "null_and_duplicate_plan_selectors_rejected": true,
+    "order_step_id_min": 0,
+    "order_step_id_max": 4,
+    "wait_reconciles_original_owners_without_selector": true,
+    "planning_unpauses": false,
+    "each_interval_requires_current_review_and_explicit_confirmation": true,
+    "default_game_ticks": 0,
+    "current_joint_stock_proof_required": true,
+    "all_met_watch_has_clock_target": false,
+    "reopening_before_first_multi_order_original_allows_new_clock_initialization": false,
+    "tests_executed": false,
+    "integrated_rust_qualified": false,
+    "live_dfhack_qualified": false,
+    "validation": {
+      "source_reviewed": true,
+      "publication_native_tcp_prior_cases": 15,
+      "publication_native_tcp_added_cases": 16,
+      "presentation_regression_groups_added": 7,
+      "header_identity_and_slot_salt_regressions_authored": true,
+      "explicit_selector_regressions_authored": true,
+      "tests_executed": false,
+      "compilation_completed": false,
+      "native_clock_dispatch_campaign_executed": false,
+      "blocker": "No usable execution environment is available"
+    }
   }
 }
