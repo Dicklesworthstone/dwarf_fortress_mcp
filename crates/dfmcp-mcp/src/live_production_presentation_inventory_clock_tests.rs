@@ -2,7 +2,7 @@
 use super::*;
 use dfmcp_core::{Digest32, FortressId, GameTick, ObservationCursor};
 
-fn fixture(prepared: bool) -> (StateAnchor, Value) {
+pub(super) fn fixture(prepared: bool) -> (StateAnchor, Value) {
     let anchor = StateAnchor {
         fortress_id: FortressId::new(7),
         cursor: ObservationCursor {
@@ -19,8 +19,9 @@ fn fixture(prepared: bool) -> (StateAnchor, Value) {
     let run = json!({"review_seal":"e".repeat(64),"key":"original-inventory-clock-run",
         "plan_digest":"f".repeat(64),"state":"prepared","pending":true,"unresolved":false,
         "before_tick":130,"game_ticks":5,"wall_millis":1000,
-        "purpose":"sample_original_inventory","native":null});
-    let view = json!({"ok":true,"anchor":anchor_value(anchor),"observation_tick_floor":130,
+        "purpose":"sample_original_inventory","native":{"phase":"prepared","unpause_attempted":false}});
+    let view = json!({"ok":true,"mode":"control","anchor":anchor_value(anchor),"observation_tick_floor":130,
+        "custody_initialization_may_be_partial":false,"parent_goal_observation_fenced":false,
         "original_plan":{"plan_digest":"a".repeat(64),"expires_at_tick":300,"steps":[
             {"step_id":0,"action":{"kind":"set_labor"}},
             {"step_id":1,"action":{"kind":"create_work_order"},"obligation":{
@@ -34,25 +35,32 @@ fn fixture(prepared: bool) -> (StateAnchor, Value) {
             "kind":"observed_inventory_minimum","item_type":"BED","minimum_stack_units":1,
             "current_truth":"true","proven_at_anchor":false,"anchor":anchor_value(selected),
             "receipt_linked":false,"deadline_tick":300,"poll_interval_ticks":5,"stable_samples":2,
-            "history":{"present":true,"fenced":false},"terminal_failure":false},
+            "history":{"present":true,"fenced":false},"terminal_failure":false,
+            "source_digest":"8".repeat(64)},
         "current_parent_goal":{"scope":"complete_original_labor_and_inventory_goal",
             "current_truth":"true","original_goal_proven":false,"anchor":anchor_value(anchor),
-            "selected_anchor":anchor_value(selected)},
+            "selected_anchor":anchor_value(selected),"source_digest":"9".repeat(64),
+            "workforce_source_digest":"b".repeat(64),"restored_from_history":false,
+            "labor":[{"unit_id":"43","labor":"CARPENTER","requested_enabled":true,
+                "observed_enabled":true,"current_truth":"true"}]},
         "clock":{"source":"order-run/1.14","target_scope":"selected_original_order_step",
             "journal_id":"1".repeat(64),"head":"2".repeat(64),"target_digest":"3".repeat(64),
-            "original_paired_seal":"4".repeat(64),"mode":"control","review_available":false,
+            "original_paired_seal":"4".repeat(64),"mode":"control","inspection_required":false,"review_available":false,
             "pending":false,"unresolved":false,"may_be_running":false,"needs_reconciliation":false,
-            "high_tick":130,"run_count":0,"active_run":null},
+            "high_tick":130,"run_count":0,"active_run":null,"runs":[]},
         "inventory_clock":{"source":"run/1.13","target_scope":"selected_original_inventory_goal",
             "journal_id":"5".repeat(64),"head":"6".repeat(64),"target_digest":"7".repeat(64),
-            "original_paired_seal":"4".repeat(64),"mode":"control","independent_authority":true,
+            "original_paired_seal":"4".repeat(64),"mode":"control","inspection_required":false,"independent_authority":true,
             "review_available":prepared,"pending":prepared,"unresolved":false,"may_be_running":false,
             "needs_reconciliation":prepared,"high_tick":130,"run_count":u32::from(prepared),
-            "active_run":if prepared {run}else{Value::Null}}});
+            "active_run":if prepared {run.clone()}else{Value::Null},
+            "runs":if prepared {vec![run]}else{vec![]}}});
     (anchor, view)
 }
 
 fn output(anchor: StateAnchor, view: &Value, mode: &str, verified: bool, ticks: u64) -> Value {
+    let mut view = view.clone();
+    clock_guidance_tests::attach_guidance(&mut view, ticks, 60000);
     let (raw, overflow) = packet(
         "fortress.query",
         Some(SessionId::new((1u128 << 127) | (24u128 << 57) | 12)),
@@ -67,9 +75,9 @@ fn output(anchor: StateAnchor, view: &Value, mode: &str, verified: bool, ticks: 
         if verified {
             view.clone()
         } else {
-            json!({"ok":false,"retained_reference":compact(view)})
+            json!({"ok":false,"retained_reference":compact(&view)})
         },
-        Some(view),
+        Some(&view),
         verified,
         false,
     );
@@ -91,6 +99,8 @@ fn retired_order_can_finish_original_inventory_stability_under_its_own_clock() {
     {
         let (anchor, mut view) = fixture(false);
         view["inventory_clock"]["run_count"] = json!(runs);
+        view["inventory_clock"]["runs"] =
+            json!((0..runs).map(|index| json!({"state":"resolved","index":index})).collect::<Vec<_>>());
         view["selected_inventory_goal"]["deadline_tick"] = json!(deadline);
         view["original_plan"]["steps"][1]["obligation"]["deadline_tick"] = json!(deadline);
         let value = output(anchor, &view, "control", true, ticks);

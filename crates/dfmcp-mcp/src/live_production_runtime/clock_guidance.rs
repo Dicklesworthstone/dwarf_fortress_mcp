@@ -617,6 +617,11 @@ pub(crate) fn from_view(view: &Value) -> Option<Guidance> {
     {
         return None;
     }
+    if portfolio && view["portfolio"]["orders"].as_array()?.iter()
+        .find(|row| row["step_id"] == selected)?["goal"] != *goal
+    {
+        return None;
+    }
     let step = original["steps"].as_array()?.iter()
         .find(|step| step["step_id"] == selected)?;
     let deadline = step["obligation"]["deadline_tick"].as_u64()?

@@ -2,7 +2,7 @@
 use super::*;
 use dfmcp_core::{Digest32, FortressId, GameTick, ObservationCursor};
 
-fn fixture(prepared: bool) -> (StateAnchor, Value) {
+pub(super) fn fixture(prepared: bool) -> (StateAnchor, Value) {
     let anchor = StateAnchor {
         fortress_id: FortressId::new(7),
         cursor: ObservationCursor {
@@ -19,26 +19,32 @@ fn fixture(prepared: bool) -> (StateAnchor, Value) {
     let run = json!({"review_seal":"e".repeat(64),"key":"original-clock-run",
         "plan_digest":"f".repeat(64),"state":"prepared","pending":true,"unresolved":false,
         "native_order_id":100,"before_tick":130,"game_ticks":10,"wall_millis":1000,
-        "purpose":"advance_original_order","native":null});
-    let view = json!({"ok":true,"anchor":anchor_value(anchor),"observation_tick_floor":130,
+        "purpose":"advance_original_order","native":{"phase":"prepared","unpause_attempted":false}});
+    let view = json!({"ok":true,"mode":"control","anchor":anchor_value(anchor),"observation_tick_floor":130,
+        "custody_initialization_may_be_partial":false,"parent_goal_observation_fenced":false,
         "original_plan":{"plan_digest":"a".repeat(64),"expires_at_tick":300,"steps":[
             {"step_id":0,"action":{"kind":"set_labor"}},
             {"step_id":1,"action":{"kind":"create_work_order"},"obligation":{
                 "deadline_tick":300,"poll_interval_ticks":5,"stable_samples":2}}]},
         "frontier":{"all_applied":true,"needs_reconciliation":false,"entries":[],"next_ready":null},
         "review":null,"original_goal_proven":false,"clock_control_enabled":true,"clock_invalidates_goal":false,
+        "inventory_clock_invalidates_goal":false,
         "recovery":{"clock_journal_id":"1".repeat(64)},
         "selected_inventory_goal":{"scope":"selected_original_order_step","step_id":1,
             "kind":"observed_inventory_minimum","item_type":"BED","minimum_stack_units":1,
             "current_truth":"false","proven_at_anchor":false,"anchor":anchor_value(selected),
             "receipt_linked":true,"deadline_tick":300,"poll_interval_ticks":5,"stable_samples":2,
-            "history":{"present":true,"fenced":false},"terminal_failure":false},
+            "history":{"present":true,"fenced":false},"terminal_failure":false,
+            "source_digest":"8".repeat(64)},
         "current_parent_goal":{"scope":"complete_original_labor_and_inventory_goal",
             "current_truth":"false","original_goal_proven":false,"anchor":anchor_value(anchor),
-            "selected_anchor":anchor_value(selected)},
+            "selected_anchor":anchor_value(selected),"source_digest":"9".repeat(64),
+            "workforce_source_digest":"b".repeat(64),"restored_from_history":false,
+            "labor":[{"unit_id":"43","labor":"CARPENTER","requested_enabled":true,
+                "observed_enabled":true,"current_truth":"true"}]},
         "clock":{"source":"order-run/1.14","target_scope":"selected_original_order_step",
             "journal_id":"1".repeat(64),"head":"2".repeat(64),"target_digest":"3".repeat(64),
-            "original_paired_seal":"4".repeat(64),"mode":"control","review_available":prepared,
+            "original_paired_seal":"4".repeat(64),"mode":"control","inspection_required":false,"review_available":prepared,
             "pending":prepared,"unresolved":false,"may_be_running":false,"needs_reconciliation":prepared,
             "high_tick":130,"run_count":u32::from(prepared),
             "active_run":if prepared {run.clone()}else{Value::Null},
@@ -65,6 +71,8 @@ fn retained_order_fixture(prepared: bool) -> (StateAnchor, Value) {
 }
 
 fn output(anchor: StateAnchor, view: &Value, mode: &str, verified: bool, ticks: u64) -> Value {
+    let mut view = view.clone();
+    clock_guidance_tests::attach_guidance(&mut view, ticks, 60000);
     let (raw, overflow) = packet(
         "fortress.query",
         Some(SessionId::new((1u128 << 127) | (24u128 << 57) | 10)),
@@ -79,9 +87,9 @@ fn output(anchor: StateAnchor, view: &Value, mode: &str, verified: bool, ticks: 
         if verified {
             view.clone()
         } else {
-            json!({"ok":false,"retained_reference":compact(view)})
+            json!({"ok":false,"retained_reference":compact(&view)})
         },
-        Some(view),
+        Some(&view),
         verified,
         false,
     );

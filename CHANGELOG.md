@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Drive standalone production from current clock guidance
+
+- Consume the live Runtime's exact new-interval and retained-Prepared offers
+  across scalar and portfolio originals, preserving independent confirmation.
+- Refresh withdrawn Prepared evidence before recommending cancellation, then
+  review the same interval without changing its identity or repeating PrepareRun.
+- Keep explicit operator blockers, exact portfolio inspection and source-backed
+  diagnosis; withdraw advice from errors, Offline, closure and overflow.
+- Require selected portfolio goal-row consistency in the shared decoder.
+- Add seven standalone regression groups and three native-peer cases; strengthen
+  three existing MCP/native campaigns for Query purity, separate Plan/Commit,
+  exact re-review and preserved next-call wall allowance.
+- Independent source reviews and exact-blob checks pass. All fourteen changed
+  Rust modules pass older-nightly syntax parsing; the Python driver passes AST
+  parsing. Latest-nightly formatting, compilation and runtime tests remain
+  unexecuted after repeated execution-service failures.
+
 ## Unreleased — Guide parent projects through bounded production time
 
 - Publish closed, authority-free clock guidance from the actual combined

@@ -299,7 +299,20 @@
       "producer_regression_groups_authored": 11,
       "parent_regression_groups_authored": 5,
       "rust_tests_executed": false,
-      "validation": "independent source reviews; execution environment unavailable"
+      "validation": "independent source review and exact-blob older-nightly syntax/Python AST checks; compilation and runtime tests unexecuted",
+      "selected_portfolio_goal_matches_current_row": true,
+      "syntax_validation": {
+        "source_files": 15,
+        "rust_modules": 14,
+        "python_drivers": 1,
+        "all_git_blob_hashes_verified": true,
+        "rust_parser": "rustfmt 1.10.0-nightly (bba531001d 2026-09-20)",
+        "rust_syntax_parse_exit": 0,
+        "python_ast_parse_exit": 0,
+        "source_bytes_modified": false,
+        "latest_nightly_formatting_qualified": false,
+        "rust_typechecking_or_runtime_tests_executed": false
+      }
     }
   },
   "unsupported": [
@@ -405,7 +418,11 @@
     "crates/dfmcp-mcp/src/native_resource_project/production_presentation_tests.rs",
     "crates/dfmcp-mcp/src/live_production_presentation.rs",
     "crates/dfmcp-mcp/src/live_production_runtime/clock_guidance.rs",
-    "crates/dfmcp-mcp/src/live_production_runtime/clock_guidance_tests.rs"
+    "crates/dfmcp-mcp/src/live_production_runtime/clock_guidance_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_presentation_clock_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_presentation_inventory_clock_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_presentation_portfolio_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_presentation_clock_guidance_tests.rs"
   ],
   "qualification": {
     "pre_outage_ledger_component_cases_passed": 17,

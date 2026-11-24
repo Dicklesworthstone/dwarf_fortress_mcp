@@ -1,5 +1,60 @@
 # Implementation Status
 
+## Unreleased — Standalone production follows the current clock owner
+
+The standalone combined-production Agent Turn now consumes the same closed
+Runtime clock guidance as native parent projects. Eligible new-interval and
+retained-Prepared Plan requests are copied exactly from current source-qualified
+offers. Missing, foreign, stale or malformed advice is not reconstructed from
+historical clock fields, and a complete portfolio preserves its real selected
+StepId and distinct composite/selected anchors.
+
+Retained Prepared recovery now follows fresh sample -> exact re-review ->
+separate confirmation. A valid sample-refresh blocker precedes the old generic
+Prepared-cancellation fallback; explicit cancellation remains a secondary
+option. Re-review at the native history limit keeps the original key, plan
+digest, before tick and tick/wall bounds without another native PrepareRun.
+Current confirmations and captured production diagnosis keep their existing
+priority. Zero allowance and other operator blockers are explicit. Errors,
+Offline, session closure, compact retention and output overflow withdraw advice.
+
+The shared decoder additionally requires the selected portfolio row's complete
+goal to equal the top-level selected goal. Seven new standalone regression
+groups cover exact offer copying, saturated-history re-review, refresh ordering,
+stale/foreign source rejection, failed/offline/closed/overflow withdrawal,
+actionable blockers and a selected True leaf in a False complete cohort.
+Existing order, inventory and portfolio fixtures now carry the complete source
+and custody metadata required by the decoder.
+
+The actual MCP/native-peer driver adds three cases for zero opening tick
+allowance in each family and inventory-only False stock. Three existing
+campaigns now execute published recommendations through Query and Plan,
+including source-backed diagnosis. They assert unchanged native calls, tick
+and custody bytes during advice inspection; no CommitRun, CancelRun or tick
+advancement during Plan; and same-key re-review without a repeated PrepareRun.
+A bounded 5,000 ms Wait must preserve an exact retained 5,000 ms interval in
+the next-call advice. These are authored execution assertions, not a claim that
+the new scenarios have run.
+
+Independent reviews of the final producer, both presentation surfaces and
+native-peer driver found no remaining source blocker. After repeated service
+failures, a compact check verified all fifteen final source files against their
+exact Git blob hashes. All fourteen Rust modules parsed with exit zero and empty
+stderr using rustfmt 1.10.0-nightly (bba531001d, 2026-09-20), edition 2024 and
+skip_children=true. The Python native-peer driver also passed AST parsing.
+No source bytes were modified by these checks; root independently read the
+complete per-file receipt.
+
+This is older-toolchain syntax evidence only. Latest-nightly formatting, Rust
+typechecking/compilation and the authored runtime regressions remain unexecuted.
+The execution host repeatedly disconnected and the previously created checkout
+and newer toolchain disappeared during recovery. Historical component results
+do not qualify this increment; full verification, MCP/native/live acceptance
+and production admission remain open.
+
+Owners: `df-combined-order-clock-c8m` and
+`df-dfhack-bridge-plane-c-pic.4.1` (in progress).
+
 ## Unreleased — Native parent projects can request useful bounded time
 
 The combined production Runtime now publishes

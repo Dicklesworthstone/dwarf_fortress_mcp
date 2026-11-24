@@ -428,7 +428,10 @@
       "crates/dfmcp-adapter/src/bounded_run/journal/tests.rs",
       "crates/dfmcp-mcp/src/live_production_runtime/project_recovery.rs",
       "crates/dfmcp-mcp/src/live_production_runtime/project_recovery_tests.rs",
-      "crates/dfmcp-adapter/src/bounded_run/journal.rs"
+      "crates/dfmcp-adapter/src/bounded_run/journal.rs",
+      "crates/dfmcp-mcp/src/live_production_presentation_clock_guidance_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/clock_guidance.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/clock_guidance_tests.rs"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -1461,6 +1464,66 @@
       "original_owner_preserved": true,
       "native_protocols_unchanged": true,
       "production_admission_added": false
+    },
+    "clock_guidance": {
+      "schema": "dfmcp.production-clock-guidance/1",
+      "producer": "live_production_runtime::Runtime::clock_guidance_json",
+      "decoder": "live_production_runtime::clock_guidance::from_view",
+      "source": "typed current native clock owners, exact original and qualified goal monitor",
+      "authority_free": true,
+      "plan_states": [
+        "new_interval",
+        "review_prepared"
+      ],
+      "plan_kinds": [
+        "run",
+        "inventory_run"
+      ],
+      "blocker_actions": [
+        "wait",
+        "inspect",
+        "operator",
+        "none"
+      ],
+      "current_confirmation_precedes_advice": true,
+      "source_refresh_precedes_generic_prepared_cancellation": true,
+      "explicit_cancellation_remains_available": true,
+      "portfolio_selector": "actual original order StepId; omitted for scalar requests",
+      "complete_cohort_and_selected_source_anchors_distinct": true,
+      "selected_goal_matches_active_portfolio_row": true,
+      "active_and_inactive_clock_custody_required": true,
+      "whole_requested_interval_authorized": true,
+      "original_deadline_cadence_key_renewed": false,
+      "retained_prepared_bounds_unchanged": true,
+      "next_call_wall_allowance": "opening session ceiling; does not renew current operation",
+      "query_native_calls": 0,
+      "query_custody_writes": 0,
+      "plan_game_ticks_advanced": 0,
+      "separate_commit_confirmation_required": true,
+      "retained_guidance_restores_offer": false,
+      "withdrawn_for": [
+        "failed_response",
+        "offline",
+        "closed",
+        "overflow"
+      ],
+      "no_work_effect_bearing_target": false,
+      "new_standalone_regression_groups_authored": 7,
+      "new_native_peer_cases_authored": 3,
+      "existing_native_peer_cases_extended": 3,
+      "execution_evidence": "independent source review and exact-blob older-nightly syntax/Python AST checks; compilation and runtime tests unexecuted",
+      "syntax_validation": {
+        "source_files": 15,
+        "rust_modules": 14,
+        "python_drivers": 1,
+        "all_git_blob_hashes_verified": true,
+        "rust_parser": "rustfmt 1.10.0-nightly (bba531001d 2026-09-20)",
+        "rust_syntax_parse_exit": 0,
+        "python_ast_parse_exit": 0,
+        "source_bytes_modified": false,
+        "latest_nightly_formatting_qualified": false,
+        "rust_typechecking_or_runtime_tests_executed": false
+      }
     }
   },
   "selected_work_order_goal_monitor": {

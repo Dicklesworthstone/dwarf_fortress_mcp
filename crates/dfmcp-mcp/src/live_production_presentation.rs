@@ -1,5 +1,6 @@
 //! Bounded Agent Turn presentation; retained views are not fresh evidence.
 use crate::agent_turn::{AgentPhase, AgentTurnBuilder, ContinuityStatus, recommendation};
+use crate::live_production_runtime::clock_guidance::{self, NextAction};
 use dfmcp_core::{RequestId, SessionId, StateAnchor, WorkBudget};
 use serde_json::{Value, json};
 
@@ -976,6 +977,17 @@ fn encode(
     });
     let current_tick = anchor
         .is_some_and(|a| view["anchor"] == anchor_value(a) && known_tick == Some(a.tick.get()));
+    // Only a currently verified live owner may supply clock proposals. Retained
+    // recovery projections, old anchors and caller-injected requests are not
+    // substitutes for the owner's closed, source-bound guidance.
+    let clock_guidance = if control_available
+        && anchor.is_some_and(|anchor| view["anchor"] == anchor_value(anchor))
+        && result["ok"] == true
+    {
+        clock_guidance::from_view(view)
+    } else {
+        None
+    };
     let prepared_review = original_prepared_review_request(
         view,
         control_available && !uncertain && current_tick && result["ok"] == true,
@@ -1030,8 +1042,14 @@ fn encode(
         && selected_goal["history"]["fenced"] != true
         && current_tick;
     let clock_goal_ready = |owner: ClockOwner| {
+        // A complete portfolio may be False because of another original leaf
+        // while this selected order still has a valid stability interval.
+        // The runtime's qualified offer retains that exact membership.
+        let source_ready = clock_guidance.as_ref().is_some_and(|guidance| {
+            guidance.offers.iter().any(|offer| offer.scope == owner.scope)
+        });
         current_goal_ready
-            && if owner == INVENTORY_CLOCK {
+            && (source_ready || if owner == INVENTORY_CLOCK {
                 matches!(
                     selected_goal["kind"].as_str(),
                     Some("observed_inventory_minimum" | "observed_inventory_increase")
@@ -1043,7 +1061,7 @@ fn encode(
                         && clock_parent["current_truth"] == "false")
                         || (selected_goal["current_truth"] == "true"
                             && clock_parent["current_truth"] == "true"))
-            }
+            })
     };
     let allowed_ticks = deadline
         .zip(known_tick)
@@ -1051,17 +1069,27 @@ fn encode(
         .zip(budget)
         .map(|(remaining, budget)| remaining.min(budget.max_game_ticks).min(1200))
         .filter(|ticks| *ticks > 0);
-    let proposed_ticks = if selected_goal["current_truth"] == "true" {
-        allowed_ticks
-            .zip(selected_goal["poll_interval_ticks"].as_u64())
-            .map(|(ticks, cadence)| ticks.min(cadence))
-            .filter(|ticks| *ticks > 0)
-    } else {
-        allowed_ticks
+    let guided_proposal = |owner: ClockOwner, state: &str| {
+        clock_guidance
+            .as_ref()
+            .and_then(|guidance| {
+                guidance.offers.iter().find(|offer| {
+                    offer.scope == owner.scope
+                        && offer.state == state
+                        && offer.plan_request["game_ticks"]
+                            .as_u64()
+                            .zip(allowed_ticks)
+                            .is_some_and(|(ticks, allowed)| ticks > 0 && ticks <= allowed)
+                        && offer.plan_request["wall_millis"]
+                            .as_u64()
+                            .zip(budget)
+                            .is_some_and(|(wall, budget)| {
+                                wall > 0 && wall <= 60000 && wall <= budget.max_wall_millis
+                            })
+                })
+            })
+            .map(|offer| offer.plan_request.clone())
     };
-    let proposed_wall = budget
-        .map(|b| b.max_wall_millis.min(5000))
-        .filter(|wall| *wall > 0);
     let inactive_pending_order = if portfolio {
         view["portfolio"]["orders"]
             .as_array()
@@ -1089,14 +1117,8 @@ fn encode(
             && clock["run_count"]
                 .as_u64()
                 .is_some_and(|count| count < owner.max_runs))
-        .then_some(proposed_ticks.zip(proposed_wall))
+        .then(|| guided_proposal(owner, "new_interval"))
         .flatten()
-        .map(|(ticks, wall)| {
-            let mut request = json!({"kind":owner.scope,"original_paired_seal":clock["original_paired_seal"],
-                "game_ticks":ticks,"wall_millis":wall});
-            if portfolio { request["order_step_id"] = view["portfolio"]["selected_order_step_id"].clone(); }
-            request
-        })
     };
     let order_proposal = new_run_proposal(ORDER_CLOCK);
     let inventory_proposal = new_run_proposal(INVENTORY_CLOCK);
@@ -1144,20 +1166,26 @@ fn encode(
                 wall > 0 && wall <= 60000 && wall <= budget.max_wall_millis
             });
     let clock_commit = clock_prepared && clock["review_available"] == true;
-    let clock_rereview = clock_prepared && clock["review_available"] == false;
-    let mut clock_proposal = if clock_rereview {
-        Some(
-            json!({"kind":clock_owner.scope,"original_paired_seal":clock["original_paired_seal"],
-            "game_ticks":clock_active["game_ticks"],"wall_millis":clock_active["wall_millis"]}),
-        )
+    let retained_proposal = guided_proposal(clock_owner, "review_prepared");
+    let clock_rereview =
+        clock_prepared && clock["review_available"] == false && retained_proposal.is_some();
+    let clock_proposal = if clock_rereview {
+        retained_proposal
     } else if clock_owner == INVENTORY_CLOCK {
         inventory_proposal.clone()
     } else {
         order_proposal.clone()
     };
-    if portfolio && let Some(request) = &mut clock_proposal {
-        request["order_step_id"] = view["portfolio"]["selected_order_step_id"].clone();
-    }
+    let clock_blocker = clock_guidance.as_ref().and_then(|guidance| {
+        (guidance.offers.is_empty() && view["frontier"]["all_applied"] == true)
+            .then(|| guidance.blockers.first())
+            .flatten()
+    });
+    let clock_guidance_view = if clock_guidance.is_some() {
+        view["clock_guidance"].clone()
+    } else {
+        Value::Null
+    };
     // Stopping an existing run does not require an unexpired or unsatisfied goal.
     let clock_cancel = |owner: ClockOwner| {
         let clock = owner.view(view);
@@ -1289,7 +1317,10 @@ fn encode(
             false,
             json!({"request":clock_proposal.as_ref().map(Value::to_string)}),
         ))
-    } else if clock_cancel(clock_owner) && clock_active["state"] == "prepared" {
+    } else if clock_cancel(clock_owner)
+        && clock_active["state"] == "prepared"
+        && clock_blocker.is_none()
+    {
         Some((
             "fortress_cancel",
             "Cancel the retained run preparation before choosing a new bounded clock slice.",
@@ -1356,6 +1387,28 @@ fn encode(
             false,
             json!({"request":request.to_string()}),
         ))
+    } else if let Some(blocker) = clock_blocker {
+        match &blocker.next_action {
+            NextAction::Wait => Some((
+                "fortress_wait",
+                blocker.message.as_str(),
+                false,
+                json!({}),
+            )),
+            NextAction::Inspect if portfolio && blocker.order_step_id.is_some() => Some((
+                "fortress_query",
+                blocker.message.as_str(),
+                false,
+                json!({"order_step_id":blocker.order_step_id}),
+            )),
+            NextAction::Inspect | NextAction::Operator => Some((
+                "fortress_explain",
+                blocker.message.as_str(),
+                false,
+                json!({}),
+            )),
+            NextAction::None => None,
+        }
     } else if portfolio
         && current_goal_ready
         && CLOCK_OWNERS
@@ -1517,6 +1570,37 @@ fn encode(
             evidence["source_digest"] = inspection_source["source_digest"].clone();
         }
         next["confidence"]["evidence"] = json!([evidence]);
+    }
+    if let Some(next) = recommendations.first_mut()
+        && next["tool"] == "fortress_plan"
+        && let Some(guidance) = &clock_guidance
+        && let Some(raw) = next["arguments"]["request"].as_str()
+        && let Ok(request) = serde_json::from_str::<Value>(raw)
+        && let Some(offer) = guidance
+            .offers
+            .iter()
+            .find(|offer| offer.plan_request == request)
+    {
+        next["recommendation_id"] = json!(format!("{}-{}", offer.state, offer.scope));
+        next["reason"] = json!(offer.reason);
+        next["estimated_cost"]["game_ticks"] = json!(0);
+        next["prerequisites"] = json!([
+            "current independent clock authority",
+            "fresh original custody and source checks during Plan",
+            "separate current review and explicit confirmation before unpause"
+        ]);
+        next["invalidating_conditions"] = json!([
+            "original plan or selected order changed",
+            "source anchor or consumed floor changed",
+            "clock custody or current authority changed",
+            "another clock owner has pending work"
+        ]);
+        next["confidence"]["evidence"] = json!([{
+            "anchor":guidance.anchor,
+            "original_plan_digest":guidance.original_plan_digest,
+            "order_step_id":offer.order_step_id,
+            "source_references":offer.evidence
+        }]);
     }
     for owner in CLOCK_OWNERS {
         if clock_cancel(owner)
@@ -1802,6 +1886,9 @@ fn encode(
     } else {
         vec![]
     };
+    if result.get("clock_guidance").is_some() {
+        result["clock_guidance"] = clock_guidance_view.clone();
+    }
     if !inspection_available {
         if result.get("production_inspection_source").is_some() {
             result["production_inspection_source"] = Value::Null;
@@ -1854,6 +1941,9 @@ fn encode(
     }
     if let Some(retained) = result.get_mut("retained_reference") {
         stock_watch::withdraw(retained);
+        if let Some(object) = retained.as_object_mut() {
+            object.remove("clock_guidance");
+        }
     }
     if result.get("stock_target").is_some() {
         result["stock_target"] = stock_target.clone();
@@ -1942,6 +2032,7 @@ fn encode(
             "clock_invalidates_goal":ORDER_CLOCK.invalidates_goal(view),
             "inventory_clock_invalidates_goal":INVENTORY_CLOCK.invalidates_goal(view),"current_pause_proven":false,
             "clock_receipt_is_goal_proof":false,
+            "clock_guidance":clock_guidance_view,
             "selected_inventory_goal_proven_at_anchor":selected_proven && !retained_order,
             "selected_order_goal_proven_at_anchor":selected_proven && retained_order}))
         .active_work(json!({"pending_plans":pending_plans,"actions":actions,"clock":clock_views[0],
@@ -2058,6 +2149,10 @@ pub(crate) fn packet(
 #[cfg(test)]
 #[path = "live_production_presentation_clock_tests.rs"]
 mod clock_tests;
+
+#[cfg(test)]
+#[path = "live_production_presentation_clock_guidance_tests.rs"]
+mod clock_guidance_tests;
 
 #[cfg(test)]
 #[path = "live_production_presentation_inventory_clock_tests.rs"]
@@ -2590,6 +2685,22 @@ mod tests {
             "journal_id":"1".repeat(64),"target_digest":"2".repeat(64),"original_paired_seal":"3".repeat(64),
             "mode":"control","pending":false,"unresolved":false,"may_be_running":false,
             "needs_reconciliation":false,"active_run":null,"run_count":0,"high_tick":anchor.tick.get()});
+        settled["ok"] = true.into();
+        settled["mode"] = "control".into();
+        settled["observation_tick_floor"] = anchor.tick.get().into();
+        settled["custody_initialization_may_be_partial"] = false.into();
+        settled["parent_goal_observation_fenced"] = false.into();
+        settled["clock_invalidates_goal"] = false.into();
+        settled["inventory_clock_invalidates_goal"] = false.into();
+        settled["frontier"]["needs_reconciliation"] = false.into();
+        settled["selected_order_goal"]["source_digest"] = json!("8".repeat(64));
+        settled["current_parent_goal"]["restored_from_history"] = false.into();
+        settled["current_parent_goal"]["labor"][0]["current_truth"] = "true".into();
+        settled["current_parent_goal"]["labor"][0]["observed_enabled"] = true.into();
+        settled["clock"]["head"] = json!("4".repeat(64));
+        settled["clock"]["inspection_required"] = false.into();
+        settled["clock"]["runs"] = json!([]);
+        clock_guidance_tests::attach_guidance(&mut settled, 10, 60000);
         let clock = call(&settled, Some(anchor), false, 10);
         assert_eq!(
             clock["agent_turn"]["recommendations"][0]["tool"],

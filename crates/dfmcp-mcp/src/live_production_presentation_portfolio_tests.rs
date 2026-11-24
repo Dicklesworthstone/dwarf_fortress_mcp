@@ -647,8 +647,19 @@ fn pending_stock_targets_clock_fixture() -> (StateAnchor, Value) {
 
 fn pending_stock_targets_clock_fixture_with_assignment(assignment: bool) -> (StateAnchor, Value) {
     let (anchor, mut view) = stock_targets_fixture_with_assignment(assignment);
+    view["ok"] = true.into();
+    view["mode"] = "control".into();
     view["anchor"] = anchor_value(anchor);
     view["observation_tick_floor"] = 130.into();
+    view["custody_initialization_may_be_partial"] = false.into();
+    view["parent_goal_observation_fenced"] = false.into();
+    view["clock_invalidates_goal"] = false.into();
+    view["inventory_clock_invalidates_goal"] = false.into();
+    view["original_plan"]["plan_digest"] = json!("a".repeat(64));
+    view["original_plan"]["expires_at_tick"] = 300.into();
+    view["current_parent_goal"]["source_digest"] = json!("8".repeat(64));
+    view["current_parent_goal"]["workforce_source_digest"] = json!("9".repeat(64));
+    view["current_parent_goal"]["restored_from_history"] = false.into();
     view["frontier"] = json!({"all_applied":true,"needs_reconciliation":false,
         "entries":[],"next_ready":null});
     view["original_goal_proven"] = false.into();
@@ -662,6 +673,8 @@ fn pending_stock_targets_clock_fixture_with_assignment(assignment: bool) -> (Sta
     });
     for order in view["portfolio"]["orders"].as_array_mut().expect("orders") {
         order["goal"]["kind"] = "observed_inventory_increase".into();
+        order["goal"]["source_digest"] = json!("b".repeat(64));
+        order["goal"]["terminal_failure"] = false.into();
     }
     view["selected_inventory_goal"] = view["portfolio"]["orders"][0]["goal"].clone();
     view["selected_parent_goal"] = json!({
@@ -670,22 +683,51 @@ fn pending_stock_targets_clock_fixture_with_assignment(assignment: bool) -> (Sta
         "selected_anchor":view["selected_inventory_goal"]["anchor"],
         "current_truth":"true","original_goal_proven":false,"parent_stability_pending":true,
         "labor":view["current_parent_goal"]["labor"],
-        "inventory_requirements":view["current_parent_goal"]["inventory_requirements"]
+        "inventory_requirements":view["current_parent_goal"]["inventory_requirements"],
+        "source_digest":"8".repeat(64),"workforce_source_digest":"9".repeat(64),
+        "restored_from_history":false
     });
     view["inventory_clock_control_enabled"] = true.into();
-    view["recovery"] = json!({"portfolio":[{"step_id":usize::from(assignment),
-        "inventory_clock_journal_id":"5".repeat(64)}]});
     view["inventory_clock"] = json!({
         "source":"run/1.13","target_scope":"selected_original_inventory_goal",
         "journal_id":"5".repeat(64),"head":"6".repeat(64),"target_digest":"7".repeat(64),
         "original_paired_seal":"4".repeat(64),"mode":"control","independent_authority":true,
+        "inspection_required":false,
         "review_available":false,"pending":false,"unresolved":false,"may_be_running":false,
-        "needs_reconciliation":false,"high_tick":130,"run_count":0,"active_run":null
+        "needs_reconciliation":false,"high_tick":130,"run_count":0,"active_run":null,"runs":[]
     });
+    let first = view["inventory_clock"].clone();
+    let mut recovery = Vec::new();
+    for (ordinal, row) in view["portfolio"]["orders"].as_array_mut().expect("orders")
+        .iter_mut().enumerate()
+    {
+        let mut clock = first.clone();
+        if ordinal > 0 {
+            clock["journal_id"] = json!(format!("{:064x}", 100 + ordinal));
+            clock["head"] = clock["journal_id"].clone();
+        }
+        recovery.push(json!({"step_id":row["step_id"],"clock_journal_id":null,
+            "inventory_clock_journal_id":clock["journal_id"]}));
+        row["clock"] = Value::Null;
+        row["inventory_clock"] = clock;
+    }
+    view["recovery"] = json!({"portfolio":recovery,
+        "clock_journal_id":null,"inventory_clock_journal_id":"5".repeat(64)});
     (anchor, view)
 }
 
 fn stock_clock_packet(anchor: StateAnchor, view: &Value, ticks: u64) -> Value {
+    let mut view = view.clone();
+    let selected = view["portfolio"]["selected_order_step_id"].clone();
+    let clock = view["clock"].clone();
+    let inventory_clock = view["inventory_clock"].clone();
+    for row in view["portfolio"]["orders"].as_array_mut().expect("orders") {
+        if row["step_id"] == selected {
+            row["clock"] = clock.clone();
+            row["inventory_clock"] = inventory_clock.clone();
+        }
+    }
+    clock_guidance_tests::attach_guidance(&mut view, ticks, 5000);
     let (raw, overflow) = packet(
         "fortress.wait",
         Some(SessionId::new(1)),
@@ -698,7 +740,7 @@ fn stock_clock_packet(anchor: StateAnchor, view: &Value, ticks: u64) -> Value {
             ..WorkBudget::default()
         }),
         view.clone(),
-        Some(view),
+        Some(&view),
         true,
         false,
     );
@@ -859,8 +901,9 @@ fn prepared_stock_parent_clock_keeps_confirmation_after_current_cohort_is_withdr
         "review_seal":"e".repeat(64),"key":"original-stock-cohort-run",
         "plan_digest":"f".repeat(64),"state":"prepared","pending":true,"unresolved":false,
         "before_tick":130,"game_ticks":5,"wall_millis":1000,
-        "purpose":"sample_original_inventory","native":null
+        "purpose":"sample_original_inventory","native":{"phase":"prepared","unpause_attempted":false}
     });
+    view["inventory_clock"]["runs"] = json!([view["inventory_clock"]["active_run"]]);
     let rendered = stock_clock_packet(anchor, &view, 20);
     assert_eq!(rendered["original_goal_proven"], false);
     assert_eq!(

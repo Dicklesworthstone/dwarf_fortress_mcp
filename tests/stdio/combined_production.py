@@ -872,6 +872,148 @@ class CombinedProduction(preflight.PreflightTests, preplan.PreplanInspectionTest
                    'game_ticks': ticks, 'wall_millis': 1000}
         return self.client.tool('plan', session_id=sid, request=json.dumps(request))
 
+
+    def query_without_clock_effects(self, sid, packet=None):
+        calls = list(self.peer.calls)
+        tick = self.peer.order_tick
+        custody = custody_files(self.directory)
+        if packet is None:
+            inspected = self.client.tool('query', session_id=sid)
+        else:
+            self.assertEqual(packet['agent_turn']['recommendations'][0]['tool'], 'fortress_query')
+            inspected = self.client.execute_next(packet)
+        self.assertTrue(inspected['ok'], inspected)
+        self.assertEqual(self.peer.calls, calls)
+        self.assertEqual(self.peer.order_tick, tick)
+        self.assertEqual(custody_files(self.directory), custody)
+        return inspected
+
+    def prepare_offered_clock(self, sid, current, scope, state='new_interval'):
+        owner = {'run': 'clock', 'inventory_run': 'inventory_clock'}[scope]
+        # Consume the actual Runtime offer from a pure local inspection. A
+        # recommendation is only a request for a separately reviewed Plan.
+        inspected = self.query_without_clock_effects(sid)
+        recommendation = inspected['agent_turn']['recommendations'][0]
+        if recommendation['tool'] == 'fortress_query':
+            # A source-backed production diagnosis keeps its existing priority
+            # when the selected goal is False. It is another local Query.
+            diagnosis = json.loads(recommendation['arguments']['request'])
+            self.assertEqual(diagnosis['query']['kind'], 'production_diagnosis')
+            inspected = self.query_without_clock_effects(sid, inspected)
+        offer = next((offer for offer in inspected['clock_guidance']['offers']
+                      if offer['scope'] == scope), None)
+        self.assertIsNotNone(offer, inspected)
+        self.assertEqual(offer['state'], state)
+        request = offer['plan_request']
+        self.assertEqual(set(request), {'kind', 'original_paired_seal', 'game_ticks', 'wall_millis'})
+        self.assertEqual(request['kind'], scope)
+        self.assertEqual(request['original_paired_seal'], current[owner]['original_paired_seal'])
+        self.assertGreater(request['game_ticks'], 0)
+        self.assertLessEqual(request['game_ticks'], 1200)
+        self.assertGreater(request['wall_millis'], 0)
+        self.assertLessEqual(request['wall_millis'], 60000)
+        recommendation = inspected['agent_turn']['recommendations'][0]
+        self.assertEqual(recommendation['tool'], 'fortress_plan')
+        self.assertEqual(recommendation['arguments']['session_id'], sid)
+        self.assertEqual(json.loads(recommendation['arguments']['request']), request)
+        self.assertNotIn('confirmed', recommendation['arguments'])
+        before_tick = self.peer.order_tick
+        commits = (list(self.peer.clock_commits), list(self.peer.inventory_clock_commits))
+        effects = [call for call in self.peer.calls if call[1] in ('CommitRun', 'CancelRun')]
+        prepares = sum(operation == 'PrepareRun' for _, operation in self.peer.calls)
+        prepared = self.client.execute_next(inspected)
+        self.assertTrue(prepared['ok'], prepared)
+        self.assertEqual(self.peer.order_tick, before_tick)
+        self.assertEqual((self.peer.clock_commits, self.peer.inventory_clock_commits), commits)
+        self.assertEqual([call for call in self.peer.calls if call[1] in ('CommitRun', 'CancelRun')], effects)
+        self.assertEqual(sum(operation == 'PrepareRun' for _, operation in self.peer.calls),
+                         prepares + (1 if state == 'new_interval' else 0))
+        self.assertTrue(prepared[owner]['review_available'])
+        run = prepared[owner]['active_run']
+        self.assertEqual(run['before_tick'], before_tick)
+        self.assertEqual(run['game_ticks'], request['game_ticks'])
+        self.assertEqual(run['wall_millis'], request['wall_millis'])
+        self.assertFalse(prepared['original_goal_proven'])
+        return prepared
+
+    def rereview_offered_clock(self, sid, prepared, scope):
+        owner = {'run': 'clock', 'inventory_run': 'inventory_clock'}[scope]
+        retained = copy.deepcopy(prepared[owner]['active_run'])
+        before_tick = self.peer.order_tick
+        commits = (list(self.peer.clock_commits), list(self.peer.inventory_clock_commits))
+        effects = [call for call in self.peer.calls if call[1] in ('CommitRun', 'CancelRun')]
+        prepares = sum(operation == 'PrepareRun' for _, operation in self.peer.calls)
+        declined = self.client.tool('commit', session_id=sid, scope=scope,
+                                    paired_seal=retained['review_seal'], confirmed=False)
+        self.assertFalse(declined['ok'], declined)
+        # The denied confirmation consumes the review, while the original
+        # Prepared record remains in custody. Wait refreshes evidence only.
+        refreshed = self.client.tool('wait', session_id=sid, max_wall_millis=5000)
+        self.assertTrue(refreshed['ok'], refreshed)
+        self.assertFalse(refreshed[owner]['review_available'])
+        offer = next((offer for offer in refreshed['clock_guidance']['offers']
+                      if offer['scope'] == scope), None)
+        self.assertIsNotNone(offer, refreshed)
+        self.assertEqual(offer['state'], 'review_prepared')
+        self.assertEqual(offer['plan_request']['wall_millis'], retained['wall_millis'])
+        self.assertEqual(self.peer.order_tick, before_tick)
+        self.assertEqual((self.peer.clock_commits, self.peer.inventory_clock_commits), commits)
+        self.assertEqual([call for call in self.peer.calls if call[1] in ('CommitRun', 'CancelRun')], effects)
+        self.assertEqual(sum(operation == 'PrepareRun' for _, operation in self.peer.calls), prepares)
+        rereviewed = self.prepare_offered_clock(sid, refreshed, scope, state='review_prepared')
+        for field in ('key', 'plan_digest', 'before_tick', 'game_ticks', 'wall_millis'):
+            self.assertEqual(rereviewed[owner]['active_run'][field], retained[field])
+        self.assertEqual((self.peer.clock_commits, self.peer.inventory_clock_commits), commits)
+        self.assertEqual([call for call in self.peer.calls if call[1] in ('CommitRun', 'CancelRun')], effects)
+        return rereviewed
+
+    def assert_zero_time_clock_guidance(self, scope):
+        sid, original, created = self.production_plan(stable_samples=2, inventory=scope == 'inventory_run')
+        owner = {'run': 'clock', 'inventory_run': 'inventory_clock'}[scope]
+        self.assertTrue(created[owner + '_control_enabled'])
+        current = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+        self.assertTrue(current['ok'], current)
+        self.assertFalse(current['original_goal_proven'])
+        inspected = self.query_without_clock_effects(sid)
+        self.assertEqual(inspected['clock_guidance']['offers'], [])
+        for recommendation in inspected['agent_turn']['recommendations']:
+            if recommendation['tool'] == 'fortress_plan':
+                request = json.loads(recommendation['arguments']['request'])
+                self.assertNotIn(request.get('kind'), ('run', 'inventory_run'))
+        self.assertEqual(self.peer.order_tick, TICK)
+        self.assertEqual(self.peer.clock_commits, [])
+        self.assertEqual(self.peer.inventory_clock_commits, [])
+        self.assertFalse(any(operation == 'PrepareRun' for _, operation in self.peer.calls))
+        self.assert_single_original_effects(inspected, original)
+
+    def test_order_clock_guidance_never_invents_an_opening_tick_budget(self):
+        self.enable_clock()
+        self.assert_zero_time_clock_guidance('run')
+
+    def test_inventory_clock_guidance_never_invents_an_opening_tick_budget(self):
+        self.enable_inventory_clock()
+        self.assert_zero_time_clock_guidance('inventory_run')
+
+
+    def test_inventory_only_clock_cannot_advance_a_false_stock_sample(self):
+        self.enable_inventory_clock()
+        self.peer.inventory_stack = 0
+        sid, original, _ = self.inventory_plan(stable_samples=2, max_game_ticks=5)
+        current = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+        self.assertTrue(current['ok'], current)
+        self.assertEqual(current['selected_inventory_goal']['current_truth'], 'false')
+        inspected = self.query_without_clock_effects(sid)
+        guidance = inspected['clock_guidance']
+        self.assertEqual(guidance['offers'], [])
+        self.assertEqual(guidance['blockers'][0]['scope'], 'inventory_run')
+        self.assertEqual(guidance['blockers'][0]['code'], 'inventory_goal_not_yet_true')
+        self.assertEqual(guidance['blockers'][0]['next_action'], 'operator')
+        self.assertEqual(self.peer.order_tick, TICK)
+        self.assertEqual(self.peer.clock_commits, [])
+        self.assertEqual(self.peer.inventory_clock_commits, [])
+        self.assertFalse(any(operation == 'PrepareRun' for _, operation in self.peer.calls))
+        self.assert_single_original_effects(inspected, original)
+
     def prepare_inventory_clock(self, sid, view, ticks=5):
         request = {'kind': 'inventory_run',
                    'original_paired_seal': view['inventory_clock']['original_paired_seal'],
@@ -904,7 +1046,9 @@ class CombinedProduction(preflight.PreflightTests, preplan.PreplanInspectionTest
         # advancing samples, at125 and130, require two distinct reviewed slices.
         for expected_tick in (TICK + 5, TICK + 10):
             before_tick = self.peer.order_tick
-            prepared = self.prepare_inventory_clock(sid, current)
+            prepared = self.prepare_offered_clock(sid, current, 'inventory_run')
+            if expected_tick == TICK + 5:
+                prepared = self.rereview_offered_clock(sid, prepared, 'inventory_run')
             self.assertTrue(prepared['ok'], prepared)
             self.assertTrue(prepared['inventory_clock']['review_available'])
             self.assertEqual(self.peer.order_tick, before_tick)
@@ -1219,11 +1363,14 @@ class CombinedProduction(preflight.PreflightTests, preplan.PreplanInspectionTest
     def test_reviewed_clock_advances_original_inventory_to_complete_parent_proof(self):
         self.enable_clock()
         self.peer.inventory_stack = 0
-        sid, original, current = self.inventory_plan(stable_samples=2, max_game_ticks=10)
+        sid, original, current = self.inventory_plan(stable_samples=2, max_game_ticks=5)
         self.assertTrue(current['clock_control_enabled'])
+        current = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+        self.assertTrue(current['ok'], current)
+        self.assertEqual(current['selected_inventory_goal']['current_truth'], 'false')
         for expected_tick in (125, 130):
             before_tick = self.peer.order_tick
-            prepared = self.prepare_clock(sid, current)
+            prepared = self.prepare_offered_clock(sid, current, 'run')
             self.assertTrue(prepared['ok'], prepared)
             self.assertTrue(prepared['clock']['review_available'])
             self.assertEqual(self.peer.order_tick, before_tick)
@@ -1261,11 +1408,15 @@ class CombinedProduction(preflight.PreflightTests, preplan.PreplanInspectionTest
     def test_default_reviewed_clock_completes_original_order_and_stability(self):
         self.enable_clock()
         self.peer.complete_order_on_clock = True
-        sid, original, current = self.order_plan(stable_samples=2, max_game_ticks=10)
+        sid, original, current = self.order_plan(stable_samples=2, max_game_ticks=5)
         self.assertTrue(current['clock_control_enabled'])
         target = current['clock']['target_digest']
+        current = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+        self.assertTrue(current['ok'], current)
         for expected_tick, predicate in ((125, 3), (130, 2)):
-            prepared = self.prepare_clock(sid, current)
+            prepared = self.prepare_offered_clock(sid, current, 'run')
+            if expected_tick == TICK + 5:
+                prepared = self.rereview_offered_clock(sid, prepared, 'run')
             self.assertTrue(prepared['ok'], prepared)
             self.assertTrue(prepared['clock']['review_available'])
             self.assertEqual(prepared['clock']['target_digest'], target)

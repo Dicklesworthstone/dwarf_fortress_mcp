@@ -1541,7 +1541,8 @@ Lost replies retain the original run key. Wait queries that key without another
 unpause. While the native owner may still be running, goal reads and new runs
 remain blocked. A failed response or restart withdraws the process-local clock
 review. Inspecting a historical Prepared record does not restore confirmation
-authority; an explicit fresh preparation is required. `scope="run"` cancellation
+authority; an explicit Plan must freshly review the exact retained interval.
+`scope="run"` cancellation
 uses current Query and clock authority and remains available after the original
 goal deadline for the retained native safety pause.
 
@@ -1557,6 +1558,52 @@ retired default-order goal remains unknown, and no clock receipt can turn its
 disappearance into completion. The independent inventory clock below handles
 unfinished sampled stability after normal engine retirement only when the
 original request explicitly selected the inventory objective.
+
+### Source-derived clock recommendations
+
+Current combined-production responses publish `clock_guidance` with schema
+`dfmcp.production-clock-guidance/1`. The Runtime derives it from the actual
+original, native clock owners, current qualified goal and available authority.
+The Agent Turn consumes that closed projection, retaining its exact original
+digest, selected StepId, source anchor and request. It cannot reconstruct an
+offer from a historical clock record or a compact recovery reference.
+
+A `new_interval` offer supplies the full `run` or `inventory_run` Plan
+request. Its positive tick count fits the session allowance, remaining original
+deadline and native 1,200-tick limit; an already True goal uses at most the
+original stability cadence. The entire interval must fit current independent
+clock authority. New wall intervals use at most 5,000 ms within the opening
+session ceiling. These are next-call proposals, not an extension of the
+operation currently returning the response.
+
+A `review_prepared` offer supplies the same request kind for the exact retained
+Prepared interval, including its original seal and unchanged tick/wall bounds.
+After lost or declined confirmation, a missing current sample produces a Wait
+recommendation first. A later qualified sample can enable that exact re-review.
+Explicit cancellation remains available, but the agent is not forced to cancel
+a recoverable preparation merely to refresh its evidence. Existing current
+reviews retain their separate Commit recommendation.
+
+Both clock families remain independently controlled. A complete portfolio
+cohort can cover its selected original leaf while preserving the leaf's
+different source cursor. The selected row's complete goal must equal the
+top-level selected goal, and every retained clock identity remains bound to its
+original owner. Pending work on an inactive leaf directs Query to that actual
+original StepId before another interval can be offered. Scalar inspection does
+not invent a portfolio selector.
+
+Blockers distinguish reconciliation or fresh sampling from inspection and
+operator intervention. Zero tick allowance, missing independent authority,
+an expired original, full retained history and an inventory-only False stock
+goal cannot become repeated automatic clock plans. A valid source-backed
+production diagnosis keeps its existing priority before a new interval.
+Failed, offline, closed and overflow packets withdraw clock offers; retained
+custody never restores them.
+
+Querying advice performs no native operation or custody mutation. Plan can
+prepare or re-review one bounded interval but does not commit it or advance
+game time. Every unpause still requires its own current review and explicit
+confirmation; current goal proof requires a later qualified observation.
 
 ## Finish original inventory stability after order retirement
 

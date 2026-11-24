@@ -299,6 +299,9 @@ fn portfolio_selection_and_distinct_composite_source_are_preserved() {
     let mut view = fixture(true, false, false);
     view["current_parent_goal"]["selected_anchors"][2]["anchor"]["state_hash"] = json!(digest_text(2));
     assert!(from_view(&view).is_none(), "same-tick different source is not selected membership");
+    let mut mismatched = fixture(true, false, false);
+    mismatched["portfolio"]["orders"][2]["goal"]["current_truth"] = json!("true");
+    assert!(from_view(&mismatched).is_none(), "selected row and current selected goal must agree");
     let mut scalar = fixture(false, false, false);
     scalar["selected_order_goal"]["anchor"]["sequence"] = json!(6);
     scalar["current_parent_goal"]["selected_anchor"]["sequence"] = json!(6);
@@ -309,8 +312,10 @@ fn portfolio_selection_and_distinct_composite_source_are_preserved() {
 fn retired_inventory_can_finish_original_and_parent_stability() {
     let mut view = fixture(true, true, false);
     view["selected_inventory_goal"]["receipt_linked"] = json!(false);
+    view["portfolio"]["orders"][2]["goal"] = view["selected_inventory_goal"].clone();
     assert!(from_view(&view).is_some());
     view["selected_inventory_goal"]["proven_at_anchor"] = json!(true);
+    view["portfolio"]["orders"][2]["goal"] = view["selected_inventory_goal"].clone();
     assert!(from_view(&view).is_some(), "complete original parent stability is still pending");
     view["current_parent_goal"]["parent_stability"]["status"] = json!("expired");
     assert!(from_view(&view).is_none());
