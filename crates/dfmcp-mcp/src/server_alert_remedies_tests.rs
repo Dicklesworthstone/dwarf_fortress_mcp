@@ -5,6 +5,64 @@ use dfmcp_core::{
 };
 use dfmcp_world::{Fact, FactSource, Value as WorldValue, WorldSnapshot};
 
+#[test]
+fn retained_advice_refuses_foreign_context_and_competing_plan_sources_before_lookup()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let _serial = crate::server::serialized_durable_tests();
+    let opened: Value = serde_json::from_str(&crate::server::open_session_in_scenario(
+        Some(false),
+        Some("98788".to_owned()),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("starter_fortress".to_owned()),
+        Some(false),
+        Some(false),
+    ))?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    let handle =
+        crate::server::lookup_session_str(opened["session_id"].as_str().ok_or("session missing")?)?;
+    let owner = handle.lock().map_err(|_| "session poisoned")?;
+    for case in 0..4 {
+        let mut context = crate::server::read_context(&owner);
+        let mut remedy = json!({
+            "tool":"fortress.plan", "goal_scope":"joint_supply_recovery",
+            "arguments":{"blueprint":json!({
+                "template":"continue_goal", "plan_digest":Digest32::ZERO.to_hex(),
+            }).to_string()},
+        });
+        let expected = match case {
+            0 => {
+                context.session_id = SessionId::new(u128::MAX);
+                assert_ne!(context.session_id, owner.session_id);
+                ErrorCode::StaleAnchor
+            }
+            1 => {
+                context.anchor.cursor.sequence += 1;
+                ErrorCode::StaleAnchor
+            }
+            2 => {
+                remedy["tool"] = json!("fortress.commit");
+                ErrorCode::InvalidRequest
+            }
+            _ => {
+                remedy["arguments"]["actions"] = json!([]);
+                ErrorCode::InvalidRequest
+            }
+        };
+        let unchanged = remedy.clone();
+        let error = lower_owned(&owner, &context, &mut remedy)
+            .expect_err("invalid context or source must be rejected before parent lookup");
+        assert_eq!(error.code, expected, "case {case}: {error}");
+        assert_eq!(remedy, unchanged);
+    }
+    Ok(())
+}
+
 fn snapshot() -> Result<WorldSnapshot> {
     crate::lab_world::scenario_snapshot("starter_fortress", FortressId::new(98_620), true)
 }
@@ -225,7 +283,7 @@ fn world_remedy_intake_uses_actual_lowering_without_mutating_its_sources() -> Re
         .find(|alert| alert["alert"] == "hostile")
         .ok_or_else(|| invalid("scenario has no hostile alert"))?["remedy"]["arguments"]
         .clone();
-    qualify(&snapshot, &recovery, &context, &mut alerts);
+    qualify(&snapshot, &recovery, &context, &mut alerts, None);
     let remedy = &alerts
         .iter()
         .find(|alert| alert["alert"] == "hostile")
@@ -256,7 +314,7 @@ fn stale_authority_cannot_qualify_a_remedy_from_another_anchor() -> Result<()> {
         Err(ErrorCode::StaleAnchor)
     );
     let mut alerts = crate::lab_world::world_alerts(&snapshot);
-    qualify(&snapshot, &recovery, &context, &mut alerts);
+    qualify(&snapshot, &recovery, &context, &mut alerts, None);
     let remedy = &alerts
         .iter()
         .find(|alert| alert["alert"] == "hostile")
@@ -334,7 +392,7 @@ fn resource_supply_advice_checks_query_source_and_shared_time_before_publication
         }
         let unchanged = current.clone();
         let mut alerts = original.clone();
-        qualify(&snapshot, &recovery, &current, &mut alerts);
+        qualify(&snapshot, &recovery, &current, &mut alerts, None);
         let remedy = &alerts
             .iter()
             .find(|alert| alert["alert"] == "drink_supply")

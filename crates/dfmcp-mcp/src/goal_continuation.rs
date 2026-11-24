@@ -162,6 +162,11 @@ impl RecoveredGoalLineage {
 }
 
 impl ProductionContinuation {
+    /// Borrow the unchanged original request without rebuilding a new goal.
+    pub(crate) fn request(&self) -> &ProductionRequest {
+        &self.request
+    }
+
     pub(crate) fn new(
         parent: Digest32,
         root: Digest32,

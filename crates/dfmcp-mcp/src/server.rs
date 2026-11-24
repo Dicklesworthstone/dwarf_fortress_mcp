@@ -432,6 +432,7 @@ fn world_alerts(session: &LabSession) -> Vec<serde_json::Value> {
         &session.civilian_recovery,
         &read_context(session),
         &mut alerts,
+        Some(session),
     );
     alerts
 }

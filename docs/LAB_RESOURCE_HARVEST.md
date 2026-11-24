@@ -101,6 +101,26 @@ for the retained plan, then separately commit production. That continuation
 preserves every original output quota and the parent/root lineage. Gathered
 plants alone never establish the original FOOD or DRINK goal.
 
+If a compatible retained FOOD/DRINK pursuit already exists, the next supply
+recommendation carries its exact `continue_goal` request instead of creating
+another production root. The newest retained pursuit is selected by its sealed
+frontier and then digest. Every currently deficient quota must be covered by the
+original minimum; additional original FOOD/DRINK quotas remain binding even if
+their immediate alerts have disappeared. Acquisition, staffing, workshop-site
+and reserve policies are copied from that original, never from the new alert.
+The `retained_goal` metadata exposes the parent/root identity and full original
+request in both the remedy and Agent Turn recommendation.
+
+Selection admits the complete retained source and plan archives plus current
+world census under one inspection allowance. The ordinary continuation gate
+still requires quiet work, known original-goal truth, valid lineage and current
+source authority, including Query for resource or reserve analysis. A refusal
+for the selected original makes advice unavailable; it cannot fall through to
+an older pursuit or a new root. Explicit withdrawal or restore abandonment
+excludes that exact pursuit. Verified recovered goals may remain eligible
+without restoring old action handles. Each proposed stage still needs its own
+Plan review, current effect grants and explicit Commit.
+
 ## Bounds and evidence
 
 The complete model admits at most 65,536 canonical entities, 1,024 sources and 4,096 harvest tasks. Public requests retain their existing 16-KiB and 16-step bounds. Source scans and scheduling consume the ordinary effect advancement budget.

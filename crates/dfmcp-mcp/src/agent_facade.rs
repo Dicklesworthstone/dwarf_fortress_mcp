@@ -907,6 +907,9 @@ fn recommendations(
                     ] {
                         next[field] = remedy[field].clone();
                     }
+                    if remedy["retained_goal"].is_object() {
+                        next["retained_goal"] = remedy["retained_goal"].clone();
+                    }
                 }
                 out.push(next);
             }

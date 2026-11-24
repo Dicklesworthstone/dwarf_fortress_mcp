@@ -1738,6 +1738,11 @@ impl ProductionRequest {
         self.planner
     }
 
+    /// The complete original stock goals, including already satisfied outputs.
+    pub(crate) fn quotas(&self) -> &BTreeMap<String, u32> {
+        &self.quotas
+    }
+
     pub(crate) fn is_resource_aware(&self) -> bool {
         matches!(
             self.planner,

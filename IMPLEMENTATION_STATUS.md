@@ -1,5 +1,48 @@
 # Implementation Status
 
+## Unreleased — Supply advice continues the retained original goal
+
+After acquisition or later depletion, laboratory supply advice now prefers the
+newest compatible retained FOOD/DRINK pursuit and offers its exact
+`continue_goal` request. Matching keeps every original minimum, including extra
+quotas whose immediate alerts have cleared, and preserves original acquisition,
+staffing, workshop-site and reserve policies. The public remedy and Agent Turn
+carry the parent/root identity and complete original request. Each stage still
+requires a new Plan review and explicit Commit.
+
+Discovery admits the complete retained source, original plan archives and
+current-world census, including repeated inspection, under a shared allowance.
+It reuses the ordinary continuation gate for quiet work, original-goal truth,
+lineage and verified recovery. Missing current Query, unresolved work, unknown
+evidence or corrupt custody for the selected original makes advice unavailable;
+none can silently select an older pursuit or manufacture a fresh root. Explicit
+withdrawal and restore abandonment exclude that exact pursuit. Current effect
+grants remain independently required, and recovered goals restore no handles.
+
+Seven new selector regression sources cover full quota/policy preservation,
+active/unknown refusal, newest-pursuit selection, source budgets and authority,
+an unfinished reserve requiring Query, verified durable recovery and unrelated
+output exclusion. Public workflow regressions now use the actual recommended
+continuation and cover missing Query and production grants after acquisition.
+A further regression checks foreign assessment contexts and competing source
+forms before parent lookup. Independent source review completed.
+
+All ten changed Rust files were parsed by the latest-nightly formatter with
+child traversal disabled; new source and changed code were formatted. Unrelated
+preexisting formatting in the two large integration files was preserved. The
+diff passes whitespace checks, and the updated harvest contract parses as JSON.
+
+Rust compilation and execution of these new MCP tests remain unestablished.
+The earlier exact-locked dependency check was SIGKILLed before MCP, and its
+single-frontend retry was interrupted after host-wide stalls. The required local
+qualification and repository verification commands were attempted: the former
+returned exit 1 and the bounded latter ended with exit 137, but their logs were
+unavailable after the executor interruption, so no particular gate is reported
+as passed or identified as the failure. Full repository/native/live/admission
+qualification remains open.
+
+Owners: `df-lab-alert-evidence-w5a`, `df-lab-resource-harvest-h2m.3` (in progress).
+
 ## Unreleased — Retain complete supply goals in alert recovery
 
 Laboratory FOOD and DRINK shortfalls now share one production blueprint with

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Resume supply recovery from the retained original
+
+- Prefer an exact `continue_goal` request for the newest compatible retained
+  FOOD/DRINK pursuit. Preserve all original quotas, acquisition and staffing
+  permissions, explicit sites, reserve horizons and parent/root lineage.
+- Expose the complete retained request in remedies and Agent Turn advice.
+  Reuse the ordinary bounded continuation/recovery gate; missing authority,
+  active work, unknown evidence or invalid custody keeps the selected original
+  unavailable without silently choosing an older pursuit or a fresh root.
+- Add seven selector regression sources and foreign-context/source guards;
+  extend actual public harvest-to-production cases to consume the recommended
+  continuation and reject missing source or effect authority. Source review
+  completed; new MCP execution and full repository qualification remain open.
+
 ## Unreleased — Recover food and drink through retained production goals
 
 - Combine known FOOD/DRINK shortfalls into one production blueprint and budget

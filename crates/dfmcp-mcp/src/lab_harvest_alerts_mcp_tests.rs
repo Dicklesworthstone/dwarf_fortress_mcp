@@ -228,12 +228,96 @@ fn public_supply_recovery_preserves_the_original_goal_through_harvest_and_produc
                 .any(|goal| goal["plan_digest"] == original && goal["predicate_truth"] == "false")),
         "{progressed}"
     );
+    // The retained resource-aware original still needs Query even when the
+    // newly gathered inventory would permit a fresh plain production root.
+    let before_advice = session_change_snapshot(&session)?;
+    let mut query_grant = None;
+    session_change(&session, |session| {
+        let index = session
+            .grants
+            .iter()
+            .position(|grant| grant.capability == Capability::Query)
+            .ok_or("query grant missing")?;
+        query_grant = Some(session.grants.remove(index));
+        Ok(())
+    })?;
+    let denied = parsed(&fortress_observe(Some(session.clone())))?;
+    assert_eq!(denied["ok"], true, "{denied}");
+    let denied_remedy = &public_drink(&denied)?["remedy"];
+    assert_eq!(denied_remedy["available"], false, "{denied}");
+    assert!(denied_remedy["unavailable_reason"].is_string());
+    assert!(
+        denied["agent_turn"]["recommendations"]
+            .as_array()
+            .ok_or("recommendations missing")?
+            .iter()
+            .all(|next| next["recommendation_id"] != "remedy-drink_supply")
+    );
+    assert_eq!(session_change_snapshot(&session)?, before_advice);
+    session_change(&session, |session| {
+        session
+            .grants
+            .push(query_grant.take().ok_or("saved query grant missing")?);
+        Ok(())
+    })?;
+    // The next alert must resume the exact retained goal. Losing current
+    // production authority keeps that continuation unavailable; it must not
+    // silently broaden the policy by proposing another root.
+    let mut production_grant = None;
+    session_change(&session, |session| {
+        let index = session
+            .grants
+            .iter()
+            .position(|grant| grant.capability == Capability::ConfigureProduction)
+            .ok_or("production grant missing")?;
+        production_grant = Some(session.grants.remove(index));
+        Ok(())
+    })?;
+    let denied = parsed(&fortress_observe(Some(session.clone())))?;
+    assert_eq!(denied["ok"], true, "{denied}");
+    let denied_remedy = &public_drink(&denied)?["remedy"];
+    assert_eq!(denied_remedy["available"], false, "{denied}");
+    let continued = parsed(
+        denied_remedy["arguments"]["blueprint"]
+            .as_str()
+            .ok_or("retained continuation missing")?,
+    )?;
+    assert_eq!(
+        continued,
+        json!({"template":"continue_goal", "plan_digest":original})
+    );
+    assert_eq!(denied_remedy["retained_goal"]["root_plan_digest"], original);
+    session_change(&session, |session| {
+        session
+            .grants
+            .push(production_grant.take().ok_or("saved grant missing")?);
+        Ok(())
+    })?;
+    let ready = parsed(&fortress_observe(Some(session.clone())))?;
+    assert_eq!(ready["ok"], true, "{ready}");
+    let next = ready["agent_turn"]["recommendations"]
+        .as_array()
+        .and_then(|rows| {
+            rows.iter()
+                .find(|row| row["recommendation_id"] == "remedy-drink_supply")
+        })
+        .ok_or("retained-goal recommendation missing")?;
+    assert_eq!(next["retained_goal"]["parent_plan_digest"], original);
+    assert_eq!(
+        next["retained_goal"]["original_request"]["quotas"],
+        source["quotas"]
+    );
     let production = parsed(&fortress_plan(
         Some(session.clone()),
         None,
         None,
         None,
-        Some(json!({"template":"continue_goal", "plan_digest":original.clone()}).to_string()),
+        Some(
+            next["arguments"]["blueprint"]
+                .as_str()
+                .ok_or("recommended continuation missing")?
+                .to_owned(),
+        ),
     ))?;
     assert_eq!(production["ok"], true, "{production}");
     assert_eq!(
@@ -405,7 +489,25 @@ fn public_joint_supply_recovery_finishes_both_original_quotas_from_one_input_pro
             assert_eq!(goal["predicate_truth"], "true", "{goal}");
             assert_eq!(goal["status"], "achieved", "{goal}");
         }
-        request = json!({"template":"continue_goal", "plan_digest":digest.clone()});
+        if expected_stage == "acquire_resources" {
+            let ready = parsed(&fortress_observe(Some(session.clone())))?;
+            assert_eq!(ready["ok"], true, "{ready}");
+            let remedy = &public_drink(&ready)?["remedy"];
+            assert_eq!(remedy["available"], true, "{ready}");
+            assert_eq!(
+                remedy["retained_goal"]["original_request"]["quotas"],
+                quotas
+            );
+            request = parsed(
+                remedy["arguments"]["blueprint"]
+                    .as_str()
+                    .ok_or("joint continuation missing")?,
+            )?;
+            assert_eq!(
+                request,
+                json!({"template":"continue_goal", "plan_digest":digest.clone()})
+            );
+        }
         parent = Some(digest);
     }
     let final_world = session_change_snapshot(&session)?;

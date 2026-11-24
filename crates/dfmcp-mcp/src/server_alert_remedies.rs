@@ -7,18 +7,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
+use dfmcp_adapter::GameAdapter;
 use dfmcp_core::{Capability, DfmcpError, ErrorCode, IntentId, OperationContext, Result, RiskTier};
 use dfmcp_intent::{Intent, StaticPlanner};
 use dfmcp_world::{PredicateEvidence, WorldSnapshot};
 use serde_json::{Map, Value, json};
 
-use super::{PlanSource, civilian_recovery};
+use super::{LabSession, PlanSource, civilian_recovery, goal_continuation, objectives};
 
 pub(super) fn qualify(
     snapshot: &WorldSnapshot,
     recovery: &civilian_recovery::CivilianRecovery,
     context: &OperationContext,
     alerts: &mut [Value],
+    owner: Option<&LabSession>,
 ) {
     // Several hostiles can share one recruitment remedy. Lower identical
     // advice only once within this immutable observation, never across anchors.
@@ -30,7 +32,11 @@ pub(super) fn qualify(
         };
         let fields = assessed.entry(remedy.to_string()).or_insert_with(|| {
             let intent = remaining_context(context, started)
-                .and_then(|current| lower(snapshot, recovery, &current, remedy));
+                .and_then(|current| match owner {
+                    Some(session) => lower_owned(session, &current, remedy),
+                    None => lower(snapshot, recovery, &current, remedy),
+                })
+                .and_then(|intent| remaining_context(context, started).map(|_| intent));
             let mut fields = assessment(snapshot, context, intent);
             if remedy["goal_scope"] == "joint_supply_recovery" {
                 fields.insert(
@@ -47,12 +53,13 @@ pub(super) fn qualify(
                         .map(str::to_owned)
                         .collect();
                     required.insert(Capability::Observe.as_str().to_owned());
-                    if remedy["arguments"]["blueprint"]
-                        .as_str()
-                        .is_some_and(|raw| {
-                            crate::lab_world::ProductionRequest::parse_current(raw)
-                                .is_ok_and(|request| request.is_resource_aware())
-                        })
+                    if remedy["retained_goal"]["requires_query"] == true
+                        || remedy["arguments"]["blueprint"]
+                            .as_str()
+                            .is_some_and(|raw| {
+                                crate::lab_world::ProductionRequest::parse_current(raw)
+                                    .is_ok_and(|request| request.is_resource_aware())
+                            })
                     {
                         required.insert(Capability::Query.as_str().to_owned());
                     }
@@ -69,6 +76,81 @@ pub(super) fn qualify(
             remedy.extend(fields.clone());
         }
     }
+}
+
+/// An already reviewed supply objective takes precedence over a fresh root.
+/// Selection reuses the owner's ordinary continuation gate; lowering and
+/// effect authority still apply to that exact source, without widening it.
+fn lower_owned(
+    session: &LabSession,
+    context: &OperationContext,
+    remedy: &mut Value,
+) -> Result<Intent> {
+    let snapshot = session.adapter.snapshot();
+    if context.session_id != session.session_id || context.anchor != snapshot.anchor() {
+        return Err(DfmcpError::new(
+            ErrorCode::StaleAnchor,
+            "owned supply advice requires this session's exact current assessment context",
+        )
+        .retryable(true));
+    }
+    if remedy["goal_scope"] != "joint_supply_recovery" {
+        return lower(snapshot, &session.civilian_recovery, context, remedy);
+    }
+    if remedy["tool"] != "fortress.plan"
+        || !remedy["arguments"]
+            .as_object()
+            .is_some_and(|arguments| arguments.len() == 1)
+    {
+        return Err(invalid(
+            "supply recovery advice requires one registered planning source",
+        ));
+    }
+    let raw = remedy["arguments"]["blueprint"]
+        .as_str()
+        .ok_or_else(|| invalid("supply recovery advice lost its production source"))?;
+    let selected = if goal_continuation::is_request(raw) {
+        let parent = goal_continuation::parse_request(raw)?;
+        Some(objectives::continuation_source(
+            session, parent, None, None,
+        )?)
+    } else if session.objectives.is_empty() {
+        None
+    } else {
+        let proposed = crate::lab_world::ProductionRequest::parse_current(raw)?;
+        objectives::supply_recovery_continuation(session, &proposed, context)?
+    };
+    let Some(selected) = selected else {
+        return lower(snapshot, &session.civilian_recovery, context, remedy);
+    };
+    let PlanSource::ProductionContinuation { raw, .. } = &selected else {
+        return Err(invalid(
+            "supply advice selected a non-production continuation",
+        ));
+    };
+    let source = goal_continuation::ProductionContinuation::parse(raw)?;
+    let requires_query = source.is_resource_aware() || source.is_current_consumption_reserve();
+    // Publish the exact retained identity even when a current effect grant is
+    // missing. That refusal must not fall back to a new, broader source policy.
+    remedy["arguments"] = json!({"blueprint":json!({
+        "template":"continue_goal", "plan_digest":source.parent.to_hex(),
+    }).to_string()});
+    remedy["retained_goal"] = source.lineage_json();
+    remedy["retained_goal"]["original_request"] =
+        serde_json::from_str(&source.request().canonical_json())
+            .map_err(|_| invalid("retained production request is not canonical JSON"))?;
+    remedy["retained_goal"]["requires_query"] = json!(requires_query);
+    remedy["separate_stage_review_required"] = json!(true);
+    remedy["then"] = json!(
+        "review this continuation of the retained original output goal, then explicitly commit the new stage; original quotas, policies and history remain unchanged"
+    );
+    super::query_budget::admit_observation_sources(&[snapshot], context)?;
+    if requires_query {
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    }
+    selected
+        .compile(IntentId::new(1), snapshot)
+        .map(|(intent, _)| intent)
 }
 
 fn remaining_context(context: &OperationContext, started: Instant) -> Result<OperationContext> {

@@ -38,6 +38,15 @@ in. It is a proposal to plan, not permission to dispatch. A custom `summary` is
 optional. Do not combine this template with explicit actions, production, or a
 pause target.
 
+Supply alerts also use this exact request when their currently deficient FOOD
+and DRINK minima are covered by a compatible retained supply goal. They prefer
+the newest retained pursuit and preserve all of its original quotas and
+policies, including quotas whose immediate alerts have cleared. Its ordinary
+continuation refusal remains an unavailable remedy; the alert cannot silently
+start a different root. `retained_goal` carries the original request and lineage
+into the Agent Turn. See [supply recovery advice](LAB_RESOURCE_HARVEST.md#low-input-recovery-advice)
+for the matching, bounded inspection and authority rules.
+
 ## What the new plan preserves
 
 The server retrieves the complete normalized original production request from

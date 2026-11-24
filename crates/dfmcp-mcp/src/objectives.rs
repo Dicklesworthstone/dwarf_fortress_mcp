@@ -25,6 +25,10 @@ mod forecast_lineage;
 #[path = "objective_forecast_recovery.rs"]
 mod forecast_recovery;
 
+#[path = "objective_supply_advice.rs"]
+mod supply_advice;
+pub(super) use supply_advice::supply_recovery_continuation;
+
 pub(super) fn withdraw_goal(session: &mut LabSession, digest: &Digest32) -> Result<Value> {
     withdrawal::withdraw_goal(session, digest)
 }
