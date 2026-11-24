@@ -1512,7 +1512,11 @@ pub(super) fn recover_objective(
         let plan = recovery_compiler::prepare_exact(&sealed, &intent, &ctx, retained.plan_digest)?;
         if matches!(
             &objective.source,
-            PlanSource::Production { .. } | PlanSource::ConnectedRoom { .. }
+            PlanSource::Production { .. }
+                | PlanSource::ProductionContinuation { .. }
+                | PlanSource::RoomContinuation { .. }
+                | PlanSource::ConnectedRoom { .. }
+                | PlanSource::ConnectedRoomContinuation { .. }
         ) || matches!(&objective.source, PlanSource::Blueprint { raw, .. }
                 if room_provisioning::is_provisioned_room(raw))
         {

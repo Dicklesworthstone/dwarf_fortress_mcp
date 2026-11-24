@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Forecast recovered project continuation chains
+
+- Extend `forecast_scope: "complete_project"` to bounded committed chains with
+  a verified recovered prefix and optional current-session live continuations.
+- Retain each historical stage's exact sealed-source witness, complete quiet
+  census, original deadline and independent reserve samples, without restoring
+  an action handle or dispatch authority.
+- Count recovered descendants against shared source/action budgets, recheck
+  physical quiet at modeled frontiers, and model further private successors when
+  current stock no longer satisfies the original project.
+- Refuse cross-recovery or backward lineage, recovered stages after live work,
+  missing source custody, and invalid current receipts without recovery fallback.
+- Add six model and two durable-facade regression sources. Independent source
+  review, static content checks and JSON parsing pass; Rust compilation, tests
+  and formatting remain unexecuted after execution-host failures.
+- Keep the existing eleven tools, default current-stage forecast behavior and
+  production-admission boundaries unchanged.
+
 ## Unreleased — Per-order clocks in native resource projects
 
 - Enable independently configured order and inventory clocks for fixed stock

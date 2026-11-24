@@ -2,7 +2,7 @@
 
 use super::*;
 
-fn finish(adapter: &mut MemoryAdapter, actions: &[ActionId]) -> Result<()> {
+pub(super) fn finish(adapter: &mut MemoryAdapter, actions: &[ActionId]) -> Result<()> {
     for _ in 0..160 {
         for action in actions {
             adapter.poll_action(*action, &context(adapter))?;
@@ -25,7 +25,7 @@ fn finish(adapter: &mut MemoryAdapter, actions: &[ActionId]) -> Result<()> {
     ))
 }
 
-fn continue_production(
+pub(super) fn continue_production(
     adapter: &mut MemoryAdapter,
     root: Digest32,
     request: ProductionRequest,
@@ -61,7 +61,7 @@ fn continue_production(
     Ok((plan, original, sealed))
 }
 
-fn continued_beds() -> Result<(
+pub(super) fn continued_beds() -> Result<(
     MemoryAdapter,
     PreparedPlan,
     Original,
@@ -87,7 +87,7 @@ fn continued_beds() -> Result<(
     Ok((adapter, root_plan, root, project, child_plan, child))
 }
 
-fn forecast_chain(
+pub(super) fn forecast_chain(
     adapter: &MemoryAdapter,
     root_plan: &PreparedPlan,
     root: &Original,
@@ -232,14 +232,7 @@ fn quiet_predecessor_and_retained_tip_share_the_complete_action_budget() -> Resu
     Ok(())
 }
 
-#[test]
-fn committed_chain_can_predict_further_stages_after_real_stock_consumption() -> Result<()> {
-    let (mut adapter, root_plan, root, project, _, child) = continued_beds()?;
-    finish(&mut adapter, &child.actions)?;
-    assert_eq!(
-        project.goal_truth(adapter.snapshot())?,
-        PredicateTruth::True
-    );
+pub(super) fn consume_bed(adapter: &mut MemoryAdapter) -> Result<()> {
     let item =
         effects::loose_furniture_items(adapter.snapshot(), dfmcp_intent::FurnitureKind::Bed)?
             .into_iter()
@@ -282,16 +275,27 @@ fn committed_chain_can_predict_further_stages_after_real_stock_consumption() -> 
     let furnishing = StaticPlanner::default().prepare_laboratory(
         adapter.snapshot(),
         &intent,
-        &context(&adapter),
+        &context(adapter),
     )?;
-    let prepared = adapter.prepare(&furnishing, &context(&adapter))?;
-    let allocation = adapter.commit(&furnishing, &prepared, &context(&adapter))?;
+    let prepared = adapter.prepare(&furnishing, &context(adapter))?;
+    let allocation = adapter.commit(&furnishing, &prepared, &context(adapter))?;
     let allocated_actions: Vec<_> = allocation
         .actions
         .into_iter()
         .map(|action| action.action_id)
         .collect();
-    finish(&mut adapter, &allocated_actions)?;
+    finish(adapter, &allocated_actions)
+}
+
+#[test]
+fn committed_chain_can_predict_further_stages_after_real_stock_consumption() -> Result<()> {
+    let (mut adapter, root_plan, root, project, _, child) = continued_beds()?;
+    finish(&mut adapter, &child.actions)?;
+    assert_eq!(
+        project.goal_truth(adapter.snapshot())?,
+        PredicateTruth::True
+    );
+    consume_bed(&mut adapter)?;
     assert_eq!(
         project.goal_truth(adapter.snapshot())?,
         PredicateTruth::False

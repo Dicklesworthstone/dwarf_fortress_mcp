@@ -108,18 +108,22 @@ fn observe(
     observe_with_recovery(fork, original, reserve, goal, stage, None)
 }
 
-fn observe_with_recovery(
+fn observe_with_recovery<'a>(
     fork: &MemoryAdapter,
     original: &Original,
     reserve: Option<PredicateTruth>,
     goal: PredicateTruth,
     stage: PredicateTruth,
-    recovered: Option<&RecoveredOriginal>,
+    recovered: impl IntoIterator<Item = &'a RecoveredOriginal>,
 ) -> Result<Outcome> {
-    let mut steps = match recovered {
-        Some(recovered) => recovered.rows(fork.snapshot())?,
-        None => Vec::new(),
-    };
+    let mut steps = Vec::new();
+    let mut original_recovery = None;
+    for recovered in recovered {
+        steps.extend(recovered.rows(fork.snapshot())?);
+        if recovered.original() == original.actual {
+            original_recovery = Some(recovered);
+        }
+    }
     let recovered_count = steps.len();
     let total = original.actions.len().saturating_add(recovered_count);
     let mut verified = recovered_count;
@@ -219,7 +223,7 @@ fn observe_with_recovery(
             "continuous_maintenance_proven":false, "steps":steps,
         }),
     };
-    if let Some(recovered) = recovered {
+    if let Some(recovered) = original_recovery {
         recovered.annotate(&mut outcome.value);
     }
     Ok(outcome)
@@ -652,7 +656,7 @@ pub(super) fn forecast(
         report["forecast_work"]["retained_continuation_actions"] = json!(
             projects
                 .iter()
-                .map(|project| project.retained_actions().count())
+                .map(|project| project.retained_actions().count() + project.recovered_retained_steps())
                 .sum::<usize>()
         );
         report["forecast_work"]["stage_reviews_deferred"] = json!(stage_reviews_deferred);
@@ -668,6 +672,9 @@ pub(super) fn forecast(
         );
         if recovered_steps > 0 {
             report["forecast_work"]["verified_recovered_original_steps"] = json!(recovered_steps);
+            report["forecast_work"]["verified_recovered_continuation_steps"] = json!(
+                projects.iter().map(Project::recovered_retained_steps).sum::<usize>()
+            );
             report["assumptions"].as_array_mut().ok_or_else(|| {
                 error(ErrorCode::InternalInvariantViolation, "forecast assumptions disappeared")
             })?.push(json!(

@@ -8,6 +8,52 @@ fn refused(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::Conflict, message)
 }
 
+/// A recovered prefix may be followed by current owned work. Historical
+/// custody never substitutes for a present live receipt or restores a handle.
+fn recovery_frontier(
+    objective: &Objective,
+    session: &LabSession,
+) -> Result<Option<StateAnchor>> {
+    if objective.abandoned(session)
+        || objective.is_withdrawn()
+        || objective.verification_error.is_some()
+    {
+        return Err(refused(
+            "complete-project stage lacks unwithdrawn verified custody",
+        ));
+    }
+    if objective.originating_process
+        && objective.original_handles_live
+        && objective.owner_session_id == session.session_id
+    {
+        return Ok(None);
+    }
+    if objective.originating_process
+        || objective.original_handles_live
+        || session
+            .commit_receipts
+            .contains_key(&objective.plan_digest.to_hex())
+    {
+        return Err(refused(
+            "complete-project continuation lacks current owned live custody",
+        ));
+    }
+    objective.selected_wait_recovery(session)?;
+    objective
+        .active_observation_anchor
+        .map(Some)
+        .ok_or_else(|| refused("complete-project recovery has no accepted observation frontier"))
+}
+
+fn follows(previous: StateAnchor, next: StateAnchor) -> bool {
+    previous.fortress_id == next.fortress_id
+        && previous.cursor.epoch <= next.cursor.epoch
+        && previous.tick <= next.tick
+        && (previous.cursor.epoch != next.cursor.epoch
+            || (previous.cursor.sequence <= next.cursor.sequence
+                && (previous.cursor != next.cursor || previous == next)))
+}
+
 fn expected_continuation(
     source: &ProjectSource,
     parent: Digest32,
@@ -62,6 +108,7 @@ pub(super) fn source(
     }
     let mut children = BTreeMap::new();
     let mut identities = BTreeSet::from([root.plan_digest]);
+    let mut recoveries = BTreeMap::from([(root.plan_digest, recovery_frontier(root, session)?)]);
     let mut root_seen = false;
     for objective in &session.objectives {
         if objective.plan_digest == root.plan_digest {
@@ -79,17 +126,7 @@ pub(super) fn source(
         if continuation.root() != root.plan_digest {
             continue;
         }
-        if !objective.originating_process
-            || !objective.original_handles_live
-            || objective.owner_session_id != session.session_id
-            || objective.abandoned(session)
-            || objective.is_withdrawn()
-            || objective.verification_error.is_some()
-        {
-            return Err(refused(
-                "complete-project continuation lacks current owned, unwithdrawn live custody",
-            ));
-        }
+        let recovery = recovery_frontier(objective, session)?;
         let expected = expected_continuation(&source, continuation.parent(), root.plan_digest)?;
         if !continuation.same_original_request(&expected) {
             return Err(refused(
@@ -105,6 +142,7 @@ pub(super) fn source(
                 "complete-project forecast requires one unambiguous linear continuation chain",
             ));
         }
+        recoveries.insert(objective.plan_digest, recovery);
         if identities.len() > MAX_COMMITTED_PROJECT_STAGES {
             return Err(DfmcpError::new(
                 ErrorCode::BudgetExceeded,
@@ -127,13 +165,20 @@ pub(super) fn source(
             .find(|objective| objective.plan_digest == child)
             .and_then(Objective::resource_plan)
             .ok_or_else(|| refused("complete-project continuation seal is unavailable"))?;
-        if previous.anchor.fortress_id != next.anchor.fortress_id
-            || previous.anchor.cursor.epoch != next.anchor.cursor.epoch
-            || previous.anchor.cursor.sequence > next.anchor.cursor.sequence
-            || previous.anchor.tick > next.anchor.tick
-        {
+        let preceding_recovery = recoveries.get(&parent).copied().flatten();
+        let next_recovery = recoveries.get(&child).copied().flatten();
+        let admitted_transition = match (preceding_recovery, next_recovery) {
+            (None, None) => previous.anchor.cursor.epoch == next.anchor.cursor.epoch,
+            (Some(accepted), None) => {
+                accepted.cursor.epoch == next.anchor.cursor.epoch
+                    && follows(accepted, next.anchor)
+            }
+            (Some(accepted), Some(next_accepted)) => accepted == next_accepted,
+            (None, Some(_)) => false,
+        };
+        if !follows(previous.anchor, next.anchor) || !admitted_transition {
             return Err(refused(
-                "complete-project continuation predates or crosses its predecessor's source lineage",
+                "complete-project continuation predates or crosses its predecessor's accepted source lineage",
             ));
         }
         ordered.push((child, parent));

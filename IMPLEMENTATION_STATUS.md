@@ -1,5 +1,40 @@
 # Implementation Status
 
+## Unreleased — Forecast complete recovered continuation chains
+
+Complete-project laboratory forecasts now accept ordinary production,
+provisioned-room and connected-room originals whose bounded committed chains
+contain a verified recovered prefix, optionally followed by owned live stages
+from the current session. All recovered members must share the same accepted
+recovery frontier; a live suffix must follow that frontier in the current epoch.
+The existing limit of eight committed stages per root remains.
+
+Every historical stage contributes its exact authenticated sealed source and
+complete Verified, physically quiet step census. Historical rows retain their
+original proof and receipt anchors with no ActionIds, recreated jobs, renewed
+deadlines or dispatch handles. Present live receipts remain authoritative and
+cannot fall back to recovery when malformed. Branches, cycles, gaps, changed
+requests, withdrawn or abandoned stages, and recovered work after a live suffix
+still refuse.
+
+The private shared-resource model counts recovered descendants against the
+cumulative source and action bounds, rechecks their physical quiet at every
+modeled frontier, and preserves each stage's own absolute reserve samples.
+Subsequent stock consumption can require further hypothetical successors.
+No archive hydration, observation publication, pending-review replacement,
+canonical time advance or custody mutation occurs during the query.
+
+Six new actual-model and two durable-facade regression tests cover recovered
+chains, live suffixes, renewed demand, independent reserves, budgets and lineage
+guards. These are authored regression sources, not passing execution evidence.
+Independent implementation review, JSON contract parsing, whitespace/content
+checks and staged-blob integrity checks passed. Rust compilation, new tests and
+formatting remain unexecuted because repeated execution-host failures removed
+the toolchain and left no usable executor. No full MCP, native, live campaign or
+production-admission qualification is claimed.
+
+Owner: `df-lab-joint-original-forecast-c2s` (in progress).
+
 ## Unreleased — Run and recover each original portfolio clock through the project
 
 Native resource projects now route independently configured order and inventory

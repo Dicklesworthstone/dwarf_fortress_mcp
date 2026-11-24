@@ -67,6 +67,30 @@ impl RecoveredOriginal {
         self.steps.len()
     }
 
+    /// A new live successor may follow only the accepted recovery frontier.
+    /// An old sealed epoch alone cannot authorize crossing a reset.
+    pub(super) fn validate_live_source(&self, anchor: StateAnchor) -> Result<()> {
+        let recovery = self.recovery_anchor;
+        if anchor.fortress_id != recovery.fortress_id
+            || anchor.cursor.epoch != recovery.cursor.epoch
+            || anchor.tick < recovery.tick
+            || anchor.cursor.sequence < recovery.cursor.sequence
+            || (anchor.cursor == recovery.cursor && anchor != recovery)
+        {
+            return Err(error(
+                ErrorCode::Conflict,
+                "live forecast continuation predates its accepted recovery frontier",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Recovered peers must come from the same authenticated reopen. Older
+    /// proof anchors and source epochs remain immutable and separately bound.
+    pub(super) fn shares_recovery(&self, other: &Self) -> bool {
+        self.recovery_anchor == other.recovery_anchor
+    }
+
     /// Every modeled descendant must still prove quiet original physical work.
     /// Historical Verified proof is immutable and is never resampled or renewed.
     pub(super) fn rows(&self, snapshot: &WorldSnapshot) -> Result<Vec<Value>> {

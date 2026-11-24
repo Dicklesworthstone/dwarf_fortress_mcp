@@ -3,7 +3,7 @@
 The existing `fortress.query` tool can forecast one to eight **already committed,
 original plans together**. The default scope selects current-session live
 originals; complete-project forecasting also accepts recovered, verified quiet
-roots as described below. This answers a practical question
+roots and their admitted continuation chains as described below. This answers a practical question
 that independent plan comparisons cannot answer: will these originals still
 finish when they share the same finite workforce, materials and consumption?
 
@@ -104,16 +104,18 @@ committed stage can still have prepared or active work. Its real receipts,
 remaining work, prior stability observations and absolute deadlines are copied
 into the shared model. No committed stage is prepared or committed again.
 
-Each stage in a live continuation chain must belong to this session and retain the unchanged typed
+Each live stage in a continuation chain must belong to this session and retain the unchanged typed
 production, room or connected-room request, its exact sealed plan and source
 snapshot, and complete action custody. The root's qualified stock-ledger
 identity and generation must remain the same in every stage source and the
 current world; each stage's own source-bound ledger validates its own plan.
 Parent sources must stay within the same fortress and restore epoch and cannot
 run backward in tick or cursor sequence. Gaps, cycles, branches, duplicate
-identities, changed requests, withdrawn or restore-abandoned pursuits, recovered
-handles, missing sources, failed or cancelled stages and unknown physical work
+identities, changed requests, withdrawn or restore-abandoned pursuits, restored
+dispatch handles, missing sources, failed or cancelled stages and unknown physical work
 refuse before the fork. No source is fetched from disk or reconstructed.
+The verified recovery path below permits historical stages from accepted earlier
+epochs; it does not relax these checks for live stages.
 
 Selecting a continuation wrapper directly remains unsupported in
 `complete_project`; select its ordinary root instead. Raw action/pause plans and
@@ -125,9 +127,10 @@ Each original keeps its initial `steps`, `predicted_actions_complete` and
 `predicted_stage_truth`. `retained_stages` lists actual committed descendants in
 parent order, including their real plan/action identities, original source
 anchors, independent reserve samples, unchanged obligation deadlines and
-predicted outcomes. These rows state `custody: "already_committed_original"`
-and `recommitted_by_forecast: false`. They describe predicted states of actual
-handles; they do not report new observations.
+predicted outcomes. Live rows state `custody: "already_committed_original"`.
+Recovered rows state `custody: "recovered_verified_original"` and carry historical
+step evidence without action handles. Every retained row states
+`recommitted_by_forecast: false`; none reports a new observation.
 
 Additional `future_stages` contain clearly labeled model plan/action
 identities, stage names, required capabilities/risk,
@@ -262,7 +265,7 @@ owned by this session. Pending plans, foreign originals, withdrawn or
 restore-abandoned pursuits and missing original custody refuse before the model
 fork. Complete-project forecasting has the following bounded recovery path.
 
-### Forecast a completed stage after durable reopen
+### Forecast completed stages after durable reopen
 
 A reopened durable fortress can forecast the next stages of an exact ordinary
 production, provisioned-room or connected-room root whose **every original step
@@ -278,14 +281,34 @@ existing recovered-original verifier. A dispatched step subsequently verified
 by its real recovered monitor is eligible. The forecast never creates such
 verification itself. Active, unknown, failed, cancelled and never-dispatched
 original steps refuse; continue observing or explicitly review the appropriate
-recovery action first. Recovered roots with already committed descendants
-remain outside this increment, including mixed recovered/live chains.
+recovery action first.
+
+The same root selection discovers up to eight committed stages across a
+verified recovered prefix and any subsequent live continuations. Every recovered
+stage must have complete, already Verified and physically quiet historical step
+custody, an exact sealed-source witness, and the same accepted recovery frontier.
+A live continuation must belong to the current session and have a sealed source
+at or after that frontier in the current epoch. Recovered stages cannot follow
+live stages. Across accepted earlier epochs, parent source ticks and epochs
+cannot run backward; within one epoch, cursor sequences also cannot run backward
+and an equal cursor must retain the exact anchor. A present live receipt remains
+authoritative even if malformed, so it cannot fall back to archived custody.
+
+For example, a completed harvest followed by a committed production stage can
+be reopened and forecast as one original project. A newly reviewed production
+continuation after reopening retains its current live jobs and deadlines while
+the predecessor remains historical. After another reopen, that continuation is
+eligible as historical work only once its real recovered monitor has verified
+every dispatched step and the original physical work is quiet. A completed
+recovered chain whose stock is later consumed can predict additional separately
+reviewed stages without recommitting any historical stage.
 
 Ordinary durable recovery already loads and verifies the original sealed
 snapshot. It retains a compact forecast witness binding that complete source's
 anchor, qualified stock-ledger identity and generation, full canonical byte and
 record counts, and the ordinary query inspector's structural byte/work bounds.
-Forecast admission charges these counts alongside current, original and reserve
+Each recovered descendant retains its own witness. Forecast admission charges
+the distinct complete source union alongside current, original and reserve
 sources. It does not read the store, hydrate history or reconstruct the old world
 during the query. Unavailable forecast-specific qualification does not prevent
 ordinary goal recovery; it only refuses this optional forecast.
@@ -298,7 +321,11 @@ anchors and original obligation deadlines. `action_id` is `null`, with
 fresh stability observation stands in for history. The model checks original
 physical quiet again at every predicted frontier. These historical steps count
 toward original action completion and the same cumulative action allowance as
-live and hypothetical steps.
+live and hypothetical steps. `forecast_work.verified_recovered_original_steps`
+counts the recovered root and descendants;
+`forecast_work.verified_recovered_continuation_steps` identifies the descendant
+portion. `retained_continuation_actions` includes historical descendant steps
+even though they have no live action IDs.
 
 New predicted successor plans still require current scoped effect and
 checkpoint authority. They exist only in the discarded model and carry the
@@ -392,6 +419,12 @@ parents, cycles, branches, owner and restore-epoch mismatches, changed requests,
 lost handles and the committed-stage bound. Recovered-model regressions cover
 residual projects without old handles, cumulative action limits, immutable
 negative/missing reserve evidence, current effect authority and reset refusal.
+Recovered-chain regression sources cover complete archived chains, active live
+tips after recovery, shared action budgets, independent root and child reserve
+samples, rejected cross-reset custody, and further stages after real furniture
+allocation. Durable chain sources cover repeated reopen and compaction, mixed
+epochs, malformed descendant live-custody precedence, and refusal of unfinished
+recovered descendants until real monitoring verifies their work.
 Durable facade regression sources cover actual reopen and compaction, source
 and output admission, unfinished work, malformed live-custody precedence,
 replacement ledgers and preservation of pending review, world and history.

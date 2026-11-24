@@ -274,12 +274,6 @@ pub(super) fn execute(
         let continued = project_lineages
             .get(&selected.actual)
             .is_some_and(|(_, descendants)| !descendants.is_empty());
-        if recovery.is_some() && continued {
-            return Err(DfmcpError::new(
-                ErrorCode::Conflict,
-                "recovered complete-project forecasting currently requires a root without committed descendants",
-            ));
-        }
         if recovery.is_none() {
             admit_live_actions(session, &selected, &mut action_union, continued, continued)?;
         }
@@ -346,19 +340,6 @@ pub(super) fn execute(
             }
             for (index, (digest, parent)) in descendants.iter().enumerate() {
                 remaining(context, started)?;
-                let retained = super::plan_cancellation::select(session, *digest)?;
-                if retained.actual != *digest {
-                    return Err(invalid(
-                        "continuation custody cannot alias another sealed stage",
-                    ));
-                }
-                admit_live_actions(
-                    session,
-                    &retained,
-                    &mut action_union,
-                    true,
-                    index + 1 < descendants.len(),
-                )?;
                 let objective = session
                     .objectives
                     .iter()
@@ -381,6 +362,64 @@ pub(super) fn execute(
                 let plan = objective
                     .resource_plan()
                     .ok_or_else(|| invalid("retained continuation seal disappeared"))?;
+                let retained_original = model::Original {
+                    requested: *digest,
+                    actual: *digest,
+                    actions: Vec::new(),
+                    reserve_until,
+                    reserve_observation: objective
+                        .selected_wait_reserve_observation
+                        .map(|(_, truth)| truth),
+                    can_continue: true,
+                };
+                if !session.commit_receipts.contains_key(&digest.to_hex()) {
+                    let (archived, census, evidence) =
+                        objective.forecast_recovered_project(session)?;
+                    let recovered = model::RecoveredOriginal::new(
+                        plan,
+                        census,
+                        evidence,
+                        session.adapter.snapshot(),
+                    )?;
+                    recovered_steps = recovered_steps.saturating_add(plan.steps.len());
+                    recovered_goals.insert(*digest);
+                    if admitted_snapshots.insert(archived.anchor.state_hash) {
+                        recovered_records = recovered_records.saturating_add(archived.records);
+                        recovered_bytes = recovered_bytes.saturating_add(archived.bytes);
+                        recovered_shape.0 =
+                            recovered_shape.0.saturating_add(archived.structural_bytes);
+                        recovered_shape.1 =
+                            recovered_shape.1.saturating_add(archived.structural_work);
+                        recovered_sources.push(json!({
+                            "anchor":anchor_json(&archived.anchor),
+                            "records":archived.records,"canonical_bytes":archived.bytes,
+                            "structural_bytes":archived.structural_bytes,"structural_work":archived.structural_work,
+                            "verification":"exact_sealed_snapshot_during_durable_recovery",
+                            "query_archive_reads":0,
+                        }));
+                    }
+                    project.retain_recovered_stage(
+                        plan.clone(),
+                        *parent,
+                        retained_original,
+                        recovered,
+                        session.adapter.snapshot(),
+                    )?;
+                    continue;
+                }
+                let retained = super::plan_cancellation::select(session, *digest)?;
+                if retained.actual != *digest {
+                    return Err(invalid(
+                        "continuation custody cannot alias another sealed stage",
+                    ));
+                }
+                admit_live_actions(
+                    session,
+                    &retained,
+                    &mut action_union,
+                    true,
+                    index + 1 < descendants.len(),
+                )?;
                 let sealed = session
                     .history
                     .get(&plan.anchor.state_hash)
@@ -398,14 +437,8 @@ pub(super) fn execute(
                     plan.clone(),
                     *parent,
                     model::Original {
-                        requested: *digest,
-                        actual: *digest,
                         actions: retained.actions,
-                        reserve_until,
-                        reserve_observation: objective
-                            .selected_wait_reserve_observation
-                            .map(|(_, truth)| truth),
-                        can_continue: true,
+                        ..retained_original
                     },
                     sealed,
                 )?;

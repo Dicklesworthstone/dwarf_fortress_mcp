@@ -4,6 +4,9 @@
 use super::*;
 use server::selected_plan_wait::RecoveredStepCustody;
 
+#[path = "original_recovered_chain_forecast_tests.rs"]
+mod chains;
+
 fn recovered_fixture() -> Result<(MemoryAdapter, PreparedPlan, Original, Project)> {
     recover_project(fixture()?, 816_501, beds()?)
 }
@@ -22,6 +25,25 @@ fn recover_project(
         original_head,
         recovered.snapshot().anchor(),
     )?;
+    let historical = recover_steps(&live, &recovered, &plan, &original)?;
+    Ok((
+        recovered,
+        plan,
+        Original {
+            actions: Vec::new(),
+            ..original
+        },
+        project.with_recovery(historical)?,
+    ))
+}
+
+fn recover_steps(
+    live: &MemoryAdapter,
+    recovered: &MemoryAdapter,
+    plan: &PreparedPlan,
+    original: &Original,
+) -> Result<RecoveredOriginal> {
+    let original_head = live.snapshot().anchor();
     let digest = Digest32::of_bytes(b"actual completed original model fixture custody");
     let census = plan
         .steps
@@ -47,21 +69,12 @@ fn recover_project(
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let historical = RecoveredOriginal::new(
-        &plan,
+    RecoveredOriginal::new(
+        plan,
         census,
         json!({"digest":digest.to_hex()}),
         recovered.snapshot(),
-    )?;
-    Ok((
-        recovered,
-        plan,
-        Original {
-            actions: Vec::new(),
-            ..original
-        },
-        project.with_recovery(historical)?,
-    ))
+    )
 }
 
 fn recovered_room_fixture(

@@ -4,6 +4,9 @@
 use super::*;
 use dfmcp_core::Capability;
 
+#[path = "recovered_continuation_forecast_mcp_tests.rs"]
+mod chains;
+
 struct StateDir(std::path::PathBuf);
 impl StateDir {
     fn new(label: &str) -> Self {

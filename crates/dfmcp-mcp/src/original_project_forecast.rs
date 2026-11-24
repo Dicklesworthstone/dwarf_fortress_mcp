@@ -20,6 +20,7 @@ struct RetainedStage {
     parent: Digest32,
     original: Original,
     reserve_sample: Option<PredicateTruth>,
+    recovered: Option<RecoveredOriginal>,
 }
 
 #[derive(Clone)]
@@ -65,6 +66,15 @@ impl Project {
 
     pub(super) fn recovered_steps(&self) -> usize {
         self.recovered.as_ref().map_or(0, RecoveredOriginal::len)
+            + self.recovered_retained_steps()
+    }
+
+    pub(super) fn recovered_retained_steps(&self) -> usize {
+        self.retained
+            .iter()
+            .filter_map(|stage| stage.recovered.as_ref())
+            .map(RecoveredOriginal::len)
+            .sum()
     }
 
     /// The caller has admitted the exact live source, lineage and complete
@@ -76,12 +86,82 @@ impl Project {
         original: Original,
         sealed: &WorldSnapshot,
     ) -> Result<()> {
-        if self.recovered.is_some() {
+        for recovered in self.recovered.iter().chain(
+            self.retained
+                .iter()
+                .filter_map(|stage| stage.recovered.as_ref()),
+        ) {
+            recovered.validate_live_source(plan.anchor)?;
+        }
+        self.validate_stage(&plan, parent, &original)?;
+        if original.actions.is_empty() || original.actions.len() != plan.steps.len() {
             return Err(error(
-                ErrorCode::Conflict,
-                "recovered complete-project forecasts do not yet admit committed descendant chains",
+                ErrorCode::InvalidPlan,
+                "retained live stage requires its complete original action handles",
             ));
         }
+        self.ledger.validate_current(sealed)?;
+        ProductionGoalLedger::capture(sealed)?.validate_plan(&plan)?;
+        let reserve_sample = original.reserve_observation;
+        self.retained.push(RetainedStage {
+            plan,
+            parent,
+            original,
+            reserve_sample,
+            recovered: None,
+        });
+        Ok(())
+    }
+
+    /// The enclosing owner has verified the exact archived source and receipt
+    /// census. Keep historical proof separate from every live/model ActionId.
+    pub(in super::super) fn retain_recovered_stage(
+        &mut self,
+        plan: PreparedPlan,
+        parent: Digest32,
+        original: Original,
+        recovered: RecoveredOriginal,
+        current: &WorldSnapshot,
+    ) -> Result<()> {
+        self.validate_stage(&plan, parent, &original)?;
+        if !original.actions.is_empty()
+            || recovered.original() != plan.digest
+            || recovered.len() != plan.steps.len()
+            || self
+                .recovered
+                .as_ref()
+                .is_none_or(|root| !root.shares_recovery(&recovered))
+            || self.retained.iter().any(|stage| {
+                stage
+                    .recovered
+                    .as_ref()
+                    .is_none_or(|prior| !prior.shares_recovery(&recovered))
+            })
+        {
+            return Err(error(
+                ErrorCode::Conflict,
+                "recovered continuation requires complete historical custody in the same recovered prefix",
+            ));
+        }
+        self.ledger.validate_current(current)?;
+        recovered.rows(current)?;
+        let reserve_sample = original.reserve_observation;
+        self.retained.push(RetainedStage {
+            plan,
+            parent,
+            original,
+            reserve_sample,
+            recovered: Some(recovered),
+        });
+        Ok(())
+    }
+
+    fn validate_stage(
+        &self,
+        plan: &PreparedPlan,
+        parent: Digest32,
+        original: &Original,
+    ) -> Result<()> {
         if self.retained.len() + 1 >= MAX_COMMITTED_PROJECT_STAGES {
             return Err(error(
                 ErrorCode::BudgetExceeded,
@@ -95,8 +175,9 @@ impl Project {
         if parent != preceding
             || plan.digest != original.actual
             || original.actual == self.original
-            || original.actions.is_empty()
-            || original.actions.len() != plan.steps.len()
+            || !plan.digest_is_valid()
+            || !plan.id_is_valid()
+            || plan.steps.is_empty()
             || original.reserve_until != self.source.reserve_until_tick()
             || self
                 .retained
@@ -108,15 +189,6 @@ impl Project {
                 "retained model stage differs from the exact original project chain",
             ));
         }
-        self.ledger.validate_current(sealed)?;
-        ProductionGoalLedger::capture(sealed)?.validate_plan(&plan)?;
-        let reserve_sample = original.reserve_observation;
-        self.retained.push(RetainedStage {
-            plan,
-            parent,
-            original,
-            reserve_sample,
-        });
         Ok(())
     }
 
@@ -189,7 +261,11 @@ impl Project {
             reserve,
             goal,
             PredicateTruth::True,
-            self.recovered.as_ref(),
+            self.recovered.iter().chain(
+                self.retained
+                    .iter()
+                    .filter_map(|stage| stage.recovered.as_ref()),
+            ),
         )?;
         let retained = self.retained_stage_views(fork, goal)?;
         // Action failures take precedence as in ordinary original inspection.
@@ -253,13 +329,24 @@ impl Project {
         let mut rows = Vec::with_capacity(self.retained.len());
         for (index, stage) in self.retained.iter().enumerate() {
             let truth = crate::lab_world::plan_goal_truth(fork.snapshot(), &stage.plan)?;
-            let mut status = observe(fork, &stage.original, stage.reserve_sample, goal, truth)?;
+            let mut status = observe_with_recovery(
+                fork,
+                &stage.original,
+                stage.reserve_sample,
+                goal,
+                truth,
+                stage.recovered.as_ref(),
+            )?;
             status.value["index"] = json!(index + 2);
             status.value["stage"] = json!(self.source.stage_name(&stage.plan));
             status.value["root_plan_digest"] = json!(self.original.to_hex());
             status.value["parent_plan_digest"] = json!(stage.parent.to_hex());
             status.value["source_anchor"] = super::super::super::anchor_json(&stage.plan.anchor);
-            status.value["custody"] = json!("already_committed_original");
+            status.value["custody"] = json!(if stage.recovered.is_some() {
+                "recovered_verified_original"
+            } else {
+                "already_committed_original"
+            });
             status.value["recommitted_by_forecast"] = json!(false);
             status.value["obligation_deadlines"] = json!(
                 stage
