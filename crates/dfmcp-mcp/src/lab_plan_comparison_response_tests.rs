@@ -723,8 +723,7 @@ mod owned_project {
         }
         for field in ["pending_plans", "actions", "carried_obligations"] {
             assert_eq!(
-                result["agent_turn"]["active_work"][field],
-                view.active_work[field],
+                result["agent_turn"]["active_work"][field], view.active_work[field],
                 "complete {field}",
             );
         }
@@ -784,6 +783,335 @@ mod owned_project {
             Err(error) if error.code == ErrorCode::BudgetExceeded
         ));
         assert_eq!(input, original);
-        assert_eq!(view.active_work["pending_plans"][0]["plan_digest"], "prior-review");
+        assert_eq!(
+            view.active_work["pending_plans"][0]["plan_digest"],
+            "prior-review"
+        );
+    }
+
+    fn portfolio_peer(digest: &str) -> Value {
+        json!({
+            "requested_plan_digest":digest, "actual_plan_digest":digest,
+            "root_plan_digest":digest, "project_source_digest":"d".repeat(64),
+            "predicted_goal_truth":"true", "predicted_complete":true,
+            "predicted_project_actions_complete":true,
+            "reserve_until_tick":501, "reserve_frontier_truth":"true",
+            "steps":[{"action_id":"retained-peer-action", "state":"verified",
+                "physical_quiescent":true}],
+            "retained_stages":[{"stage":"acquire_resources", "plan_digest":digest,
+                "predicted_actions_complete":true, "predicted_physical_quiescent":true}],
+            "future_stages":[{"stage":"production", "from_tick":151,
+                "plan_digest":"e".repeat(64), "predicted_complete":true,
+                "steps":[{"step":0, "kind":"create_work_order",
+                    "obligation":{"terminal":{"field":{"entity_id":"9000",
+                        "field":"stock.item.BED", "op":"ge", "value":24}},
+                        "deadline_tick":501, "poll_interval_ticks":10,
+                        "stable_observations":2}}]}],
+        })
+    }
+
+    fn portfolio_payload(view: &TemporalResponseProjection) -> Value {
+        let mut input = payload(view);
+        input["schema"] = json!("dfmcp.plan-comparison/5");
+        input["version"] = json!(5);
+        input["competing_plan_digests"] = json!(["a".repeat(64), "b".repeat(64)]);
+        input["owned_work"] = json!({
+            "live_originals":["a".repeat(64)],
+            "recovered_originals":["b".repeat(64)],
+        });
+        let prediction = json!({
+            "stages":[
+                {"stage":"acquire_resources", "from_tick":101,
+                    "predicted_actions_complete":true},
+                {"stage":"production", "from_tick":151,
+                    "predicted_actions_complete":true},
+            ],
+            "predicted_complete":true, "project_action_count":3,
+            "peer_projects":[portfolio_peer(&"a".repeat(64)), portfolio_peer(&"b".repeat(64))],
+            "selected_peer_projects":{
+                "scope":"selected_committed_complete_projects",
+                "requested_plan_digests":["a".repeat(64), "b".repeat(64)],
+                "actual_plan_digests":["a".repeat(64), "b".repeat(64)],
+                "selected_and_competing_action_steps":2,
+                "fixed_custody_records":12, "fixed_custody_bytes":2048,
+                "dispatch_handles_restored":false,
+            },
+            "predicted_portfolio_complete":true, "portfolio_evidence_complete":true,
+            "portfolio_goal_truth":"true", "portfolio_completion_tick":501,
+            "portfolio_action_count":5, "max_risk":"guarded",
+            "requires_checkpoint":true,
+            "required_capabilities":["designate", "configure_production", "checkpoint"],
+        });
+        input["candidates"] = json!([
+            {"key":"project-alpha", "prediction":prediction,
+                "selection_scope":"current_reviewed_stage_only"},
+            {"key":"project-beta", "prediction":prediction,
+                "selection_scope":"current_reviewed_stage_only"},
+        ]);
+        input
+    }
+
+    fn portfolio_query_work() -> Value {
+        json!({
+            "query_baselines":[{"baseline":"qb1:portfolio"}],
+            "query_watches":[{"query_watch":"qw1:portfolio"}],
+            "condition_watches":[{"condition_watch":"cw1:portfolio"}],
+        })
+    }
+
+    #[test]
+    fn complete_portfolio_publication_retains_every_candidate_peer_stage_and_current_catalog()
+    -> Result<()> {
+        let view = projection();
+        let input = portfolio_payload(&view);
+        let original = input.clone();
+        let queries = portfolio_query_work();
+        let output = finish(&view, input.clone(), queries.clone(), None)?;
+        let result: Value =
+            serde_json::from_str(&output).map_err(|_| invariant("invalid portfolio packet"))?;
+        for field in [
+            "schema",
+            "version",
+            "forecast_scope",
+            "progression_scope",
+            "competing_plan_digests",
+            "owned_work",
+            "candidates",
+            "source_work",
+            "forecast_work",
+        ] {
+            assert_eq!(result[field], input[field], "complete {field}");
+        }
+        assert_eq!(
+            result["candidates"][1]["prediction"]["peer_projects"][1]["future_stages"],
+            input["candidates"][1]["prediction"]["peer_projects"][1]["future_stages"]
+        );
+        for (field, value) in view
+            .active_work
+            .as_object()
+            .ok_or_else(|| invariant("missing current work"))?
+        {
+            if !matches!(
+                field.as_str(),
+                "query_baselines" | "query_watches" | "condition_watches"
+            ) {
+                assert_eq!(
+                    result["agent_turn"]["active_work"][field], *value,
+                    "{field}"
+                );
+            }
+        }
+        for field in ["query_baselines", "query_watches", "condition_watches"] {
+            assert_eq!(result["agent_turn"]["active_work"][field], queries[field]);
+        }
+        let briefing = &result["agent_turn"]["briefing"];
+        assert_eq!(briefing["forecast_scope"], "complete_project");
+        assert_eq!(briefing["forecast_progression_scope"], "owned_session");
+        assert_eq!(
+            briefing["forecast_recovered_observation"],
+            "discarded_copies_only"
+        );
+        assert_eq!(
+            briefing["forecast_future_stages"],
+            "candidate_and_selected_peer_projects_discarded_copies"
+        );
+        assert_eq!(
+            briefing["forecast_recommendation_scope"],
+            "complete_selected_portfolio"
+        );
+        assert_eq!(
+            briefing["forecast_competing_plan_digests"],
+            input["competing_plan_digests"]
+        );
+        assert_eq!(briefing["canonical_time_advanced"], 0);
+        assert_eq!(briefing["candidate_predictions_grant_authority"], false);
+        assert_eq!(result["selection_scope"], "current_reviewed_stage_only");
+        assert_eq!(result["automatic_continuation"], false);
+        assert_eq!(result["effect_evidence"], false);
+        assert_eq!(result["game_effect"], "none");
+        assert_eq!(result["forecast_work"]["actual_game_ticks_advanced"], 0);
+        assert_eq!(result["agent_turn"]["recommendations"], json!([]));
+        assert_eq!(
+            result["agent_turn"]["uncertainty"][0]["epistemic_state"],
+            "predicted"
+        );
+        let limits = result["agent_turn"]["uncertainty"][0]["consequence"]
+            .as_str()
+            .ok_or_else(|| invariant("missing portfolio uncertainty"))?;
+        assert!(limits.contains("Unselected originals"));
+        assert!(limits.contains("current candidate stage"));
+        assert!(limits.contains("separate review and Commit"));
+        assert_eq!(result["publication"], "complete_before_pending_plan_change");
+        assert_eq!(
+            input, original,
+            "publication changed caller-owned prediction"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn portfolio_publication_refuses_crossed_generations_scopes_and_missing_peer_selection() {
+        let view = projection();
+        for (field, value) in [
+            ("schema", json!("dfmcp.plan-comparison/1")),
+            ("schema", json!("dfmcp.plan-comparison/2")),
+            ("schema", json!("dfmcp.plan-comparison/3")),
+            ("schema", json!("dfmcp.plan-comparison/4")),
+            ("schema", json!("unknown")),
+            ("schema", Value::Null),
+            ("version", json!(1)),
+            ("version", json!(2)),
+            ("version", json!(3)),
+            ("version", json!(4)),
+            ("version", json!(6)),
+            ("version", Value::Null),
+            ("kind", json!("select_candidate")),
+            ("forecast_scope", json!("current_stage")),
+            ("forecast_scope", Value::Null),
+            ("progression_scope", json!("candidate_only")),
+            ("progression_scope", Value::Null),
+        ] {
+            let mut input = portfolio_payload(&view);
+            input[field] = value;
+            assert!(
+                matches!(
+                    finish(&view, input, portfolio_query_work(), None),
+                    Err(error) if error.code == ErrorCode::InternalInvariantViolation
+                ),
+                "crossed {field} was published"
+            );
+        }
+        let mut input = portfolio_payload(&view);
+        input
+            .as_object_mut()
+            .expect("portfolio object")
+            .remove("competing_plan_digests");
+        assert!(matches!(
+            finish(&view, input, portfolio_query_work(), None),
+            Err(error) if error.code == ErrorCode::InternalInvariantViolation
+        ));
+    }
+
+    #[test]
+    fn portfolio_publication_refuses_noncanonical_duplicate_or_unbounded_selected_peers() {
+        let view = projection();
+        for peers in [
+            Value::Null,
+            json!([]),
+            json!("a".repeat(64)),
+            json!(["a".repeat(64), "a".repeat(64)]),
+            json!(["A".repeat(64)]),
+            json!(["a".repeat(63)]),
+            json!([format!("{}\n", "a".repeat(64))]),
+            json!(["g".repeat(64)]),
+            json!([null]),
+            json!([17]),
+            json!(
+                (1..=8)
+                    .map(|index| format!("{index:064x}"))
+                    .collect::<Vec<_>>()
+            ),
+        ] {
+            let mut input = portfolio_payload(&view);
+            input["competing_plan_digests"] = peers;
+            assert!(matches!(
+                finish(&view, input, portfolio_query_work(), None),
+                Err(error) if error.code == ErrorCode::InternalInvariantViolation
+            ));
+        }
+    }
+
+    #[test]
+    fn peer_selection_cannot_be_published_under_older_comparison_or_selection_envelopes()
+    -> Result<()> {
+        let view = projection();
+        for version in 1..=4 {
+            let mut baseline = payload(&view);
+            baseline["schema"] = json!(format!("dfmcp.plan-comparison/{version}"));
+            baseline["version"] = json!(version);
+            let object = baseline
+                .as_object_mut()
+                .ok_or_else(|| invariant("legacy object"))?;
+            match version {
+                1 => {
+                    object.remove("forecast_scope");
+                    object.remove("progression_scope");
+                }
+                2 => {
+                    object.remove("progression_scope");
+                }
+                3 => {
+                    object.insert("forecast_scope".to_owned(), json!("current_stage"));
+                }
+                _ => {}
+            }
+            finish(&view, baseline.clone(), query_work(), None)?;
+            for peers in [Value::Null, json!([]), json!(["a".repeat(64)])] {
+                let mut input = baseline.clone();
+                input["competing_plan_digests"] = peers;
+                assert!(
+                    matches!(
+                        finish(&view, input, query_work(), None),
+                        Err(error) if error.code == ErrorCode::InternalInvariantViolation
+                    ),
+                    "older version {version} accepted peer selection"
+                );
+            }
+        }
+        let selected = json!({
+            "ok":true, "kind":"select_candidate",
+            "schema":"dfmcp.plan-comparison/1", "version":1,
+            "anchor":view.anchor, "session_id":view.session_id,
+            "plan_digest":"c".repeat(64), "max_risk":"read_only",
+            "source_work":{"records":1, "canonical_bytes":100},
+            "next_step":{"tool":"fortress.commit", "arguments":{
+                "session_id":view.session_id, "plan_digest":"c".repeat(64)}},
+        });
+        let pending = json!({"plan_digest":"c".repeat(64), "state":"prepared",
+            "anchor":view.anchor});
+        finish(&view, selected.clone(), query_work(), Some(pending.clone()))?;
+        for peers in [Value::Null, json!([]), json!(["a".repeat(64)])] {
+            let mut input = selected.clone();
+            input["competing_plan_digests"] = peers;
+            assert!(
+                matches!(
+                    finish(&view, input, query_work(), Some(pending.clone())),
+                    Err(error) if error.code == ErrorCode::InternalInvariantViolation
+                ),
+                "selection accepted peer continuation authority"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn complete_later_peer_obligation_evidence_overflow_refuses_without_clipping() -> Result<()> {
+        let mut view = projection();
+        view.budget.max_output_tokens = 4_096;
+        let baseline = portfolio_payload(&view);
+        finish(&view, baseline.clone(), portfolio_query_work(), None)?;
+        for peer in 0..2 {
+            let mut input = baseline.clone();
+            let terminal = input["candidates"][1]["prediction"]["peer_projects"][peer]
+                ["future_stages"][0]["steps"][0]["obligation"]["terminal"].clone();
+            input["candidates"][1]["prediction"]["peer_projects"][peer]["future_stages"][0]["steps"]
+                [0]["obligation"]["terminal"] = json!({"all":vec![terminal; 512]});
+            let original = input.clone();
+            let work = view.active_work.clone();
+            assert!(
+                matches!(
+                    finish(&view, input.clone(), portfolio_query_work(), None),
+                    Err(error) if error.code == ErrorCode::BudgetExceeded
+                ),
+                "later peer {peer} obligation was clipped"
+            );
+            assert_eq!(input, original);
+            assert_eq!(view.active_work, work);
+            assert_eq!(
+                view.active_work["pending_plans"][0]["plan_digest"],
+                "prior-review"
+            );
+        }
+        Ok(())
     }
 }

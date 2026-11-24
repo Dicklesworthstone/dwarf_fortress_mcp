@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Compare candidates with complete selected peer projects
+
+- Add explicit version 5 portfolio comparisons to the existing Plan blueprint
+  surface: one candidate plus one to seven committed original projects share
+  finite resources, later stages, retained recovery evidence and exact reserves.
+- Reuse complete original-project admission and the existing foreground model.
+  Recommend only when the whole selected portfolio succeeds with known evidence;
+  rank joint completion and new-stage costs while retaining candidate outcomes.
+- Keep all alternatives within cumulative source, action, archive, predicate,
+  polling, time and output limits. Publish complete peer-stage evidence, preserve
+  earlier pending review on refusal, and select only the current candidate stage.
+- Preserve comparison versions 1–4 and original-query behavior. Add intake,
+  model, publication and public separate-stage workflow regressions. Schema
+  checks pass 27 accepted/179 rejected cases, scoped Rust formatting and
+  repository source checks pass; Rust compilation and runtime execution remain
+  unverified at this checkpoint.
+
 ## Unreleased — Resume supply recovery from the retained original
 
 - Prefer an exact `continue_goal` request for the newest compatible retained

@@ -14,8 +14,11 @@ use dfmcp_world::{Predicate, WorldSnapshot};
 use serde_json::{Value, json};
 
 use super::super::{
-    CarriedStep, LabSession, original_forecast::model, plan_cancellation,
-    project_forecast::ProjectSource, recovered_step_progress,
+    CarriedStep, LabSession,
+    original_forecast::{AdmittedProjectSet, model},
+    plan_cancellation,
+    project_forecast::ProjectSource,
+    recovered_step_progress,
 };
 use super::{ForecastBudget, exhausted, invalid};
 use crate::lab_world::ProductionGoalLedger;
@@ -23,6 +26,9 @@ use model::ForecastMeter;
 
 const MAX_TRACKED: usize = 1_024;
 const MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
+
+#[path = "owned_candidate_portfolio.rs"]
+mod portfolio;
 
 pub(crate) struct OwnedWork {
     session: SessionId,
@@ -264,7 +270,7 @@ impl OwnedWork {
         started: Instant,
         budget: &mut ForecastBudget,
     ) -> Result<Value> {
-        self.forecast_candidate(adapter, None, plan, context, reserve, started, budget)
+        self.forecast_candidate(adapter, None, plan, context, reserve, started, budget, None)
     }
 
     pub(super) fn forecast_project(
@@ -290,6 +296,35 @@ impl OwnedWork {
             reserve,
             started,
             budget,
+            None,
+        )
+    }
+
+    pub(super) fn forecast_project_with_peers(
+        &self,
+        adapter: &MemoryAdapter,
+        source: &ProjectSource,
+        plan: &PreparedPlan,
+        context: &OperationContext,
+        reserve: Option<u64>,
+        started: Instant,
+        budget: &mut ForecastBudget,
+        peers: &AdmittedProjectSet<'_>,
+    ) -> Result<Value> {
+        if source.reserve_until_tick() != reserve {
+            return Err(invalid(
+                "owned portfolio candidate changed its original reserve frontier",
+            ));
+        }
+        self.forecast_candidate(
+            adapter,
+            Some(source),
+            plan,
+            context,
+            reserve,
+            started,
+            budget,
+            Some(peers),
         )
     }
 
@@ -302,6 +337,7 @@ impl OwnedWork {
         reserve: Option<u64>,
         started: Instant,
         budget: &mut ForecastBudget,
+        peers: Option<&AdmittedProjectSet<'_>>,
     ) -> Result<Value> {
         if self.session != context.session_id
             || self.anchor != context.anchor
@@ -311,28 +347,55 @@ impl OwnedWork {
                 "owned candidate progression changed its admitted session or source",
             ));
         }
+        if let Some(peers) = peers {
+            if project.is_none() {
+                return Err(invalid(
+                    "selected peer projects require a complete candidate project",
+                ));
+            }
+            portfolio::validate(self, peers, adapter.snapshot(), plan, context, started)?;
+        }
         if project.is_some() {
             budget.begin_project(adapter.snapshot(), plan, context)?;
         } else {
             budget.begin_candidate(adapter.snapshot(), plan, context)?;
         }
+        if let Some(peers) = peers {
+            let roots: Vec<_> = peers
+                .originals
+                .iter()
+                .map(|original| original.actual)
+                .collect();
+            budget.select_owned_projects(plan.digest, &roots, context)?;
+        }
         let plan_bytes = archive(plan, context, started)?.len() as u64;
         // The unchanged typed request is retained for every modeled successor.
         let project_bytes = project.map_or(0, |source| source.source_bytes() as u64);
+        let (actions, records, bytes) = peers.map_or(
+            (
+                self.actions.len().saturating_add(self.carried.len()) as u64,
+                self.records,
+                self.bytes,
+            ),
+            |peers| (peers.action_steps, peers.fixed_records, peers.fixed_bytes),
+        );
         budget.admit_owned_candidate(
-            self.actions.len().saturating_add(self.carried.len()) as u64,
-            self.records.saturating_add(plan.steps.len() as u64),
-            self.bytes
+            actions,
+            records.saturating_add(plan.steps.len() as u64),
+            bytes
                 .saturating_add(plan_bytes)
                 .saturating_add(project_bytes),
             context,
         )?;
+        if peers.is_some() {
+            budget.inspect_owned_source(adapter.snapshot(), context)?;
+        }
         // The existing engine snapshots a committed private world. Account for
         // this first clone and its second model clone under one shared meter.
         budget.before_fork(adapter.snapshot(), context)?;
         let mut fork = adapter.clone();
         let result = self.forecast_committed(
-            adapter, &mut fork, project, plan, context, reserve, started, budget,
+            adapter, &mut fork, project, plan, context, reserve, started, budget, peers,
         );
         budget.check(context)?;
         match result {
@@ -344,12 +407,18 @@ impl OwnedWork {
                 ) =>
             {
                 match project {
-                    Some(source) => self.project_unavailable(
-                        &error,
-                        source,
-                        adapter.snapshot(),
-                        vec![stage_cost(source, plan, 1)],
-                    ),
+                    Some(source) => {
+                        let mut value = self.project_unavailable(
+                            &error,
+                            source,
+                            adapter.snapshot(),
+                            vec![stage_cost(source, plan, 1)],
+                        )?;
+                        if let Some(peers) = peers {
+                            portfolio::unavailable(&mut value, peers, &BTreeMap::new())?;
+                        }
+                        Ok(value)
+                    }
                     None => Ok(json!({"epistemic_state":"predicted", "available":false,
                         "progression_scope":"owned_session", "competing_work":self.describe(),
                         "reason":{"code":error.code.as_str(),"message":error.message}})),
@@ -387,6 +456,7 @@ impl OwnedWork {
         reserve: Option<u64>,
         started: Instant,
         budget: &mut ForecastBudget,
+        peers: Option<&AdmittedProjectSet<'_>>,
     ) -> Result<Value> {
         if reserve.is_some_and(|tick| {
             tick <= context.anchor.tick.0
@@ -437,7 +507,14 @@ impl OwnedWork {
         let mut meter = Meter {
             budget,
             current: context,
+            started,
+            candidate: plan.digest,
             project,
+            peers,
+            peer_stages: BTreeMap::new(),
+            peer_goal_nodes: 0,
+            initial_recovered_observed: false,
+            recovered_at_candidate_commit: 0,
             admitted_stages: project
                 .map_or_else(Vec::new, |source| vec![stage_cost(source, plan, 1)]),
             goal_nodes: nodes(
@@ -470,7 +547,13 @@ impl OwnedWork {
         // Real commit publication refreshes recovered monitors at this same
         // tick. Preserve that transition before any candidate-complete shortcut.
         let polls = self.carried.iter().filter(|row| !row.is_final()).count() as u64;
-        let mut carried = if polls > 0 {
+        let mut carried = if peers.is_some() {
+            // The engine first admits these authentic active monitors, then
+            // performs the same-tick candidate observation before any goal
+            // shortcut. Selected recovered proof must remain available even
+            // when that first observation verifies it.
+            self.carried.clone()
+        } else if polls > 0 {
             let modeled = OperationContext {
                 anchor: fork.snapshot().anchor(),
                 ..context.clone()
@@ -493,7 +576,9 @@ impl OwnedWork {
             ));
         }
         let finished_at_commit = carried.iter().filter(|row| row.is_final()).count();
-        carried.retain(|row| !row.is_final());
+        if peers.is_none() {
+            carried.retain(|row| !row.is_final());
+        }
         let original = model::Original {
             requested: plan.digest,
             actual: plan.digest,
@@ -502,34 +587,47 @@ impl OwnedWork {
             reserve_observation: None,
             can_continue: project.is_some(),
         };
+        let mut originals = vec![original];
+        if let Some(peers) = peers {
+            originals.extend(peers.originals.iter().cloned());
+        }
         let modeled = OperationContext {
             anchor: fork.snapshot().anchor(),
             ..context.clone()
         };
         let evaluate = |digest: Digest32, snapshot: &WorldSnapshot| {
-            if digest != plan.digest {
-                return Err(invalid("candidate goal changed during private progression"));
+            if digest == plan.digest {
+                let truth = crate::lab_world::plan_goal_truth(snapshot, plan)?;
+                Ok((truth, truth))
+            } else {
+                peers
+                    .ok_or_else(|| invalid("candidate goal changed during private progression"))?
+                    .evaluate(digest, snapshot)
             }
-            let truth = crate::lab_world::plan_goal_truth(snapshot, plan)?;
-            Ok((truth, truth))
         };
         let prediction = match model_project {
-            Some(project) => model::forecast_project_metered(
-                fork,
-                &[original],
-                &tracked,
-                &modeled,
-                meter.budget.horizon_ticks(),
-                started,
-                vec![project],
-                carried,
-                |_, _, _| Ok(()),
-                evaluate,
-                &mut meter,
-            ),
+            Some(project) => {
+                let mut projects = vec![project];
+                if let Some(peers) = peers {
+                    projects.extend(peers.projects.iter().cloned());
+                }
+                model::forecast_project_metered(
+                    fork,
+                    &originals,
+                    &tracked,
+                    &modeled,
+                    meter.budget.horizon_ticks(),
+                    started,
+                    projects,
+                    carried,
+                    |_, _, _| Ok(()),
+                    evaluate,
+                    &mut meter,
+                )
+            }
             None => model::forecast_current_stage_metered(
                 fork,
-                &[original],
+                &originals,
                 &tracked,
                 &modeled,
                 meter.budget.horizon_ticks(),
@@ -552,19 +650,24 @@ impl OwnedWork {
             {
                 let source =
                     project.ok_or_else(|| invalid("complete candidate source disappeared"))?;
-                return self.project_unavailable(
+                let mut value = self.project_unavailable(
                     &error,
                     source,
                     adapter.snapshot(),
                     meter.admitted_stages,
-                );
+                )?;
+                if let Some(peers) = peers {
+                    portfolio::unavailable(&mut value, peers, &meter.peer_stages)?;
+                }
+                return Ok(value);
             }
             Err(error) => return Err(error),
         };
         let row = prediction["originals"]
             .as_array()
-            .filter(|rows| rows.len() == 1)
+            .filter(|rows| rows.len() == 1 + peers.map_or(0, |peers| peers.originals.len()))
             .and_then(|rows| rows.first())
+            .filter(|row| row["actual_plan_digest"] == plan.digest.to_hex())
             .ok_or_else(|| invalid("shared candidate model omitted its exact selected outcome"))?;
         let tick = prediction["predicted_frontier_tick"]
             .as_u64()
@@ -609,7 +712,9 @@ impl OwnedWork {
             "sampling_policy":"real foreground cadence with exact candidate reserve endpoint and original live/recovered deadlines",
             "competing_work":self.describe(),
             "shared_progression_work":prediction["forecast_work"],
-            "recovered_peers_finished_at_candidate_commit":finished_at_commit,
+            "recovered_peers_finished_at_candidate_commit":if peers.is_some() {
+                meter.recovered_at_candidate_commit
+            } else { finished_at_commit },
             "recovered_commit_observation_polls":polls,
             "simulation_slices":prediction["forecast_work"]["simulation_slices"],
             "effect_evidence":false, "actual_game_ticks_advanced":0,
@@ -630,6 +735,9 @@ impl OwnedWork {
             value["simulation_horizon_truncated"] =
                 json!(prediction["stop_reason"] == "horizon_reached");
             value["stop_reason"] = prediction["stop_reason"].clone();
+        }
+        if let Some(peers) = peers {
+            portfolio::decorate(&mut value, &prediction, peers)?;
         }
         Ok(value)
     }
@@ -746,24 +854,49 @@ fn decorate_project_stages(
     Ok(())
 }
 
-struct Meter<'a> {
+struct Meter<'a, 'session> {
     budget: &'a mut ForecastBudget,
     current: &'a OperationContext,
+    started: Instant,
+    candidate: Digest32,
     project: Option<&'a ProjectSource>,
+    peers: Option<&'a AdmittedProjectSet<'session>>,
+    peer_stages: BTreeMap<Digest32, Vec<Value>>,
+    peer_goal_nodes: u64,
+    initial_recovered_observed: bool,
+    recovered_at_candidate_commit: usize,
     admitted_stages: Vec<Value>,
     goal_nodes: u64,
     candidate_ticks: BTreeMap<ActionId, Option<u64>>,
 }
 
-impl ForecastMeter for Meter<'_> {
+impl ForecastMeter for Meter<'_, '_> {
     fn before_fork(&mut self, snapshot: &WorldSnapshot) -> Result<()> {
         self.budget.before_fork(snapshot, self.current)
     }
     fn inspect_source(&mut self, snapshot: &WorldSnapshot) -> Result<()> {
+        if let Some(peers) = self.peers {
+            peers.inspect_structure(snapshot, self.current, self.started)?;
+        }
         self.budget.inspect_owned_source(snapshot, self.current)
     }
-    fn before_goal_evaluation(&mut self) -> Result<()> {
-        self.budget.before_predicates(self.goal_nodes, self.current)
+    fn before_original_goal_evaluation(&mut self, original: Digest32) -> Result<()> {
+        let nodes = if original == self.candidate {
+            self.goal_nodes
+        } else {
+            let peers = self
+                .peers
+                .filter(|peers| peers.originals.iter().any(|peer| peer.actual == original))
+                .ok_or_else(|| invalid("portfolio goal escaped its admitted original set"))?;
+            peers
+                .predicate_node_bound
+                .saturating_add(peers.recovered_predicate_node_bound)
+                .saturating_add(self.peer_goal_nodes)
+        };
+        self.budget.before_predicates(nodes, self.current)
+    }
+    fn observe_recovered_before_goals(&self) -> bool {
+        self.peers.is_some()
     }
     fn before_round(&mut self, ticks: u64) -> Result<()> {
         self.budget.before_advance(ticks, self.current)
@@ -783,39 +916,103 @@ impl ForecastMeter for Meter<'_> {
             *tick = Some(receipt.observed_anchor.tick.0);
         }
     }
-    fn before_project_stage(
+    fn before_original_project_stage(
         &mut self,
+        original: Digest32,
         snapshot: &WorldSnapshot,
         plan: &PreparedPlan,
         archive_bytes: u64,
     ) -> Result<()> {
-        self.budget
-            .admit_owned_project_stage(snapshot, plan, archive_bytes, self.current)?;
+        if self.peers.is_some() {
+            self.budget.admit_owned_portfolio_stage(
+                original,
+                snapshot,
+                plan,
+                archive_bytes,
+                self.current,
+            )?;
+        } else {
+            if original != self.candidate {
+                return Err(invalid("candidate successor changed its original identity"));
+            }
+            self.budget
+                .admit_owned_project_stage(snapshot, plan, archive_bytes, self.current)?;
+        }
         let nodes = plan.steps.iter().try_fold(0u64, |total, step| {
             step_nodes(step).map(|nodes| total.saturating_add(nodes))
         })?;
         self.budget
             .before_predicates(nodes.saturating_mul(2), self.current)?;
-        self.goal_nodes = self.goal_nodes.saturating_add(nodes);
-        let source = self
-            .project
-            .ok_or_else(|| invalid("candidate successor lacks its project source"))?;
-        self.admitted_stages
-            .push(stage_cost(source, plan, self.admitted_stages.len() + 1));
+        if original == self.candidate {
+            self.goal_nodes = self.goal_nodes.saturating_add(nodes);
+            let source = self
+                .project
+                .ok_or_else(|| invalid("candidate successor lacks its project source"))?;
+            self.admitted_stages
+                .push(stage_cost(source, plan, self.admitted_stages.len() + 1));
+        } else {
+            let project = self
+                .peers
+                .and_then(|peers| {
+                    peers
+                        .projects
+                        .iter()
+                        .find(|project| project.original == original)
+                })
+                .ok_or_else(|| invalid("selected peer successor lost its typed source"))?;
+            self.peer_goal_nodes = self.peer_goal_nodes.saturating_add(nodes);
+            let stages = self.peer_stages.entry(original).or_default();
+            let mut stage = stage_cost(
+                project.source(),
+                plan,
+                project.committed_stage_count() + stages.len() + 1,
+            );
+            stage["root_plan_digest"] = json!(original.to_hex());
+            stages.push(stage);
+        }
         Ok(())
     }
-    fn after_project_commit(&mut self, actions: &[ActionReceipt]) {
-        for action in actions {
-            self.candidate_ticks.insert(
-                action.action_id,
-                action
-                    .state
-                    .is_terminal()
-                    .then_some(action.observed_anchor.tick.0),
-            );
+    fn after_original_project_commit(
+        &mut self,
+        original: Digest32,
+        actions: &[ActionReceipt],
+    ) -> Result<()> {
+        if original != self.candidate {
+            if self
+                .peers
+                .is_none_or(|peers| !peers.originals.iter().any(|peer| peer.actual == original))
+            {
+                return Err(invalid(
+                    "modeled peer commit escaped its admitted original set",
+                ));
+            }
+            return Ok(());
         }
+        for action in actions {
+            if self
+                .candidate_ticks
+                .insert(
+                    action.action_id,
+                    action
+                        .state
+                        .is_terminal()
+                        .then_some(action.observed_anchor.tick.0),
+                )
+                .is_some()
+            {
+                return Err(invalid(
+                    "candidate successor reused an admitted action identity",
+                ));
+            }
+        }
+        Ok(())
     }
     fn after_project_observation(&mut self, carried: &[CarriedStep]) -> Result<()> {
+        if self.peers.is_some() && !self.initial_recovered_observed {
+            self.recovered_at_candidate_commit =
+                carried.iter().filter(|row| row.is_final()).count();
+            self.initial_recovered_observed = true;
+        }
         if carried
             .iter()
             .any(|row| row.state == "failed" || row.observation_error.is_some())
@@ -838,3 +1035,7 @@ impl ForecastMeter for Meter<'_> {
 #[cfg(test)]
 #[path = "owned_candidate_forecast_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "owned_candidate_portfolio_tests.rs"]
+mod portfolio_tests;

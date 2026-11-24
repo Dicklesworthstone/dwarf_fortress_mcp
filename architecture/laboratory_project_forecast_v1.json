@@ -122,5 +122,38 @@
     ],
     "schema_test": "scripts/test_lab_plan_comparison_schema.py",
     "execution_status": "see IMPLEMENTATION_STATUS.md; test source is not an execution or full-qualification claim"
+  },
+  "selected_portfolio_comparison": {
+    "version": 5,
+    "response_schema": "dfmcp.plan-comparison/5",
+    "forecast_scope": "complete_project",
+    "progression_scope": "owned_session",
+    "competing_plan_digests": {
+      "minimum": 1,
+      "maximum": 7,
+      "identity": "canonical_lowercase_64_hex_committed_ordinary_original_roots",
+      "duplicates": "reject",
+      "order": "canonical_digest",
+      "legacy_versions": "field_rejected_including_null_or_empty"
+    },
+    "admission": "shared_exact_original_query_custody_with_live_or_verified_recovered_retained_chains",
+    "future_stages": "candidate_and_explicitly_selected_peer_projects_only",
+    "unselected_owned_work": "current_committed_actions_and_authentic_recovered_monitors",
+    "hypothetical_successors_per_root": 3,
+    "tracked_model_source_forks_across_candidates": 8,
+    "shared_work_budget": "complete_current_world_and_fixed_custody_plus_all_future_archives_actions_predicates_polls_ticks_and_one_original_wall_deadline",
+    "candidate_outcomes": "existing_predicted_and_project_fields_remain_separate",
+    "peer_outcomes": "full_requested_actual_root_source_retained_future_stage_and_exact_reserve_evidence",
+    "complete_evidence": "all_roots_and_each_retained_reserve_known_individually_false_does_not_mask_unknown",
+    "recommendation_requires": "all_selected_projects_complete_at_one_common_frontier",
+    "cost_scope": "candidate_and_hypothetical_peer_stages",
+    "committed_peer_history": "admitted_source_and_workload_not_new_marginal_review_cost",
+    "selection": "version_1_current_candidate_stage_only",
+    "canonical_effects": false,
+    "proof_publication": false,
+    "automatic_continuation": false,
+    "recovered_dispatch_restoration": false,
+    "output": "whole_packet_or_refusal_before_pending_change",
+    "compatibility": "versions_1_through_4_accepted_behavior_preserved"
   }
 }

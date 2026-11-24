@@ -66,8 +66,23 @@ fn candidate_failure(
     Ok(())
 }
 
-fn project_cost(prediction: &Value) -> Result<(RiskTier, bool, u64)> {
-    let risk = match prediction["project_max_risk"].as_str() {
+fn project_cost(prediction: &Value, portfolio: bool) -> Result<(RiskTier, bool, u64)> {
+    let (risk, checkpoint, actions, capabilities) = if portfolio {
+        (
+            &prediction["portfolio_max_risk"],
+            &prediction["portfolio_requires_checkpoint"],
+            &prediction["portfolio_action_count"],
+            &prediction["portfolio_required_capabilities"],
+        )
+    } else {
+        (
+            &prediction["project_max_risk"],
+            &prediction["project_requires_checkpoint"],
+            &prediction["project_action_count"],
+            &prediction["project_required_capabilities"],
+        )
+    };
+    let risk = match risk.as_str() {
         Some("read_only") => RiskTier::ReadOnly,
         Some("reversible") => RiskTier::Reversible,
         Some("guarded") => RiskTier::Guarded,
@@ -78,13 +93,13 @@ fn project_cost(prediction: &Value) -> Result<(RiskTier, bool, u64)> {
             ));
         }
     };
-    let checkpoint = prediction["project_requires_checkpoint"]
+    let checkpoint = checkpoint
         .as_bool()
         .ok_or_else(|| invariant("available project forecast omitted its checkpoint burden"))?;
-    let actions = prediction["project_action_count"]
+    let actions = actions
         .as_u64()
         .ok_or_else(|| invariant("available project forecast omitted its complete action count"))?;
-    if !prediction["project_required_capabilities"]
+    if !capabilities
         .as_array()
         .is_some_and(|values| values.iter().all(Value::is_string))
     {
@@ -108,19 +123,36 @@ pub(super) fn compare(
     comparison: &Comparison,
     started: Instant,
     owned: Option<&owned_progression::OwnedWork>,
+    peers: Option<&super::super::original_forecast::AdmittedProjectSet<'_>>,
 ) -> Result<Value> {
     let snapshot = adapter.snapshot();
+    let portfolio = peers.is_some();
+    if portfolio != comparison.competing_plan_digests.is_some() || (portfolio && owned.is_none()) {
+        return Err(invalid(
+            "complete portfolio comparison lost its admitted peer selection",
+        ));
+    }
     authorize(snapshot, context)?;
     check_wall(context, started)?;
     let mut budget = ForecastBudget::new_project(context, started, comparison.horizon_ticks)?;
     let source_work = budget.admit_source(snapshot, context)?;
     let mut candidates: Vec<_> = comparison.candidates.iter().collect();
     candidates.sort_by(|left, right| left.key.cmp(&right.key));
-    let identity = json!({
+    let mut identity = json!({
         "schema":"dfmcp.lab-project-comparison-fork/1",
         "anchor":super::super::anchor_json(&snapshot.anchor()),
         "candidates":candidates,
     });
+    if let Some(peers) = peers {
+        identity["schema"] = json!("dfmcp.lab-project-portfolio-comparison-fork/1");
+        identity["competing_plan_digests"] = json!(
+            peers
+                .requested_digests()
+                .iter()
+                .map(|digest| digest.to_hex())
+                .collect::<Vec<_>>()
+        );
+    }
     let intent_id = IntentId::new(
         Digest32::of_bytes(identity.to_string().as_bytes())
             .first_u128()
@@ -196,7 +228,18 @@ pub(super) fn compare(
     let mut evidence_complete = rows.is_empty();
     for (source, plan) in prepared {
         check_wall(context, started)?;
-        let prediction = if let Some(owned) = owned {
+        let prediction = if let (Some(owned), Some(peers)) = (owned, peers) {
+            owned.forecast_project_with_peers(
+                adapter,
+                &source.project,
+                &plan,
+                context,
+                source.reserve_until,
+                started,
+                &mut budget,
+                peers,
+            )?
+        } else if let Some(owned) = owned {
             owned.forecast_project(
                 adapter,
                 &source.project,
@@ -223,15 +266,26 @@ pub(super) fn compare(
             prediction["predicted_goal_truth"].as_str(),
             Some("true" | "false")
         );
-        evidence_complete &= available && known_goal && reserve_known;
+        evidence_complete &= available
+            && known_goal
+            && reserve_known
+            && (!portfolio || prediction["portfolio_evidence_complete"] == true);
         if available {
-            let (risk, checkpoint, actions) = project_cost(&prediction)?;
-            if prediction["predicted_complete"] == true && reserve_complete {
-                let completion_tick = prediction["predicted_completion_tick"]
-                    .as_u64()
-                    .ok_or_else(|| {
-                        invariant("complete project forecast omitted its completion tick")
-                    })?;
+            let (risk, checkpoint, actions) = project_cost(&prediction, portfolio)?;
+            let complete = if portfolio {
+                prediction["predicted_portfolio_complete"] == true
+            } else {
+                prediction["predicted_complete"] == true
+            };
+            if complete && reserve_complete {
+                let completion = if portfolio {
+                    &prediction["portfolio_completion_tick"]
+                } else {
+                    &prediction["predicted_completion_tick"]
+                };
+                let completion_tick = completion.as_u64().ok_or_else(|| {
+                    invariant("complete project forecast omitted its completion tick")
+                })?;
                 ranking.push((
                     risk,
                     checkpoint,
@@ -244,6 +298,21 @@ pub(super) fn compare(
         // Preserve the complete staged forecast. The common publisher either
         // publishes every decision-bearing field or refuses before any state
         // change; a compact current-stage projection would hide the new work.
+        let (risk_field, checkpoint_field, actions_field, capabilities_field) = if portfolio {
+            (
+                "portfolio_max_risk",
+                "portfolio_requires_checkpoint",
+                "portfolio_action_count",
+                "portfolio_required_capabilities",
+            )
+        } else {
+            (
+                "project_max_risk",
+                "project_requires_checkpoint",
+                "project_action_count",
+                "project_required_capabilities",
+            )
+        };
         rows.push(json!({
             "key":source.candidate.key,
             "status":if available { "evaluated" } else { "unavailable" },
@@ -252,11 +321,15 @@ pub(super) fn compare(
             "summary":plan.summary,
             "goal_scope":"complete_original_project",
             "forecast_scope":"complete_project",
-            "max_risk":prediction["project_max_risk"],
-            "requires_checkpoint":prediction["project_requires_checkpoint"],
-            "action_count":prediction["project_action_count"],
-            "required_capabilities":prediction["project_required_capabilities"],
-            "cost_scope":"all_simulated_project_stages",
+            "max_risk":prediction[risk_field],
+            "requires_checkpoint":prediction[checkpoint_field],
+            "action_count":prediction[actions_field],
+            "required_capabilities":prediction[capabilities_field],
+            "cost_scope":if portfolio {
+                "candidate_and_hypothetical_peer_stages"
+            } else {
+                "all_simulated_project_stages"
+            },
             "current_stage":{
                 "action_count":plan.steps.len(),
                 "max_risk":plan.max_risk.as_str(),
@@ -274,7 +347,13 @@ pub(super) fn compare(
     let recommendation = evidence_complete
         .then(|| ranking.first().map(|row| row.4.clone()))
         .flatten();
-    let reason = if !evidence_complete {
+    let reason = if portfolio && !evidence_complete {
+        "at least one candidate or selected peer lacks comparable known goal or exact reserve evidence; no portfolio recommendation is justified"
+    } else if portfolio && recommendation.is_none() {
+        "no alternative predicts all selected original goals, verified stages and physical quiescence together within the common horizon"
+    } else if portfolio {
+        "among complete selected portfolios, minimize new-stage aggregate risk, checkpoint burden, joint completion tick, new action count, then lexical candidate key"
+    } else if !evidence_complete {
         "at least one project lacks a complete comparable prediction or requested reserve frontier; no recommendation is justified"
     } else if recommendation.is_none() {
         "no project predicts its complete original goal, verified stage actions and physical quiescence within the common horizon"
@@ -323,6 +402,30 @@ pub(super) fn compare(
             json!("same_original_project_with_owned_session_progression_on_discarded_forks");
         result["assumptions"] = json!(
             "every authenticated current-session open action progresses in retained commit order; unfinished recovered peers keep their original cadence; each candidate's next stage is compiled only from a quiet verified fork and reviewed without delay; other originals' future stages and other sessions' deferred dispatch are excluded; actual future stages still require separate current review and commit"
+        );
+    }
+    if let Some(peers) = peers {
+        result["schema"] = json!("dfmcp.plan-comparison/5");
+        result["version"] = json!(5);
+        result["competing_plan_digests"] = json!(
+            peers
+                .requested_digests()
+                .iter()
+                .map(|digest| digest.to_hex())
+                .collect::<Vec<_>>()
+        );
+        result["selected_peer_projects"] = peers.describe();
+        result["owned_work"]["peer_original_goals_selected"] = json!(true);
+        result["recommendation_scope"] = json!("complete_selected_portfolio");
+        result["recommendation"]["policy"] = json!(
+            "complete_selected_portfolios_then_new_risk_checkpoint_joint_completion_tick_new_action_count_key_v1"
+        );
+        result["method"] = json!("same_candidate_goal_with_selected_complete_peer_projects");
+        result["assumptions"] = json!(
+            "the candidate and each explicitly selected committed project review future stages without delay after verified quiet predecessors; all current-session work shares finite resources and authentic recovered cadence; unselected originals contribute committed stages only; other sessions' deferred dispatch is excluded; actual future stages still require separate current review and commit"
+        );
+        result["note"] = json!(
+            "recommendations require the whole selected portfolio to complete; selection prepares only the current candidate stage, and every real peer or candidate continuation still requires ordinary review and Commit"
         );
     }
     Ok(result)

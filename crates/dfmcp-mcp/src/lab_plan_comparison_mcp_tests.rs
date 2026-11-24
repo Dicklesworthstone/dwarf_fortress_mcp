@@ -1349,7 +1349,10 @@ fn public_owned_project_selection_requires_separate_production_review() -> TestR
         assert_eq!(prediction["stages"].as_array().map(Vec::len), Some(2));
         assert_eq!(prediction["stages"][0]["stage"], "acquire_resources");
         assert_eq!(prediction["stages"][1]["stage"], "production");
-        assert_eq!(prediction["shared_progression_work"]["deferred_dispatches"], 2);
+        assert_eq!(
+            prediction["shared_progression_work"]["deferred_dispatches"],
+            2
+        );
         assert_eq!(row["action_count"], prediction["project_action_count"]);
         assert_eq!(row["max_risk"], prediction["project_max_risk"]);
         assert!(
@@ -1415,12 +1418,18 @@ fn public_owned_project_selection_requires_separate_production_review() -> TestR
         .to_string(),
     )?;
     assert_eq!(next["ok"], true, "{next}");
-    assert_eq!(next["production"]["resource_workflow"]["stage"], "production");
+    assert_eq!(
+        next["production"]["resource_workflow"]["stage"],
+        "production"
+    );
     assert_eq!(
         next["production"]["resource_workflow"]["original_request"]["quotas"],
         json!([{"item":"BED","minimum":24}])
     );
-    assert_eq!(next["production"]["continuation"]["parent_plan_digest"], first);
+    assert_eq!(
+        next["production"]["continuation"]["parent_plan_digest"],
+        first
+    );
     let next_commit = parsed(&crate::agent_facade::fortress_commit(
         Some(owner.id.clone()),
         text_field(&next, "plan_digest")?,
@@ -1439,5 +1448,258 @@ fn public_owned_project_selection_requires_separate_production_review() -> TestR
         .ok_or("production continuation objective missing")?;
     assert_eq!(goal["predicate_truth"], "true", "{goal}");
     assert_eq!(goal["status"], "achieved", "{goal}");
+    Ok(())
+}
+
+fn portfolio_request(peer: &str) -> Value {
+    let mut request = owned_project_request();
+    request["version"] = json!(5);
+    request["competing_plan_digests"] = json!([peer]);
+    for candidate in request["candidates"]
+        .as_array_mut()
+        .expect("candidate fixture")
+    {
+        candidate["blueprint"]["quotas"] = json!([{"item":"BED","minimum":4}]);
+    }
+    request
+}
+
+fn commit_portfolio_peer(owner: &Owner) -> TestResult<String> {
+    let planned = plan_blueprint(
+        owner,
+        &json!({
+            "template":"production", "quotas":[{"item":"BED","minimum":24}],
+            "acquire_resources":{"assign_labor":false},
+        })
+        .to_string(),
+    )?;
+    assert_eq!(planned["ok"], true, "{planned}");
+    assert_eq!(
+        planned["production"]["resource_workflow"]["stage"],
+        "acquire_resources"
+    );
+    let digest = text_field(&planned, "plan_digest")?;
+    let committed = parsed(&crate::agent_facade::fortress_commit(
+        Some(owner.id.clone()),
+        digest.clone(),
+    ))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    Ok(digest)
+}
+
+#[test]
+fn public_portfolio_compares_complete_peer_work_and_commits_each_real_stage_separately()
+-> TestResult {
+    let _serial = crate::test_serial();
+    let owner = open_project_resources()?;
+    output_budget(&owner, 65_536)?;
+    let peer = commit_portfolio_peer(&owner)?;
+    let previous = text_field(&pause_plan(&owner)?, "plan_digest")?;
+    let before = comparison_state(&owner)?;
+    let initial = snapshot(&owner)?;
+    let request = portfolio_request(&peer);
+    let report = plan_blueprint(&owner, &request.to_string())?;
+    assert_eq!(report["ok"], true, "{report}");
+    assert_eq!(report["schema"], "dfmcp.plan-comparison/5");
+    assert_eq!(report["version"], 5);
+    assert_eq!(report["competing_plan_digests"], json!([peer.clone()]));
+    assert_eq!(report["owned_work"]["peer_original_goals_selected"], true);
+    assert_eq!(
+        report["recommendation_scope"],
+        "complete_selected_portfolio"
+    );
+    assert_eq!(report["selection_scope"], "current_reviewed_stage_only");
+    assert_eq!(report["effect_evidence"], false);
+    assert_eq!(report["automatic_continuation"], false);
+    assert_eq!(report["pending_plan_changed"], false);
+    assert_eq!(report["forecast_work"]["actual_game_ticks_advanced"], 0);
+    assert!(report["recommended_candidate"].is_string(), "{report}");
+    for key in ["alpha", "staffed"] {
+        let row = candidate(&report, key)?;
+        let prediction = &row["prediction"];
+        assert_eq!(prediction["predicted_complete"], true, "{prediction}");
+        assert_eq!(
+            prediction["predicted_portfolio_complete"], true,
+            "{prediction}"
+        );
+        assert_eq!(
+            prediction["portfolio_evidence_complete"], true,
+            "{prediction}"
+        );
+        assert_eq!(prediction["portfolio_goal_truth"], "true");
+        assert_eq!(row["cost_scope"], "candidate_and_hypothetical_peer_stages");
+        assert_eq!(row["action_count"], prediction["portfolio_action_count"]);
+        assert_eq!(row["max_risk"], prediction["portfolio_max_risk"]);
+        assert!(
+            prediction["portfolio_action_count"]
+                .as_u64()
+                .ok_or("portfolio cost missing")?
+                > prediction["project_action_count"]
+                    .as_u64()
+                    .ok_or("candidate cost missing")?,
+            "the selected peer's hypothetical production must join decision costs: {prediction}",
+        );
+        assert!(
+            prediction["portfolio_completion_tick"]
+                .as_u64()
+                .ok_or("joint frontier missing")?
+                >= prediction["predicted_completion_tick"]
+                    .as_u64()
+                    .ok_or("candidate frontier missing")?,
+        );
+        let peers = prediction["peer_projects"]
+            .as_array()
+            .ok_or("peer outcomes missing")?;
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0]["requested_plan_digest"], peer);
+        assert_eq!(peers[0]["actual_plan_digest"], peer);
+        assert_eq!(peers[0]["predicted_complete"], true, "{}", peers[0]);
+        assert!(
+            peers[0]["future_stages"]
+                .as_array()
+                .is_some_and(|stages| !stages.is_empty())
+        );
+    }
+    assert_eq!(comparison_state(&owner)?, before);
+    assert_eq!(pending_digest(&owner)?.as_deref(), Some(previous.as_str()));
+    assert_eq!(snapshot(&owner)?, initial);
+
+    output_budget(&owner, 1)?;
+    refusal(
+        &plan_blueprint(&owner, &request.to_string())?,
+        "budget_exceeded",
+    );
+    assert_eq!(comparison_state(&owner)?, before);
+    output_budget(&owner, 65_536)?;
+
+    let selected_request = selection(&report, "alpha")?;
+    let selected_json = parsed(&selected_request)?;
+    assert_eq!(selected_json["version"], 1);
+    assert!(selected_json.get("competing_plan_digests").is_none());
+    let selected = plan_blueprint(&owner, &selected_request)?;
+    assert_eq!(selected["ok"], true, "{selected}");
+    assert_eq!(
+        selected["production"]["resource_workflow"]["stage"],
+        "production"
+    );
+    assert_eq!(snapshot(&owner)?, initial);
+    let candidate_digest = text_field(&selected, "plan_digest")?;
+    let committed = parsed(&crate::agent_facade::fortress_commit(
+        Some(owner.id.clone()),
+        candidate_digest.clone(),
+    ))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    let candidate_done = parsed(&crate::agent_facade::fortress_wait_for_plan(
+        Some(owner.id.clone()),
+        Some(2_000),
+        Some(candidate_digest.clone()),
+    ))?;
+    assert_eq!(candidate_done["ok"], true, "{candidate_done}");
+    assert!(pending_digest(&owner)?.is_none());
+    let handle = resolve_session(Some(owner.id.clone()))?;
+    with_session_read(
+        &handle,
+        |error| Err(error.into()),
+        |session| -> TestResult {
+            assert_eq!(
+                session.objectives.len(),
+                2,
+                "a prediction cannot install any peer successor"
+            );
+            Ok(())
+        },
+    )?;
+
+    // Settle the real first peer stage, then explicitly review and commit the
+    // production that existed only in the portfolio model until this point.
+    let peer_ready = parsed(&crate::agent_facade::fortress_wait_for_plan(
+        Some(owner.id.clone()),
+        Some(2_000),
+        Some(peer.clone()),
+    ))?;
+    assert_eq!(peer_ready["ok"], true, "{peer_ready}");
+    let continued = plan_blueprint(
+        &owner,
+        &json!({
+            "template":"continue_goal", "plan_digest":peer.clone(),
+        })
+        .to_string(),
+    )?;
+    assert_eq!(continued["ok"], true, "{continued}");
+    assert_eq!(
+        continued["production"]["resource_workflow"]["stage"],
+        "production"
+    );
+    assert_eq!(
+        continued["production"]["resource_workflow"]["original_request"]["quotas"],
+        json!([{"item":"BED","minimum":24}]),
+    );
+    assert_eq!(
+        continued["production"]["continuation"]["parent_plan_digest"],
+        peer
+    );
+    let continuation = text_field(&continued, "plan_digest")?;
+    let committed = parsed(&crate::agent_facade::fortress_commit(
+        Some(owner.id.clone()),
+        continuation.clone(),
+    ))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    let complete = parsed(&crate::agent_facade::fortress_wait_for_plan(
+        Some(owner.id.clone()),
+        Some(5_000),
+        Some(continuation.clone()),
+    ))?;
+    assert_eq!(complete["ok"], true, "{complete}");
+    let observed = parsed(&crate::agent_facade::fortress_observe(Some(
+        owner.id.clone(),
+    )))?;
+    assert_eq!(observed["ok"], true, "{observed}");
+    for digest in [&candidate_digest, &continuation] {
+        let goal = observed["objectives"]
+            .as_array()
+            .and_then(|rows| {
+                rows.iter()
+                    .find(|goal| goal["plan_digest"] == digest.as_str())
+            })
+            .ok_or("completed original goal missing")?;
+        assert_eq!(goal["predicate_truth"], "true", "{goal}");
+        assert_eq!(goal["status"], "achieved", "{goal}");
+    }
+    Ok(())
+}
+
+#[test]
+fn public_portfolio_refuses_unknown_peers_and_lost_query_authority_without_fallback() -> TestResult
+{
+    let _serial = crate::test_serial();
+    for missing_authority in [false, true] {
+        let owner = open_project_resources()?;
+        output_budget(&owner, 65_536)?;
+        let peer = commit_portfolio_peer(&owner)?;
+        let pending = text_field(&pause_plan(&owner)?, "plan_digest")?;
+        let before = comparison_state(&owner)?;
+        let mut request = portfolio_request(&peer);
+        if missing_authority {
+            let handle = resolve_session(Some(owner.id.clone()))?;
+            let mut session = handle.lock().map_err(|_| "session poisoned")?;
+            session
+                .grants
+                .retain(|grant| grant.capability != Capability::Query);
+        } else {
+            request["competing_plan_digests"] = json!(["ff".repeat(32)]);
+        }
+        let result = plan_blueprint(&owner, &request.to_string())?;
+        assert_eq!(result["ok"], false, "{result}");
+        if missing_authority {
+            assert_eq!(result["error"]["code"], "capability_denied", "{result}");
+        }
+        assert!(
+            result
+                .get("recommended_candidate")
+                .is_none_or(Value::is_null)
+        );
+        assert_eq!(comparison_state(&owner)?, before);
+        assert_eq!(pending_digest(&owner)?.as_deref(), Some(pending.as_str()));
+    }
     Ok(())
 }

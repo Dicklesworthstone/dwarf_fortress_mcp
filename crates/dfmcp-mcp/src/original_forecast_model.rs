@@ -51,6 +51,15 @@ pub(crate) trait ForecastMeter {
     fn before_goal_evaluation(&mut self) -> Result<()> {
         Ok(())
     }
+    fn before_original_goal_evaluation(&mut self, _original: Digest32) -> Result<()> {
+        self.before_goal_evaluation()
+    }
+    /// A newly committed candidate may affect a selected recovered original
+    /// immediately. Admit its authentic monitor first, then observe this one
+    /// private commit before an already-complete goal can short-circuit it.
+    fn observe_recovered_before_goals(&self) -> bool {
+        false
+    }
     fn before_round(&mut self, _ticks: u64) -> Result<()> {
         Ok(())
     }
@@ -67,7 +76,24 @@ pub(crate) trait ForecastMeter {
     ) -> Result<()> {
         Ok(())
     }
+    fn before_original_project_stage(
+        &mut self,
+        _original: Digest32,
+        snapshot: &WorldSnapshot,
+        plan: &dfmcp_intent::PreparedPlan,
+        archive_bytes: u64,
+    ) -> Result<()> {
+        self.before_project_stage(snapshot, plan, archive_bytes)
+    }
     fn after_project_commit(&mut self, _actions: &[dfmcp_adapter::ActionReceipt]) {}
+    fn after_original_project_commit(
+        &mut self,
+        _original: Digest32,
+        actions: &[dfmcp_adapter::ActionReceipt],
+    ) -> Result<()> {
+        self.after_project_commit(actions);
+        Ok(())
+    }
     fn after_project_observation(&mut self, _carried: &[CarriedStep]) -> Result<()> {
         Ok(())
     }
@@ -640,6 +666,19 @@ fn forecast_metered(
     let mut dispatches = 0u32;
     let mut first_poll = true;
     let mut pending = tracked.to_vec();
+    if meter.observe_recovered_before_goals() {
+        observe_recovered(
+            &fork,
+            &mut carried,
+            context,
+            started,
+            polls,
+            &mut recovered_polls,
+            &mut recovered_predicate_nodes,
+            meter,
+        )?;
+        meter.after_project_observation(&carried)?;
+    }
     let (outcomes, stop) = loop {
         check(context, started)?;
         let observation_context = OperationContext {
@@ -652,7 +691,7 @@ fn forecast_metered(
         }
         let mut outcomes = Vec::with_capacity(originals.len());
         for (index, original) in originals.iter().enumerate() {
-            meter.before_goal_evaluation()?;
+            meter.before_original_goal_evaluation(original.actual)?;
             let (mut goal, stage) = evaluate(original.actual, fork.snapshot())?;
             if let Some(projects) = &mut projects {
                 goal = projects[index].goal_truth(fork.snapshot())?;
@@ -764,10 +803,15 @@ fn forecast_metered(
                 &mut inspect,
                 meter,
             )?;
-            meter.before_project_stage(fork.snapshot(), &plan, archive.len() as u64)?;
+            meter.before_original_project_stage(
+                originals[index].actual,
+                fork.snapshot(),
+                &plan,
+                archive.len() as u64,
+            )?;
             let prepared = fork.prepare(&plan, &modeled_context)?;
             let receipt = fork.commit(&plan, &prepared, &modeled_context)?;
-            meter.after_project_commit(&receipt.actions);
+            meter.after_original_project_commit(originals[index].actual, &receipt.actions)?;
             let actions: Vec<_> = receipt
                 .actions
                 .into_iter()

@@ -65,17 +65,23 @@ impl Project {
     }
 
     pub(super) fn recovered_originals(&self) -> impl Iterator<Item = &RecoveredOriginal> {
-        self.recovered.iter().chain(self.retained.iter().filter_map(|stage| stage.recovered.as_ref()))
+        self.recovered.iter().chain(
+            self.retained
+                .iter()
+                .filter_map(|stage| stage.recovered.as_ref()),
+        )
     }
 
     pub(super) fn historical_recovered_retained_steps(&self) -> usize {
-        self.retained.iter().filter_map(|stage| stage.recovered.as_ref())
-            .map(RecoveredOriginal::historical_verified_steps).sum()
+        self.retained
+            .iter()
+            .filter_map(|stage| stage.recovered.as_ref())
+            .map(RecoveredOriginal::historical_verified_steps)
+            .sum()
     }
 
     pub(super) fn recovered_steps(&self) -> usize {
-        self.recovered.as_ref().map_or(0, RecoveredOriginal::len)
-            + self.recovered_retained_steps()
+        self.recovered.as_ref().map_or(0, RecoveredOriginal::len) + self.recovered_retained_steps()
     }
 
     pub(super) fn recovered_retained_steps(&self) -> usize {
@@ -102,7 +108,10 @@ impl Project {
         ) {
             recovered.validate_live_source(plan.anchor)?;
             if !recovered.initially_complete() {
-                return Err(error(ErrorCode::Conflict, "a committed successor cannot follow an unfinished recovered predecessor"));
+                return Err(error(
+                    ErrorCode::Conflict,
+                    "a committed successor cannot follow an unfinished recovered predecessor",
+                ));
             }
         }
         self.validate_stage(&plan, parent, &original)?;
@@ -144,10 +153,9 @@ impl Project {
                 .as_ref()
                 .is_none_or(|root| !root.shares_recovery(&recovered) || !root.initially_complete())
             || self.retained.iter().any(|stage| {
-                stage
-                    .recovered
-                    .as_ref()
-                    .is_none_or(|prior| !prior.shares_recovery(&recovered) || !prior.initially_complete())
+                stage.recovered.as_ref().is_none_or(|prior| {
+                    !prior.shares_recovery(&recovered) || !prior.initially_complete()
+                })
             })
         {
             return Err(error(
@@ -202,6 +210,16 @@ impl Project {
             ));
         }
         Ok(())
+    }
+
+    /// Immutable typed source for a containing portfolio's per-root accounting.
+    /// The returned request confers no authority to dispatch its future stages.
+    pub(crate) fn source(&self) -> &ProjectSource {
+        &self.source
+    }
+
+    pub(crate) fn committed_stage_count(&self) -> usize {
+        self.retained.len() + 1
     }
 
     pub(super) fn retained_actions(&self) -> impl Iterator<Item = ActionId> + '_ {
@@ -259,7 +277,9 @@ impl Project {
                     .is_some_and(|receipt| receipt.state == CommitState::Verified)
             });
         for recovered in self.recovered_originals() {
-            committed_verified &= recovered.rows(fork.snapshot(), carried)?.iter()
+            committed_verified &= recovered
+                .rows(fork.snapshot(), carried)?
+                .iter()
                 .all(|row| row.state == CommitState::Verified);
         }
         for stage in &self.stages {
@@ -364,7 +384,8 @@ impl Project {
             status.value["parent_plan_digest"] = json!(stage.parent.to_hex());
             status.value["source_anchor"] = super::super::super::anchor_json(&stage.plan.anchor);
             status.value["custody"] = json!(match &stage.recovered {
-                Some(recovered) if !recovered.initially_complete() => "recovered_observation_original",
+                Some(recovered) if !recovered.initially_complete() =>
+                    "recovered_observation_original",
                 Some(_) => "recovered_verified_original",
                 None => "already_committed_original",
             });

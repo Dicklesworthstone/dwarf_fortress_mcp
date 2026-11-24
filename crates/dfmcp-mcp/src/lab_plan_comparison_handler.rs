@@ -363,7 +363,22 @@ fn execute_owned(
     let mut selected = None;
     let payload = match request {
         plan_comparison::Request::Compare(_) => {
-            if plan_comparison::uses_owned_progression(request) {
+            if let Some(digests) = plan_comparison::competing_projects(request) {
+                let owned = plan_comparison::owned_progression::OwnedWork::admit(
+                    session, &current, started,
+                )?;
+                let peers = original_forecast::admit_complete_projects(
+                    session, digests, &current, started,
+                )?;
+                plan_comparison::compare_with_portfolio(
+                    &session.adapter,
+                    &current,
+                    request,
+                    started,
+                    &owned,
+                    &peers,
+                )?
+            } else if plan_comparison::uses_owned_progression(request) {
                 let owned = plan_comparison::owned_progression::OwnedWork::admit(
                     session, &current, started,
                 )?;

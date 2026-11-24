@@ -87,6 +87,7 @@ enum ForecastScope {
 pub(super) struct Comparison {
     scope: ForecastScope,
     owned_progression: bool,
+    competing_plan_digests: Option<Vec<Digest32>>,
     horizon_ticks: u64,
     candidates: Vec<Candidate>,
 }
@@ -114,6 +115,8 @@ enum Envelope {
         forecast_scope: Option<String>,
         #[serde(default, deserialize_with = "present")]
         progression_scope: Option<String>,
+        #[serde(default, deserialize_with = "present")]
+        competing_plan_digests: Option<Vec<String>>,
         horizon_ticks: u64,
         candidates: Vec<Candidate>,
     },
@@ -169,9 +172,45 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
             version,
             forecast_scope,
             progression_scope,
+            competing_plan_digests,
             horizon_ticks,
             candidates,
         } => {
+            let competing_plan_digests = match (version, competing_plan_digests) {
+                (5, Some(digests)) => {
+                    if !(1..=7).contains(&digests.len()) {
+                        return Err(invalid(
+                            "portfolio comparisons require one to seven committed peer projects",
+                        ));
+                    }
+                    let mut selected = BTreeSet::new();
+                    for digest in digests {
+                        if !lower_hex(&digest, 64) {
+                            return Err(invalid(
+                                "competing_plan_digests requires canonical lowercase plan digests",
+                            ));
+                        }
+                        let digest = Digest32::from_hex(&digest).ok_or_else(|| {
+                            invalid("competing project digest could not be decoded")
+                        })?;
+                        if !selected.insert(digest) {
+                            return Err(invalid("competing project digests must be distinct"));
+                        }
+                    }
+                    Some(selected.into_iter().collect())
+                }
+                (5, None) => {
+                    return Err(invalid(
+                        "version 5 requires explicit competing_plan_digests",
+                    ));
+                }
+                (_, Some(_)) => {
+                    return Err(invalid(
+                        "competing_plan_digests is available only in version 5 comparisons",
+                    ));
+                }
+                (_, None) => None,
+            };
             let (scope, owned_progression) = match (
                 version,
                 forecast_scope.as_deref(),
@@ -182,12 +221,12 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
                 (3, Some("current_stage"), Some("owned_session")) => {
                     (ForecastScope::CurrentStage, true)
                 }
-                (4, Some("complete_project"), Some("owned_session")) => {
+                (4 | 5, Some("complete_project"), Some("owned_session")) => {
                     (ForecastScope::CompleteProject, true)
                 }
                 _ => {
                     return Err(invalid(
-                        "comparison requires version 1 without scopes, version 2 with complete_project, version 3 with current_stage and owned_session, or version 4 with complete_project and owned_session",
+                        "comparison requires version 1 without scopes, version 2 with complete_project, version 3 with current_stage and owned_session, or version 4/5 with complete_project and owned_session; version 5 also requires selected competing projects",
                     ));
                 }
             };
@@ -214,6 +253,7 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
             Ok(Some(Request::Compare(Comparison {
                 scope,
                 owned_progression,
+                competing_plan_digests,
                 horizon_ticks,
                 candidates,
             })))
@@ -245,6 +285,13 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
 
 pub(super) fn uses_owned_progression(request: &Request) -> bool {
     matches!(request, Request::Compare(comparison) if comparison.owned_progression)
+}
+
+pub(super) fn competing_projects(request: &Request) -> Option<&[Digest32]> {
+    match request {
+        Request::Compare(comparison) => comparison.competing_plan_digests.as_deref(),
+        Request::Select(_) => None,
+    }
 }
 
 fn version_one(version: u32) -> Result<()> {
@@ -612,13 +659,18 @@ pub(super) fn compare_with_owned_work(
     let Request::Compare(comparison) = request else {
         return Err(invalid("comparison execution requires compare_candidates"));
     };
+    if comparison.competing_plan_digests.is_some() {
+        return Err(invalid(
+            "portfolio comparison requires its exact admitted complete peer projects",
+        ));
+    }
     if comparison.owned_progression != owned.is_some() {
         return Err(invalid(
             "owned-session comparison requires its exact authenticated current work selection",
         ));
     }
     if comparison.scope == ForecastScope::CompleteProject {
-        return project_comparison::compare(adapter, context, comparison, started, owned);
+        return project_comparison::compare(adapter, context, comparison, started, owned, None);
     }
     let snapshot = adapter.snapshot();
     authorize(snapshot, context)?;
@@ -880,6 +932,36 @@ pub(super) fn compare_with_owned_work(
     Ok(result)
 }
 
+pub(super) fn compare_with_portfolio(
+    adapter: &MemoryAdapter,
+    context: &OperationContext,
+    request: &Request,
+    started: Instant,
+    owned: &owned_progression::OwnedWork,
+    peers: &super::original_forecast::AdmittedProjectSet<'_>,
+) -> Result<Value> {
+    let Request::Compare(comparison) = request else {
+        return Err(invalid("portfolio execution requires compare_candidates"));
+    };
+    if comparison.scope != ForecastScope::CompleteProject
+        || !comparison.owned_progression
+        || comparison.competing_plan_digests.as_deref() != Some(peers.requested_digests())
+    {
+        return Err(invalid(
+            "portfolio comparison differs from its admitted complete project selection",
+        ));
+    }
+    peers.check_source(adapter.snapshot(), context, started)?;
+    project_comparison::compare(
+        adapter,
+        context,
+        comparison,
+        started,
+        Some(owned),
+        Some(peers),
+    )
+}
+
 // serde_json::Value accepts repeated object keys. A source candidate must retain
 // one unambiguous meaning through normalization, digesting and later selection.
 struct UniqueValue(Value);
@@ -967,3 +1049,7 @@ impl<'de> Deserialize<'de> for UniqueValue {
 #[cfg(test)]
 #[path = "lab_plan_comparison_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "lab_plan_portfolio_request_tests.rs"]
+mod portfolio_request_tests;

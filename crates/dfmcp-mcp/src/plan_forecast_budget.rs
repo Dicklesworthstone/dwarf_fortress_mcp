@@ -2,9 +2,10 @@
 //! Canonical-source work is measured; retained adapter history is not a heap-size
 //! measurement. No counter here represents actual game-time advancement.
 
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use dfmcp_core::{Capability, DfmcpError, ErrorCode, OperationContext, Result, RiskTier};
+use dfmcp_core::{Capability, DfmcpError, Digest32, ErrorCode, OperationContext, Result, RiskTier};
 use dfmcp_intent::PreparedPlan;
 use dfmcp_world::WorldSnapshot;
 use serde_json::{Value, json};
@@ -44,6 +45,11 @@ pub(crate) struct ForecastBudget {
     generated_custody_records: u64,
     generated_custody_bytes: u64,
     predicate_nodes: u64,
+    portfolio_candidate: Option<Digest32>,
+    portfolio_stages: BTreeMap<Digest32, u64>,
+    selected_peer_project_copies: u64,
+    hypothetical_competing_actions: u64,
+    hypothetical_peer_stages: u64,
 }
 
 impl ForecastBudget {
@@ -89,6 +95,11 @@ impl ForecastBudget {
             generated_custody_records: 0,
             generated_custody_bytes: 0,
             predicate_nodes: 0,
+            portfolio_candidate: None,
+            portfolio_stages: BTreeMap::new(),
+            selected_peer_project_copies: 0,
+            hypothetical_competing_actions: 0,
+            hypothetical_peer_stages: 0,
         };
         result.check(current)?;
         Ok(result)
@@ -312,6 +323,44 @@ impl ForecastBudget {
         Ok(())
     }
 
+    /// A portfolio keeps an independent four-stage allowance for the proposed
+    /// project and each explicitly selected committed root. Committed history
+    /// has already been charged as competing custody; only new successors add
+    /// stage and action costs here.
+    pub(crate) fn select_owned_projects(
+        &mut self,
+        candidate: Digest32,
+        peers: &[Digest32],
+        current: &OperationContext,
+    ) -> Result<()> {
+        self.check(current)?;
+        if !self.project_mode
+            || self.current_project_stages != 1
+            || peers.is_empty()
+            || peers.len() > 7
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "portfolio forecasts require one candidate and one to seven selected roots",
+            ));
+        }
+        let mut stages = BTreeMap::from([(candidate, 1)]);
+        for peer in peers {
+            if stages.insert(*peer, 1).is_some() {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "portfolio forecasts cannot duplicate candidate or selected root identities",
+                ));
+            }
+        }
+        self.portfolio_candidate = Some(candidate);
+        self.portfolio_stages = stages;
+        self.selected_peer_project_copies = self
+            .selected_peer_project_copies
+            .saturating_add(peers.len() as u64);
+        Ok(())
+    }
+
     /// Derived sources remain private descendants of this forecast's source.
     /// Inspection keeps the original real owner/context; only model execution
     /// binds the derived anchor. No simulated observation becomes authority.
@@ -413,6 +462,81 @@ impl ForecastBudget {
         self.inspect_owned_source(snapshot, current)
     }
 
+    /// Candidate and selected-peer successors share all aggregate allowances,
+    /// while each exact root retains its own bounded stage count. All authority
+    /// checks have already succeeded at the modeled frontier before this call.
+    pub(crate) fn admit_owned_portfolio_stage(
+        &mut self,
+        original: Digest32,
+        snapshot: &WorldSnapshot,
+        plan: &PreparedPlan,
+        archive_bytes: u64,
+        current: &OperationContext,
+    ) -> Result<()> {
+        self.inspect_owned_source(snapshot, current)?;
+        let stages = self
+            .portfolio_stages
+            .get(&original)
+            .copied()
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "portfolio successor does not belong to an admitted project",
+                )
+            })?;
+        if plan.anchor != snapshot.anchor() {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "portfolio stage differs from its exact private source",
+            ));
+        }
+        let added = plan.steps.len() as u64;
+        if stages >= MAX_PROJECT_STAGES
+            || self
+                .actions
+                .saturating_add(self.competing_actions)
+                .saturating_add(added)
+                > u64::from(current.budget.max_actions)
+        {
+            return Err(exhausted(
+                "portfolio stages exceed their per-root or complete shared action allowance",
+            ));
+        }
+        let generated_records = self.generated_custody_records.saturating_add(added);
+        let generated_bytes = self.generated_custody_bytes.saturating_add(archive_bytes);
+        if self
+            .forked_records
+            .saturating_add(self.forked_custody_records)
+            .saturating_add(generated_records)
+            > u64::from(current.budget.max_entities)
+            || self
+                .forked_bytes
+                .saturating_add(self.forked_custody_bytes)
+                .saturating_add(generated_bytes)
+                > current.budget.max_bytes
+        {
+            return Err(exhausted(
+                "portfolio archives exceed the shared copied and generated custody budget",
+            ));
+        }
+        if self.portfolio_candidate == Some(original) {
+            self.actions = self.actions.saturating_add(added);
+            self.current_project_stages += 1;
+        } else {
+            self.competing_actions = self.competing_actions.saturating_add(added);
+            self.hypothetical_competing_actions =
+                self.hypothetical_competing_actions.saturating_add(added);
+            self.hypothetical_peer_stages += 1;
+        }
+        self.portfolio_stages.insert(original, stages + 1);
+        self.project_stages += 1;
+        self.generated_custody_records = generated_records;
+        self.generated_custody_bytes = generated_bytes;
+        self.custody_records = self.custody_records.saturating_add(added);
+        self.custody_bytes = self.custody_bytes.saturating_add(archive_bytes);
+        self.inspect_owned_source(snapshot, current)
+    }
+
     pub(crate) fn before_fork(
         &mut self,
         snapshot: &WorldSnapshot,
@@ -431,7 +555,7 @@ impl ForecastBudget {
         let forked_custody_records = self
             .forked_custody_records
             .saturating_add(self.custody_records);
-        let maximum_forks = if self.project_mode {
+        let maximum_forks = if self.project_mode && self.portfolio_candidate.is_none() {
             MAX_PROJECT_FORKS
         } else {
             MAX_SOURCE_FORKS
@@ -565,6 +689,17 @@ impl ForecastBudget {
             }
             work["slice_accounting"] = json!(
                 "attempted shared foreground observation rounds, including zero-time polls; simulated_game_ticks counts only successful advances"
+            );
+        }
+        if self.portfolio_candidate.is_some() {
+            work["selected_peer_project_copies"] = json!(self.selected_peer_project_copies);
+            work["hypothetical_competing_action_steps"] =
+                json!(self.hypothetical_competing_actions);
+            work["hypothetical_peer_stages"] = json!(self.hypothetical_peer_stages);
+            work["limits"]["selected_peers_per_candidate"] = json!(7);
+            work["limits"]["source_forks"] = json!(MAX_SOURCE_FORKS);
+            work["stage_accounting"] = json!(
+                "candidate initial and all hypothetical candidate/selected-peer stages; committed peer history is charged once per candidate in competing action and source custody totals"
             );
         }
         work

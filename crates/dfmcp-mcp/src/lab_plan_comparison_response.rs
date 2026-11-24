@@ -8,9 +8,29 @@ use crate::agent_turn::{
 use dfmcp_core::{DfmcpError, ErrorCode, Result, SessionId};
 use dfmcp_intent::PreparedPlan;
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 
 fn invariant(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::InternalInvariantViolation, message)
+}
+
+fn selected_portfolio(value: &Value) -> bool {
+    let Some(digests) = value
+        .as_array()
+        .filter(|digests| (1..=7).contains(&digests.len()))
+    else {
+        return false;
+    };
+    let mut distinct = BTreeSet::new();
+    digests.iter().all(|value| {
+        value.as_str().is_some_and(|digest| {
+            digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                && distinct.insert(digest)
+        })
+    })
 }
 
 /// Supply-dependent plans carry their complete proof once in the same response. The
@@ -79,13 +99,21 @@ pub(super) fn finish(
         && payload["version"] == 4
         && payload["forecast_scope"] == "complete_project"
         && payload["progression_scope"] == "owned_session";
-    let owned_progression = owned_current_stage || owned_project;
+    let owned_portfolio = payload["kind"] == "compare_candidates"
+        && payload["schema"] == "dfmcp.plan-comparison/5"
+        && payload["version"] == 5
+        && payload["forecast_scope"] == "complete_project"
+        && payload["progression_scope"] == "owned_session"
+        && selected_portfolio(&payload["competing_plan_digests"]);
+    let owned_progression = owned_current_stage || owned_project || owned_portfolio;
     let owned_envelope = matches!(
         payload["schema"].as_str(),
-        Some("dfmcp.plan-comparison/3" | "dfmcp.plan-comparison/4")
+        Some("dfmcp.plan-comparison/3" | "dfmcp.plan-comparison/4" | "dfmcp.plan-comparison/5")
     ) || (payload["kind"] == "compare_candidates"
-        && (payload["version"] == 3 || payload["version"] == 4));
-    if owned_envelope && !owned_progression {
+        && (payload["version"] == 3 || payload["version"] == 4 || payload["version"] == 5));
+    if (owned_envelope && !owned_progression)
+        || (payload.get("competing_plan_digests").is_some() && !owned_portfolio)
+    {
         return Err(invariant(
             "owned-session forecast publication lost its explicit versioned scope",
         ));
@@ -251,12 +279,25 @@ pub(super) fn finish(
         briefing["forecast_recovered_observation"] = json!("discarded_copies_only");
         briefing["forecast_live_action_order"] =
             json!("existing_session_commit_order_then_candidate");
-        if owned_project {
+        if owned_project || owned_portfolio {
             briefing["forecast_scope"] = json!("complete_project");
-            briefing["forecast_future_stages"] = json!("candidate_only_discarded_copies");
+            briefing["forecast_future_stages"] = json!(if owned_portfolio {
+                "candidate_and_selected_peer_projects_discarded_copies"
+            } else {
+                "candidate_only_discarded_copies"
+            });
+        }
+        if owned_portfolio {
+            briefing["forecast_competing_plan_digests"] = payload["competing_plan_digests"].clone();
+            briefing["forecast_recommendation_scope"] = json!("complete_selected_portfolio");
         }
     }
-    let (assumptions, limits) = if owned_project {
+    let (assumptions, limits) = if owned_portfolio {
+        (
+            "The complete candidate and selected committed projects share one discarded timeline and finite resources; each hypothetical successor requires a verified quiet predecessor and current modeled authority.",
+            "Unselected originals contribute committed work only; other sessions' deferred dispatch is excluded. Only the current candidate stage can be selected. Every actual successor still requires separate review and Commit.",
+        )
+    } else if owned_project {
         (
             "The complete candidate project shares discarded laboratory forks with authenticated current-session work; each later stage is reviewed without delay after its predecessor is verified and quiet.",
             "Other originals' future stages and other sessions' deferred dispatch are excluded. Only the current executable candidate stage can be selected; predictions grant no future review or effect authority.",

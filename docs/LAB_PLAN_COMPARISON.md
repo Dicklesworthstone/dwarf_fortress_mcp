@@ -266,6 +266,113 @@ whole packet; it cannot discard a later stage or replace the pending plan.
 | 2 | Complete original project | Candidate only |
 | 3 | Current executable stage | Authenticated current-session live/recovered work |
 | 4 | Complete original project | Authenticated current-session live/recovered work |
+| 5 | Complete candidate and selected peer projects | Authenticated current-session work plus selected peers' future stages |
+
+## Compare a candidate with selected complete peer projects
+
+Version 5 adds an explicit `competing_plan_digests` selection to the version 4
+scopes. Use it when later stages of already committed projects must compete
+with the candidate for finite workers, materials and time. Select one to seven
+ordinary original roots; the candidate is the eighth possible project. The
+complete original-query admission resolves exact aliases and retained live or
+verified recovered continuation chains. Select the original root, not a
+continuation wrapper. Duplicate, foreign, withdrawn, abandoned or unavailable
+original custody refuses the request.
+
+For example, first commit a BED24 resource production project in
+`starter_fortress_resources`. Its initial stage gathers the missing wood.
+Replace the example digest below with that actual committed original digest,
+then compare two BED4 strategies while the larger project's gathering and
+later production are part of the same model:
+
+```json
+{
+  "template": "compare_candidates",
+  "version": 5,
+  "forecast_scope": "complete_project",
+  "progression_scope": "owned_session",
+  "competing_plan_digests": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "horizon_ticks": 5000,
+  "candidates": [
+    {
+      "key": "existing_labor",
+      "blueprint": {
+        "template": "production",
+        "quotas": [{"item": "BED", "minimum": 4}],
+        "acquire_resources": {"assign_labor": false}
+      }
+    },
+    {
+      "key": "allow_labor",
+      "blueprint": {
+        "template": "production",
+        "quotas": [{"item": "BED", "minimum": 4}],
+        "acquire_resources": {"assign_labor": true}
+      }
+    }
+  ]
+}
+```
+
+Every alternative starts from the same actual anchor and authenticated peer
+custody. Candidate and selected-peer successors are compiled only after their
+preceding stages are verified and physically quiet, from resources present at
+that modeled frontier. Unselected owned originals still contribute their
+committed deferred work and authentic recovered monitors. Their uncommitted
+future stages remain outside this explicit portfolio.
+
+A success report uses `dfmcp.plan-comparison/5`. The top-level
+`competing_plan_digests` and `selected_peer_projects` identify the complete
+selection and custody census. Each prediction retains its existing candidate
+`predicted_*`, `project_*` and `stages` fields. Its `peer_projects` array
+additionally retains every selected root's requested/actual identity, source,
+retained stages, future stages, action outcomes and exact reserve evidence.
+
+The new decision fields distinguish the candidate from the portfolio:
+
+| Field | Meaning |
+| --- | --- |
+| `portfolio_evidence_complete` | Every selected original and retained reserve has known comparable evidence; a known False goal cannot conceal another Unknown goal. |
+| `predicted_portfolio_complete` | All selected goals, stage proofs and physical work satisfy the shared model's completion rule at one frontier. |
+| `portfolio_completion_tick` | That common completion frontier, or null. |
+| `portfolio_goal_truth` | Combined current goal truth; it does not substitute for the independent evidence-completeness check. |
+| `portfolio_action_count`, `portfolio_max_risk`, `portfolio_requires_checkpoint`, `portfolio_required_capabilities` | Candidate stages plus newly hypothetical peer stages. Existing committed peer history remains fully admitted workload, while its past review cost is excluded from these new decision costs. |
+
+A recommendation requires complete comparable evidence for every alternative
+and a completed portfolio. It ranks new-stage risk, checkpoint burden, joint
+completion tick, new action count and candidate key in that order. A candidate
+that finishes while a selected peer misses its original goal or reserve is not
+eligible. Unknown evidence suppresses the whole recommendation rather than
+turning an unavailable alternative into an ordinary loss.
+
+All roots share the same foreground timeline, finite resource model, original
+request deadline and aggregate allowances. Each root may add at most three
+hypothetical successors. V5 permits at most eight tracked model source forks
+across the candidate set; it does not renew record, byte, action, predicate,
+poll, slice or game-tick budgets. Copied complete custody and generated future
+archives remain cumulative across alternatives. Every current and future
+effect checks its own modeled scope, risk, capability, expiry and checkpoint
+requirements. Each original reserve keeps its exact absolute tick; later stock
+cannot repair a missed or unknown endpoint.
+
+The Agent Turn names `complete_selected_portfolio` as the recommendation scope
+and identifies the selected peer roots. Complete candidate and peer evidence
+must fit the negotiated output allowance. Publication refuses the whole packet
+instead of dropping another project's future stage or changing a pending plan.
+
+Selection remains the ordinary version 1 `select_candidate` request. It
+prepares only the candidate's current stage. Commit that stage explicitly,
+observe actual progress, and separately use `continue_goal` to review each
+needed candidate or peer successor. The forecast creates no actual successor,
+proof, clock advance or recovered dispatch handle. Other sessions' deferred
+dispatch remains outside the model, and no native/live capability is added.
+
+Versions 1–4 reject the new peer-selection field, including empty or null
+values. Their accepted request and forecast behavior remain unchanged. V5's
+peer set is canonicalized by digest, so request order does not change the
+selected portfolio.
 
 ## Forecast the complete resource or room project
 
@@ -623,6 +730,12 @@ peer invalidation, shared budgets and immutable canonical state. Public facade
 regressions exercise full-project comparison and current-stage selection,
 existing deferred pause effects, normal Commit/Wait and whole-packet refusal.
 Packet regressions retain every stage and owned-work census, report the precise
-prediction limits and reject crossed version/scope metadata. These remain
+prediction limits and reject crossed version/scope metadata. Version 5 reuses
+`original_forecast_admission.rs` for exact selected roots and complete retained
+custody, then `owned_candidate_portfolio.rs` for joint completion and marginal
+stage costs. Its public regression follows actual candidate selection and
+Commit/Wait, followed by a separately reviewed peer continuation. Additional
+model, intake and publication regressions cover finite contention, recovery,
+independent reserve evidence, aggregate bounds and complete peer-stage output. These remain
 source tests until executed; consult the current status for the exact
 validation boundary.

@@ -1,5 +1,48 @@
 # Implementation Status
 
+## Unreleased — Compare complete selected project portfolios
+
+Opt-in laboratory comparison version 5 combines each production or room
+candidate with one to seven explicitly selected committed original projects.
+All selected future stages share the existing original foreground model,
+finite workers/materials, exact reserve endpoints and one common timeline.
+Unselected owned work keeps its existing committed progression. Candidate
+outcomes remain separate from full selected-peer stage/proof reports;
+recommendation requires complete comparable evidence and successful completion
+of the entire selected portfolio.
+
+The original-query custody admission is shared without changing that query's
+accepted behavior or reports. Exact live/recovered retained lineages, complete
+source and original action history, authenticated observation monitors and
+original deadlines remain binding. Each modeled successor checks current
+effect authority; all alternatives share source/custody/archive, action,
+predicate, polling, slice, tick and wall allowances. Past committed peer work
+remains admitted workload; new decision costs include candidate stages and
+newly hypothetical peer stages. No actual successor, proof, clock advance or
+recovered dispatch handle is created.
+
+The existing blueprint argument admits the closed v5 envelope and preserves
+versions 1–4. Public reports retain every peer outcome and current-work catalog,
+and refuse full-packet overflow before pending review changes. Selection remains
+version 1 and prepares only the current candidate stage; actual peer and
+candidate continuations still require separate review and Commit.
+
+Executed schema verification passed 27 accepted and 179 rejected cases,
+preserving every previous case. Scoped latest-nightly Rust formatting and
+diff checks passed. Repository validation passed 6,065 checks across 3,283
+files; source-integrity and implementation-status checks also passed. Shared
+admission extraction was mechanically checked against all 415 moved source
+lines, and independent source/type review covered the admission, model hooks,
+ranking, publication and public workflows. Seventeen new Rust regressions
+cover request intake, shared modeling, whole-packet publication and separately
+committed real continuations. Rust compilation and runtime test execution
+remain unverified at this checkpoint. Static checks do not establish runtime
+correctness. No new full repository/native/live or admission qualification
+is claimed.
+
+Owners: `df-lab-plan-comparison-c9r`, `df-lab-joint-original-forecast-c2s`,
+`df-lab-project-forecast-p7q` (in progress).
+
 ## Unreleased — Supply advice continues the retained original goal
 
 After acquisition or later depletion, laboratory supply advice now prefers the
