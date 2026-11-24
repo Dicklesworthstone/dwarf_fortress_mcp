@@ -178,6 +178,10 @@ impl StdioClient {
         self.open_configured(fortress, paused, max_output_tokens, false)
     }
 
+    fn open_shared(&mut self, fortress: &str, paused: bool) -> TestResult<String> {
+        self.open_configured(fortress, paused, 32_768, true)
+    }
+
     fn open_configured(
         &mut self,
         fortress: &str,
@@ -671,6 +675,200 @@ fn task_capacity_refuses_before_effects_in_an_independent_session() -> TestResul
         client.method("tasks/cancel", json!({"taskId":id}))?;
         client.await_terminal(id, "cancelled")?;
     }
+    Ok(())
+}
+
+#[test]
+fn a_paused_task_does_not_starve_another_sessions_completion_or_close() -> TestResult {
+    let mut client = StdioClient::spawn(true)?;
+    client.discover()?;
+    let first = client.open("9140", true)?;
+    let first_plan = client.plan(&first, true)?;
+    let first_id = client.start_task(&first, plan_digest(&first_plan)?)?;
+    let first_record = client.await_dispatch(&first, &first_id)?;
+    let first_anchor = client.terrain(&first)?["anchor"].clone();
+
+    let second = client.open("9141", false)?;
+    let second_plan = client.plan(&second, true)?;
+    let second_digest = plan_digest(&second_plan)?.to_owned();
+    let second_id = client.start_task(&second, &second_digest)?;
+    client.await_dispatch(&second, &second_id)?;
+    let second_anchor = client.terrain(&second)?["anchor"].clone();
+    for _ in 0..3 {
+        assert_eq!(client.task(&first_id)?["status"], "working");
+        assert_eq!(client.task(&second_id)?["status"], "working");
+    }
+    assert_eq!(client.terrain(&first)?["anchor"], first_anchor);
+    assert_eq!(client.terrain(&second)?["anchor"], second_anchor);
+
+    for _ in 0..16 {
+        client.advance(&second, 50)?;
+        if client.task(&second_id)?["status"] == "completed" {
+            break;
+        }
+    }
+    let completed = client.await_terminal(&second_id, "completed")?;
+    assert_actions_proven(
+        &tool_payload(&completed["result"])?,
+        &second_digest,
+        "Verified",
+        2,
+    )?;
+    assert_eq!(client.task(&first_id)?["status"], "working");
+    assert_eq!(client.terrain(&first)?["anchor"], first_anchor);
+    assert_eq!(
+        client.task_record(&first, &first_id)?["progress"]["obligation"]["actions"],
+        first_record["progress"]["obligation"]["actions"],
+    );
+
+    let closed = client.tool(
+        "fortress_cancel",
+        json!({
+            "session_id":second,"mode":"close_session","scope":"session",
+        }),
+    )?;
+    assert_eq!(closed["closed"], true);
+    assert_refused(&client.rpc("tasks/get", json!({"taskId":second_id}))?);
+    assert_eq!(client.task(&first_id)?["status"], "working");
+    client.method("tasks/cancel", json!({"taskId":first_id}))?;
+    client.await_terminal(&first_id, "cancelled")?;
+    Ok(())
+}
+
+#[test]
+fn cancelling_one_concurrent_original_leaves_its_sibling_owned_and_progressing() -> TestResult {
+    let mut client = StdioClient::spawn(true)?;
+    client.discover()?;
+    let first = client.open("9142", true)?;
+    let first_plan = client.plan(&first, true)?;
+    let first_id = client.start_task(&first, plan_digest(&first_plan)?)?;
+    client.await_dispatch(&first, &first_id)?;
+    let second = client.open("9143", true)?;
+    let second_plan = client.plan(&second, true)?;
+    let second_digest = plan_digest(&second_plan)?.to_owned();
+    let second_id = client.start_task(&second, &second_digest)?;
+    let second_record = client.await_dispatch(&second, &second_id)?;
+    let before = client.terrain(&second)?;
+
+    client.method("tasks/cancel", json!({"taskId":first_id}))?;
+    client.await_terminal(&first_id, "cancelled")?;
+    let drained = client.task_record(&first, &first_id)?;
+    assert_eq!(
+        drained["progress"]["finalization"]["drain_progress"]["quiescent"],
+        true
+    );
+    assert_eq!(client.task(&second_id)?["status"], "working");
+    assert_eq!(client.terrain(&second)?["anchor"], before["anchor"]);
+    assert_eq!(
+        client.task_record(&second, &second_id)?["progress"]["obligation"]["actions"],
+        second_record["progress"]["obligation"]["actions"],
+    );
+
+    let resume = client.tool("fortress_plan", json!({
+        "session_id":second,"summary":"resume the independently owned sibling","paused_target":false,
+    }))?;
+    client.tool(
+        "fortress_commit",
+        json!({
+            "session_id":second,"plan_digest":plan_digest(&resume)?,
+        }),
+    )?;
+    for _ in 0..16 {
+        client.advance(&second, 50)?;
+        if client.task(&second_id)?["status"] == "completed" {
+            break;
+        }
+    }
+    let completed = client.await_terminal(&second_id, "completed")?;
+    assert_actions_proven(
+        &tool_payload(&completed["result"])?,
+        &second_digest,
+        "Verified",
+        2,
+    )?;
+    assert_eq!(
+        client.task_record(&first, &first_id)?["progress"],
+        drained["progress"],
+        "the sibling's progress cannot rewrite another original's retained drain",
+    );
+    Ok(())
+}
+
+#[test]
+fn shared_foreground_progress_wakes_both_tasks_without_polling_the_other_original() -> TestResult {
+    let mut client = StdioClient::spawn(true)?;
+    client.discover()?;
+    let first = client.open_shared("9144", false)?;
+    let second = client.open_shared("9144", false)?;
+    let first_plan = client.plan(&first, false)?;
+    let first_digest = plan_digest(&first_plan)?.to_owned();
+    let first_id = client.start_task(&first, &first_digest)?;
+    client.await_dispatch(&first, &first_id)?;
+    let second_plan = client.tool(
+        "fortress_plan",
+        json!({
+            "session_id":second,"summary":"independent disjoint shared excavation",
+            "actions":json!([{"action":{
+                "kind":"designate_dig","min":[4,5,10],"max":[4,5,10],"mode":"mine",
+            }}]).to_string(),
+        }),
+    )?;
+    let second_digest = plan_digest(&second_plan)?.to_owned();
+    let second_id = client.start_task(&second, &second_digest)?;
+    let second_initial = client.await_dispatch(&second, &second_id)?;
+
+    let waited = client.tool(
+        "fortress_wait",
+        json!({
+            "session_id":first,"plan_digest":first_digest,"max_game_ticks":2_000,
+        }),
+    )?;
+    assert_eq!(waited["selected_plan_wait"]["complete"], true, "{waited}");
+    let first_terminal = client.await_terminal(&first_id, "completed")?;
+    let frontier = client.terrain(&first)?["anchor"].clone();
+    let mut observed = None;
+    for _ in 0..256 {
+        let record = client.task_record(&second, &second_id)?;
+        if record["progress"]["obligation"]["observed_anchor"] == frontier {
+            observed = Some(record);
+            break;
+        }
+    }
+    let observed = observed.ok_or("sibling Task missed the shared foreground progress wake")?;
+    assert_eq!(observed["task"]["status"], "working", "{observed}");
+    assert_eq!(
+        observed["progress"]["obligation"]["actions"][0]["state"],
+        second_initial["progress"]["obligation"]["actions"][0]["state"],
+        "another session's foreground wait and Task observation cannot poll this original",
+    );
+    assert_eq!(
+        observed["progress"]["obligation"]["actions"][0]["receipt_digest"],
+        second_initial["progress"]["obligation"]["actions"][0]["receipt_digest"],
+    );
+    assert_eq!(client.terrain(&second)?["anchor"], frontier);
+
+    let finished = client.tool(
+        "fortress_wait",
+        json!({
+            "session_id":second,"plan_digest":second_digest,"max_game_ticks":2_000,
+        }),
+    )?;
+    assert_eq!(
+        finished["selected_plan_wait"]["complete"], true,
+        "{finished}"
+    );
+    let second_terminal = client.await_terminal(&second_id, "completed")?;
+    assert_actions_proven(
+        &tool_payload(&second_terminal["result"])?,
+        &second_digest,
+        "Verified",
+        1,
+    )?;
+    assert_eq!(client.task(&first_id)?, first_terminal);
+    assert_eq!(
+        client.terrain(&first)?["anchor"],
+        client.terrain(&second)?["anchor"]
+    );
     Ok(())
 }
 

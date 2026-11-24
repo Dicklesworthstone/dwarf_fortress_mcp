@@ -83,6 +83,15 @@ verification reached the Beads coverage gate and stopped because `br` is
 absent; local release qualification refused the dirty worktree. Neither the
 pin bump nor static checks transfer the historical qualification below.
 
+The concurrency regression increment adds four store/lifecycle cases and three
+real subprocess cases for capacity ownership, independent progress,
+cancellation and expiry evidence. The actual unchanged process harness and
+both support modules pass metadata type checking with latest nightly, real
+dfmcp-core source and exact cached serde_json 1.0.154. Harness SHA-256:
+`422e2e17609b22c4fcbb88f38fb646d20fba02b3e3e862358a92e41194e40202`.
+This checks the test client types; it does not execute a server or establish
+runtime conformance.
+
 As of 2026-08-31, the v0.8.0 pin (`12d3469`) **fails the modern handshake
 golden tests in CI**: `test_negative_era_refusal_and_marker_validations`
 passes, but `test_modern_handshake_full_lifecycle_and_plan_commit` hangs

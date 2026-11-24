@@ -35,9 +35,23 @@ Execution expiry cannot silently erase unfinished work or release history.
 Five actual-source progress-registration tests pass on nightly 2026-11-24.
 The exact locked dependency graph resolves and fetches; dependency policy and
 locked metadata checks pass. Source review covers every new FastMCP store
-method and retained default. The existing process capacity case now fills all eight slots before
-checking refusal and verifies per-session capacity discovery. Executable MCP
-and subprocess validation is not yet established.
+method and retained default. The existing process capacity case fills all eight
+slots before checking refusal and verifies per-session capacity discovery.
+
+Four new store/lifecycle regressions cover mixed monitor kinds, canonical
+session aliases, terminal supervisor tails, independent cancellation and exact
+execution-expiry evidence. Three new actual-process cases cover a paused first
+Task alongside a separately completing session, isolated original cancellation,
+and shared-world foreground wakeups without polling another session's receipts.
+These cases compare real original plans, current world state, request counters,
+pending review and retained proof.
+
+The complete unchanged process-test harness and both support modules passed
+latest-nightly metadata type checking against the real dfmcp-core source and
+cached exact serde_json 1.0.154 metadata. The harness source SHA-256 is
+`422e2e17609b22c4fcbb88f38fb646d20fba02b3e3e862358a92e41194e40202`.
+No server process or Task lifecycle tests executed in that check; production
+MCP compilation and subprocess runtime validation remain unestablished.
 
 Both single-job locked/offline MCP checks were killed by SIGKILL while
 compiling Asupersync 0.6.2, before application diagnostics; the second used

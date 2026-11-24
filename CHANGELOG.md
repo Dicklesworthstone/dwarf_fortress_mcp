@@ -13,8 +13,11 @@
   Expiry preserves original work, immutable proof and explicit reconciliation
   evidence. Retain up to 256 process-local histories without automatic reclaim.
 - Pass five actual-source wakeup tests and update existing process capacity
-  expectations. Complete MCP compilation and process execution remain
-  unestablished after both exact dependency builds were SIGKILLed before MCP.
+  expectations. Add four store/lifecycle cases and three actual-process cases
+  for fairness, cancellation isolation, shared wakeups and expiry evidence.
+  The unchanged process harness type-checks against real pinned metadata;
+  runtime execution remains unestablished because both exact full dependency
+  builds were SIGKILLed before MCP.
 
 ## Unreleased — Compare candidates with complete selected peer projects
 
