@@ -107,6 +107,7 @@ pub(super) fn compare(
     context: &OperationContext,
     comparison: &Comparison,
     started: Instant,
+    owned: Option<&owned_progression::OwnedWork>,
 ) -> Result<Value> {
     let snapshot = adapter.snapshot();
     authorize(snapshot, context)?;
@@ -195,8 +196,19 @@ pub(super) fn compare(
     let mut evidence_complete = rows.is_empty();
     for (source, plan) in prepared {
         check_wall(context, started)?;
-        let prediction =
-            forecast_project_bounded(adapter, &source.project, &plan, context, &mut budget)?;
+        let prediction = if let Some(owned) = owned {
+            owned.forecast_project(
+                adapter,
+                &source.project,
+                &plan,
+                context,
+                source.reserve_until,
+                started,
+                &mut budget,
+            )?
+        } else {
+            forecast_project_bounded(adapter, &source.project, &plan, context, &mut budget)?
+        };
         let available = prediction["available"] == true;
         let reserve = &prediction["reserve_forecast"];
         let reserve_known = source.reserve_until.is_none()
@@ -272,7 +284,7 @@ pub(super) fn compare(
     let goal_digest = common_goal
         .as_ref()
         .map(|goal| Digest32::of_bytes(goal.to_string().as_bytes()).to_hex());
-    Ok(json!({
+    let mut result = json!({
         "ok":true,
         "schema":"dfmcp.plan-comparison/2",
         "kind":"compare_candidates",
@@ -301,5 +313,17 @@ pub(super) fn compare(
         "automatic_continuation":false,
         "selection_scope":"current_reviewed_stage_only",
         "note":"selection revalidates the exact candidate source and prepares only its current executable stage; predicted later stages never become pending plans, goal evidence or effect authority",
-    }))
+    });
+    if let Some(owned) = owned {
+        result["schema"] = json!("dfmcp.plan-comparison/4");
+        result["version"] = json!(4);
+        result["progression_scope"] = json!("owned_session");
+        result["owned_work"] = owned.describe();
+        result["method"] =
+            json!("same_original_project_with_owned_session_progression_on_discarded_forks");
+        result["assumptions"] = json!(
+            "every authenticated current-session open action progresses in retained commit order; unfinished recovered peers keep their original cadence; each candidate's next stage is compiled only from a quiet verified fork and reviewed without delay; other originals' future stages and other sessions' deferred dispatch are excluded; actual future stages still require separate current review and commit"
+        );
+    }
+    Ok(result)
 }

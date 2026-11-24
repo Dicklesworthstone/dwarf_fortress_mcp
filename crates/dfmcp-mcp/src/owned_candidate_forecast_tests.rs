@@ -490,3 +490,6 @@ fn version_three_requires_explicit_current_stage_and_owned_session_scopes() -> R
     }
     Ok(())
 }
+
+#[path = "owned_candidate_project_tests.rs"]
+mod projects;

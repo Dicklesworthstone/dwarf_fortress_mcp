@@ -69,14 +69,24 @@ pub(super) fn finish(
         || resource_production
         || resource_room
         || production_reserve;
-    let owned_progression = payload["kind"] == "compare_candidates"
+    let owned_current_stage = payload["kind"] == "compare_candidates"
         && payload["schema"] == "dfmcp.plan-comparison/3"
         && payload["version"] == 3
         && payload["forecast_scope"] == "current_stage"
         && payload["progression_scope"] == "owned_session";
-    if payload["schema"] == "dfmcp.plan-comparison/3" && !owned_progression {
+    let owned_project = payload["kind"] == "compare_candidates"
+        && payload["schema"] == "dfmcp.plan-comparison/4"
+        && payload["version"] == 4
+        && payload["forecast_scope"] == "complete_project"
+        && payload["progression_scope"] == "owned_session";
+    let owned_progression = owned_current_stage || owned_project;
+    if matches!(
+        payload["schema"].as_str(),
+        Some("dfmcp.plan-comparison/3" | "dfmcp.plan-comparison/4")
+    ) && !owned_progression
+    {
         return Err(invariant(
-            "owned-session forecast publication lost its explicit current-stage scope",
+            "owned-session forecast publication lost its explicit versioned scope",
         ));
     }
     if !payload.is_object()
@@ -240,8 +250,17 @@ pub(super) fn finish(
         briefing["forecast_recovered_observation"] = json!("discarded_copies_only");
         briefing["forecast_live_action_order"] =
             json!("existing_session_commit_order_then_candidate");
+        if owned_project {
+            briefing["forecast_scope"] = json!("complete_project");
+            briefing["forecast_future_stages"] = json!("candidate_only_discarded_copies");
+        }
     }
-    let (assumptions, limits) = if owned_progression {
+    let (assumptions, limits) = if owned_project {
+        (
+            "The complete candidate project shares discarded laboratory forks with authenticated current-session work; each later stage is reviewed without delay after its predecessor is verified and quiet.",
+            "Other originals' future stages and other sessions' deferred dispatch are excluded. Only the current executable candidate stage can be selected; predictions grant no future review or effect authority.",
+        )
+    } else if owned_progression {
         (
             "Authenticated current-session live deferred work and copied recovered monitors share the real foreground cadence on discarded laboratory forks.",
             "Other sessions' deferred dispatch and future project stages are excluded. Predicted outcomes are not observed effect proof or commit success.",

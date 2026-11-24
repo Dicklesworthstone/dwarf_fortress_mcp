@@ -41,6 +41,8 @@ pub(crate) struct ForecastBudget {
     custody_bytes: u64,
     forked_custody_records: u64,
     forked_custody_bytes: u64,
+    generated_custody_records: u64,
+    generated_custody_bytes: u64,
     predicate_nodes: u64,
 }
 
@@ -84,6 +86,8 @@ impl ForecastBudget {
             custody_bytes: 0,
             forked_custody_records: 0,
             forked_custody_bytes: 0,
+            generated_custody_records: 0,
+            generated_custody_bytes: 0,
             predicate_nodes: 0,
         };
         result.check(current)?;
@@ -361,6 +365,54 @@ impl ForecastBudget {
         Ok(())
     }
 
+    /// Future candidate stages retain their exact archive on the same private
+    /// model. Charge it and every competing action before the adapter prepares
+    /// or commits; the next candidate starts with its own admitted custody.
+    pub(crate) fn admit_owned_project_stage(
+        &mut self,
+        snapshot: &WorldSnapshot,
+        plan: &PreparedPlan,
+        archive_bytes: u64,
+        current: &OperationContext,
+    ) -> Result<()> {
+        self.inspect_owned_source(snapshot, current)?;
+        if self
+            .actions
+            .saturating_add(plan.steps.len() as u64)
+            .saturating_add(self.competing_actions)
+            > u64::from(current.budget.max_actions)
+        {
+            return Err(exhausted(
+                "owned project stages exceed the complete candidate and competing action budget",
+            ));
+        }
+        let generated_records = self
+            .generated_custody_records
+            .saturating_add(plan.steps.len() as u64);
+        let generated_bytes = self.generated_custody_bytes.saturating_add(archive_bytes);
+        if self
+            .forked_records
+            .saturating_add(self.forked_custody_records)
+            .saturating_add(generated_records)
+            > u64::from(current.budget.max_entities)
+            || self
+                .forked_bytes
+                .saturating_add(self.forked_custody_bytes)
+                .saturating_add(generated_bytes)
+                > current.budget.max_bytes
+        {
+            return Err(exhausted(
+                "owned project archives exceed the shared copied and generated custody budget",
+            ));
+        }
+        self.admit_project_stage(snapshot, plan, current)?;
+        self.generated_custody_records = generated_records;
+        self.generated_custody_bytes = generated_bytes;
+        self.custody_records = self.custody_records.saturating_add(plan.steps.len() as u64);
+        self.custody_bytes = self.custody_bytes.saturating_add(archive_bytes);
+        self.inspect_owned_source(snapshot, current)
+    }
+
     pub(crate) fn before_fork(
         &mut self,
         snapshot: &WorldSnapshot,
@@ -385,7 +437,9 @@ impl ForecastBudget {
             MAX_SOURCE_FORKS
         };
         if self.source_forks >= maximum_forks
-            || forked_records.saturating_add(forked_custody_records)
+            || forked_records
+                .saturating_add(forked_custody_records)
+                .saturating_add(self.generated_custody_records)
                 > u64::from(current.budget.max_entities)
         {
             return Err(exhausted(
@@ -405,7 +459,11 @@ impl ForecastBudget {
         })?;
         let forked_bytes = self.forked_bytes.saturating_add(bytes);
         let forked_custody_bytes = self.forked_custody_bytes.saturating_add(self.custody_bytes);
-        if forked_bytes.saturating_add(forked_custody_bytes) > current.budget.max_bytes {
+        if forked_bytes
+            .saturating_add(forked_custody_bytes)
+            .saturating_add(self.generated_custody_bytes)
+            > current.budget.max_bytes
+        {
             return Err(exhausted(
                 "comparison exceeds its aggregate forked-source byte budget",
             ));
@@ -489,6 +547,10 @@ impl ForecastBudget {
             work["competing_action_steps"] = json!(self.competing_actions);
             work["forked_retained_custody_records"] = json!(self.forked_custody_records);
             work["forked_retained_custody_bytes"] = json!(self.forked_custody_bytes);
+            if self.project_mode {
+                work["generated_project_custody_records"] = json!(self.generated_custody_records);
+                work["generated_project_custody_bytes"] = json!(self.generated_custody_bytes);
+            }
             work["predicate_node_visits_bound"] = json!(self.predicate_nodes);
             work["limits"]["complete_candidate_and_competing_steps"] =
                 json!(self.current.budget.max_actions);
@@ -496,6 +558,11 @@ impl ForecastBudget {
             work["source_accounting"] = json!(
                 "canonical world and exact retained original/monitor custody copied for each discarded candidate; combined source and custody totals share negotiated record/byte limits, not a measured heap-size total"
             );
+            if self.project_mode {
+                work["source_accounting"] = json!(
+                    "canonical world and retained original/monitor custody copied into each private candidate, plus every generated future plan archive; copied and generated totals share the aggregate record/byte allowance, and each modeled source retains all current custody"
+                );
+            }
             work["slice_accounting"] = json!(
                 "attempted shared foreground observation rounds, including zero-time polls; simulated_game_ticks counts only successful advances"
             );

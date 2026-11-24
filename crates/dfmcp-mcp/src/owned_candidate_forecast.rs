@@ -1,4 +1,4 @@
-//! Current-stage candidate forecasts under authenticated owned-session work.
+//! Candidate-stage and complete-project forecasts under authenticated owned work.
 //! The shared original forecast engine owns all polling and time progression.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,9 +14,11 @@ use dfmcp_world::{Predicate, WorldSnapshot};
 use serde_json::{Value, json};
 
 use super::super::{
-    CarriedStep, LabSession, original_forecast::model, plan_cancellation, recovered_step_progress,
+    CarriedStep, LabSession, original_forecast::model, plan_cancellation,
+    project_forecast::ProjectSource, recovered_step_progress,
 };
 use super::{ForecastBudget, exhausted, invalid};
+use crate::lab_world::ProductionGoalLedger;
 use model::ForecastMeter;
 
 const MAX_TRACKED: usize = 1_024;
@@ -262,6 +264,45 @@ impl OwnedWork {
         started: Instant,
         budget: &mut ForecastBudget,
     ) -> Result<Value> {
+        self.forecast_candidate(adapter, None, plan, context, reserve, started, budget)
+    }
+
+    pub(super) fn forecast_project(
+        &self,
+        adapter: &MemoryAdapter,
+        source: &ProjectSource,
+        plan: &PreparedPlan,
+        context: &OperationContext,
+        reserve: Option<u64>,
+        started: Instant,
+        budget: &mut ForecastBudget,
+    ) -> Result<Value> {
+        if source.reserve_until_tick() != reserve {
+            return Err(invalid(
+                "owned candidate project changed its original reserve frontier",
+            ));
+        }
+        self.forecast_candidate(
+            adapter,
+            Some(source),
+            plan,
+            context,
+            reserve,
+            started,
+            budget,
+        )
+    }
+
+    fn forecast_candidate(
+        &self,
+        adapter: &MemoryAdapter,
+        project: Option<&ProjectSource>,
+        plan: &PreparedPlan,
+        context: &OperationContext,
+        reserve: Option<u64>,
+        started: Instant,
+        budget: &mut ForecastBudget,
+    ) -> Result<Value> {
         if self.session != context.session_id
             || self.anchor != context.anchor
             || adapter.snapshot().anchor() != self.anchor
@@ -270,7 +311,11 @@ impl OwnedWork {
                 "owned candidate progression changed its admitted session or source",
             ));
         }
-        budget.begin_candidate(adapter.snapshot(), plan, context)?;
+        if project.is_some() {
+            budget.begin_project(adapter.snapshot(), plan, context)?;
+        } else {
+            budget.begin_candidate(adapter.snapshot(), plan, context)?;
+        }
         let plan_bytes = archive(plan, context, started)?.len() as u64;
         budget.admit_owned_candidate(
             self.actions.len().saturating_add(self.carried.len()) as u64,
@@ -282,8 +327,9 @@ impl OwnedWork {
         // this first clone and its second model clone under one shared meter.
         budget.before_fork(adapter.snapshot(), context)?;
         let mut fork = adapter.clone();
-        let result =
-            self.forecast_committed(adapter, &mut fork, plan, context, reserve, started, budget);
+        let result = self.forecast_committed(
+            adapter, &mut fork, project, plan, context, reserve, started, budget,
+        );
         budget.check(context)?;
         match result {
             Err(error)
@@ -293,18 +339,45 @@ impl OwnedWork {
                         | dfmcp_core::ErrorCode::CancellationRequested
                 ) =>
             {
-                Ok(json!({"epistemic_state":"predicted", "available":false,
-                    "progression_scope":"owned_session", "competing_work":self.describe(),
-                    "reason":{"code":error.code.as_str(),"message":error.message}}))
+                match project {
+                    Some(source) => self.project_unavailable(
+                        &error,
+                        source,
+                        adapter.snapshot(),
+                        vec![stage_cost(source, plan, 1)],
+                    ),
+                    None => Ok(json!({"epistemic_state":"predicted", "available":false,
+                        "progression_scope":"owned_session", "competing_work":self.describe(),
+                        "reason":{"code":error.code.as_str(),"message":error.message}})),
+                }
             }
             other => other,
         }
+    }
+
+    fn project_unavailable(
+        &self,
+        error: &dfmcp_core::DfmcpError,
+        source: &ProjectSource,
+        snapshot: &WorldSnapshot,
+        stages: Vec<Value>,
+    ) -> Result<Value> {
+        let mut value = json!({
+            "epistemic_state":"predicted", "available":false,
+            "progression_scope":"owned_session", "competing_work":self.describe(),
+            "reason":{"code":error.code.as_str(),"message":error.message},
+            "stage_outcomes_available":false,
+            "effect_evidence":false, "actual_game_ticks_advanced":0,
+        });
+        decorate_project_stages(&mut value, source, snapshot, stages)?;
+        Ok(value)
     }
 
     fn forecast_committed(
         &self,
         adapter: &MemoryAdapter,
         fork: &mut MemoryAdapter,
+        project: Option<&ProjectSource>,
         plan: &PreparedPlan,
         context: &OperationContext,
         reserve: Option<u64>,
@@ -320,6 +393,14 @@ impl OwnedWork {
                 "owned candidate reserve requires its original bounded future frontier",
             ));
         }
+        let model_project = match project {
+            Some(source) => {
+                let ledger = ProductionGoalLedger::capture(adapter.snapshot())?;
+                ledger.validate_plan(plan)?;
+                Some(model::Project::new(plan.digest, source.clone(), ledger))
+            }
+            None => None,
+        };
         let commit_nodes = plan.steps.iter().try_fold(0u64, |total, step| {
             step_nodes(step).map(|nodes| total.saturating_add(nodes))
         })?;
@@ -352,11 +433,21 @@ impl OwnedWork {
         let mut meter = Meter {
             budget,
             current: context,
+            project,
+            admitted_stages: project
+                .map_or_else(Vec::new, |source| vec![stage_cost(source, plan, 1)]),
             goal_nodes: nodes(
                 std::iter::once(&plan.terminal_condition)
                     .chain(plan.steps.iter().flat_map(|step| &step.postconditions)),
             )?
-            .saturating_add(plan.steps.len() as u64),
+            .saturating_add(plan.steps.len() as u64)
+            // Full semantic goal and remaining-reserve checks use the same
+            // conservative bound as the original-project query.
+            .saturating_add(if project.is_some() {
+                super::super::selected_plan_wait::SEMANTIC_GOAL_NODE_RESERVE * 2
+            } else {
+                0
+            }),
             candidate_ticks: receipt
                 .actions
                 .iter()
@@ -405,30 +496,67 @@ impl OwnedWork {
             actions: actions.clone(),
             reserve_until: reserve,
             reserve_observation: None,
-            can_continue: false,
+            can_continue: project.is_some(),
         };
         let modeled = OperationContext {
             anchor: fork.snapshot().anchor(),
             ..context.clone()
         };
-        let prediction = model::forecast_current_stage_metered(
-            fork,
-            &[original],
-            &tracked,
-            &modeled,
-            meter.budget.horizon_ticks(),
-            started,
-            carried,
-            |_, _, _| Ok(()),
-            |digest, snapshot| {
-                if digest != plan.digest {
-                    return Err(invalid("candidate goal changed during private progression"));
-                }
-                let truth = crate::lab_world::plan_goal_truth(snapshot, plan)?;
-                Ok((truth, truth))
-            },
-            &mut meter,
-        )?;
+        let evaluate = |digest: Digest32, snapshot: &WorldSnapshot| {
+            if digest != plan.digest {
+                return Err(invalid("candidate goal changed during private progression"));
+            }
+            let truth = crate::lab_world::plan_goal_truth(snapshot, plan)?;
+            Ok((truth, truth))
+        };
+        let prediction = match model_project {
+            Some(project) => model::forecast_project_metered(
+                fork,
+                &[original],
+                &tracked,
+                &modeled,
+                meter.budget.horizon_ticks(),
+                started,
+                vec![project],
+                carried,
+                |_, _, _| Ok(()),
+                evaluate,
+                &mut meter,
+            ),
+            None => model::forecast_current_stage_metered(
+                fork,
+                &[original],
+                &tracked,
+                &modeled,
+                meter.budget.horizon_ticks(),
+                started,
+                carried,
+                |_, _, _| Ok(()),
+                evaluate,
+                &mut meter,
+            ),
+        };
+        let prediction = match prediction {
+            Ok(prediction) => prediction,
+            Err(error)
+                if project.is_some()
+                    && !matches!(
+                        error.code,
+                        dfmcp_core::ErrorCode::BudgetExceeded
+                            | dfmcp_core::ErrorCode::CancellationRequested
+                    ) =>
+            {
+                let source =
+                    project.ok_or_else(|| invalid("complete candidate source disappeared"))?;
+                return self.project_unavailable(
+                    &error,
+                    source,
+                    adapter.snapshot(),
+                    meter.admitted_stages,
+                );
+            }
+            Err(error) => return Err(error),
+        };
         let row = prediction["originals"]
             .as_array()
             .filter(|rows| rows.len() == 1)
@@ -438,7 +566,11 @@ impl OwnedWork {
             .as_u64()
             .ok_or_else(|| invalid("shared candidate model omitted its predicted frontier"))?;
         let complete = row["predicted_complete"] == true;
-        let actions_complete = row["predicted_actions_complete"] == true;
+        let actions_complete = row[if project.is_some() {
+            "predicted_project_actions_complete"
+        } else {
+            "predicted_actions_complete"
+        }] == true;
         let actions_at = if actions_complete {
             meter
                 .candidate_ticks
@@ -488,13 +620,133 @@ impl OwnedWork {
                 "scope":"original candidate goal at its exact requested future frontier",
             });
         }
+        if let Some(source) = project {
+            decorate_project(&mut value, row, source, plan, adapter.snapshot())?;
+            value["horizon_tick"] = json!(meter.budget.horizon_tick());
+            value["simulation_horizon_truncated"] =
+                json!(!complete && tick >= meter.budget.horizon_tick());
+            value["stop_reason"] = prediction["stop_reason"].clone();
+        }
         Ok(value)
     }
+}
+
+/// Aggregate only the candidate's own stages; competing work constrains the
+/// prediction but cannot become its success, risk or action-count evidence.
+fn decorate_project(
+    value: &mut Value,
+    row: &Value,
+    source: &ProjectSource,
+    plan: &PreparedPlan,
+    snapshot: &WorldSnapshot,
+) -> Result<()> {
+    let mut initial_steps = row["steps"].clone();
+    if let Some(steps) = initial_steps.as_array_mut() {
+        for step in steps {
+            if let Some(fields) = step.as_object_mut()
+                && let Some(id) = fields.remove("action_id")
+            {
+                fields.insert("model_action_id".to_owned(), id);
+            }
+        }
+    }
+    let mut initial = stage_cost(source, plan, 1);
+    initial["predicted_actions_complete"] = row["predicted_actions_complete"].clone();
+    initial["predicted_physical_quiescent"] = row["predicted_original_physical_quiescent"].clone();
+    initial["predicted_stage_complete"] = json!(
+        row["predicted_actions_complete"] == true
+            && row["predicted_original_physical_quiescent"] == true
+    );
+    initial["steps"] = initial_steps;
+    let mut stages = vec![initial];
+    stages.extend(
+        row["future_stages"]
+            .as_array()
+            .ok_or_else(|| invalid("complete candidate model omitted its future stages"))?
+            .iter()
+            .cloned(),
+    );
+    decorate_project_stages(value, source, snapshot, stages)
+}
+
+fn stage_cost(source: &ProjectSource, plan: &PreparedPlan, index: usize) -> Value {
+    json!({
+        "index":index, "stage":source.stage_name(plan),
+        "model_plan_digest":plan.digest.to_hex(),
+        "executable_review":false, "model_actions_are_live_handles":false,
+        "from_tick":plan.anchor.tick.0,
+        "action_count":plan.steps.len(), "max_risk":plan.max_risk.as_str(),
+        "requires_checkpoint":plan.requires_checkpoint,
+        "required_capabilities":plan.required_capabilities.iter()
+            .map(|capability| capability.as_str()).collect::<Vec<_>>(),
+        "obligation_deadlines":plan.steps.iter().filter_map(|step| step.obligation.as_ref()
+            .map(|spec| json!({
+                "step":step.id.get(), "deadline_tick":spec.deadline_tick.0,
+                "poll_interval_ticks":spec.poll_interval_ticks,
+                "stable_observations":spec.stable_for_observations,
+            }))).collect::<Vec<_>>(),
+    })
+}
+
+fn decorate_project_stages(
+    value: &mut Value,
+    source: &ProjectSource,
+    snapshot: &WorldSnapshot,
+    stages: Vec<Value>,
+) -> Result<()> {
+    let mut risk = RiskTier::ReadOnly;
+    let mut checkpoint = false;
+    let mut actions = 0u64;
+    let mut capabilities = BTreeSet::new();
+    for stage in &stages {
+        let stage_risk = match stage["max_risk"].as_str() {
+            Some("read_only") => RiskTier::ReadOnly,
+            Some("reversible") => RiskTier::Reversible,
+            Some("guarded") => RiskTier::Guarded,
+            Some("irreversible") => RiskTier::Irreversible,
+            _ => return Err(invalid("complete candidate stage omitted its risk")),
+        };
+        risk = risk.max(stage_risk);
+        checkpoint |= stage["requires_checkpoint"].as_bool().ok_or_else(|| {
+            invalid("complete candidate stage omitted its checkpoint requirement")
+        })?;
+        actions = actions.saturating_add(
+            stage["action_count"]
+                .as_u64()
+                .ok_or_else(|| invalid("complete candidate stage omitted its action count"))?,
+        );
+        for capability in stage["required_capabilities"]
+            .as_array()
+            .ok_or_else(|| invalid("complete candidate stage omitted its capabilities"))?
+        {
+            capabilities.insert(
+                capability
+                    .as_str()
+                    .ok_or_else(|| invalid("complete candidate stage has an invalid capability"))?
+                    .to_owned(),
+            );
+        }
+    }
+    value["schema"] = json!("dfmcp.project-forecast/2");
+    value["method"] = json!("complete_candidate_project_with_real_owned_foreground_progression");
+    value["forecast_scope"] = json!("complete_project");
+    value["project_source_digest"] = json!(source.source_digest().to_hex());
+    value["semantic_goal"] = source.semantic_key(snapshot)?;
+    value["project_max_risk"] = json!(risk.as_str());
+    value["project_requires_checkpoint"] = json!(checkpoint);
+    value["project_action_count"] = json!(actions);
+    value["project_required_capabilities"] = json!(capabilities);
+    value["stages"] = json!(stages);
+    value["requires_review_between_stages"] = json!(true);
+    value["future_stage_plans_are_executable"] = json!(false);
+    Ok(())
 }
 
 struct Meter<'a> {
     budget: &'a mut ForecastBudget,
     current: &'a OperationContext,
+    project: Option<&'a ProjectSource>,
+    admitted_stages: Vec<Value>,
     goal_nodes: u64,
     candidate_ticks: BTreeMap<ActionId, Option<u64>>,
 }
@@ -526,6 +778,49 @@ impl ForecastMeter for Meter<'_> {
         {
             *tick = Some(receipt.observed_anchor.tick.0);
         }
+    }
+    fn before_project_stage(
+        &mut self,
+        snapshot: &WorldSnapshot,
+        plan: &PreparedPlan,
+        archive_bytes: u64,
+    ) -> Result<()> {
+        self.budget
+            .admit_owned_project_stage(snapshot, plan, archive_bytes, self.current)?;
+        let nodes = plan.steps.iter().try_fold(0u64, |total, step| {
+            step_nodes(step).map(|nodes| total.saturating_add(nodes))
+        })?;
+        self.budget
+            .before_predicates(nodes.saturating_mul(2), self.current)?;
+        self.goal_nodes = self.goal_nodes.saturating_add(nodes);
+        let source = self
+            .project
+            .ok_or_else(|| invalid("candidate successor lacks its project source"))?;
+        self.admitted_stages
+            .push(stage_cost(source, plan, self.admitted_stages.len() + 1));
+        Ok(())
+    }
+    fn after_project_commit(&mut self, actions: &[ActionReceipt]) {
+        for action in actions {
+            self.candidate_ticks.insert(
+                action.action_id,
+                action
+                    .state
+                    .is_terminal()
+                    .then_some(action.observed_anchor.tick.0),
+            );
+        }
+    }
+    fn after_project_observation(&mut self, carried: &[CarriedStep]) -> Result<()> {
+        if carried
+            .iter()
+            .any(|row| row.state == "failed" || row.observation_error.is_some())
+        {
+            return Err(invalid(
+                "candidate successor encountered a failed authenticated recovered peer",
+            ));
+        }
+        Ok(())
     }
     fn before_recovered_observation(&mut self, polls: u64, nodes: u64) -> Result<()> {
         self.budget.before_predicates(nodes, self.current)?;

@@ -22,7 +22,7 @@ const MAX_TRACKED: usize = 1_024;
 
 #[path = "original_project_forecast.rs"]
 mod projects;
-pub(super) use projects::Project;
+pub(crate) use projects::Project;
 
 #[path = "recovered_original_forecast.rs"]
 mod recovery;
@@ -59,6 +59,18 @@ pub(crate) trait ForecastMeter {
         Ok(())
     }
     fn after_action_poll(&mut self, _receipt: &dfmcp_adapter::ActionReceipt) {}
+    fn before_project_stage(
+        &mut self,
+        _snapshot: &WorldSnapshot,
+        _plan: &dfmcp_intent::PreparedPlan,
+        _archive_bytes: u64,
+    ) -> Result<()> {
+        Ok(())
+    }
+    fn after_project_commit(&mut self, _actions: &[dfmcp_adapter::ActionReceipt]) {}
+    fn after_project_observation(&mut self, _carried: &[CarriedStep]) -> Result<()> {
+        Ok(())
+    }
     fn before_recovered_observation(&mut self, _polls: u64, _nodes: u64) -> Result<()> {
         Ok(())
     }
@@ -409,6 +421,36 @@ pub(crate) fn forecast_current_stage_metered(
     )
 }
 
+/// Complete candidate projects share the same authenticated foreground model.
+/// Every hypothetical stage passes the caller's aggregate meter before effects.
+pub(crate) fn forecast_project_metered(
+    adapter: &MemoryAdapter,
+    originals: &[Original],
+    tracked: &[ActionId],
+    context: &OperationContext,
+    horizon_ticks: u64,
+    started: Instant,
+    projects: Vec<Project>,
+    carried: Vec<CarriedStep>,
+    inspect: impl FnMut(&WorldSnapshot, u64, u64) -> Result<()>,
+    evaluate: impl FnMut(Digest32, &WorldSnapshot) -> Result<(PredicateTruth, PredicateTruth)>,
+    meter: &mut impl ForecastMeter,
+) -> Result<Value> {
+    forecast_metered(
+        adapter,
+        originals,
+        tracked,
+        context,
+        horizon_ticks,
+        started,
+        Some(projects),
+        carried,
+        inspect,
+        evaluate,
+        meter,
+    )
+}
+
 fn forecast_metered(
     adapter: &MemoryAdapter,
     originals: &[Original],
@@ -722,8 +764,10 @@ fn forecast_metered(
                 &mut inspect,
                 meter,
             )?;
+            meter.before_project_stage(fork.snapshot(), &plan, archive.len() as u64)?;
             let prepared = fork.prepare(&plan, &modeled_context)?;
             let receipt = fork.commit(&plan, &prepared, &modeled_context)?;
+            meter.after_project_commit(&receipt.actions);
             let actions: Vec<_> = receipt
                 .actions
                 .into_iter()
@@ -767,6 +811,7 @@ fn forecast_metered(
                 &mut recovered_predicate_nodes,
                 meter,
             )?;
+            meter.after_project_observation(&carried)?;
             first_poll = true;
             continue;
         }

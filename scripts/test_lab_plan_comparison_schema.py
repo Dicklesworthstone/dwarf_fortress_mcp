@@ -132,6 +132,31 @@ def main() -> None:
         value = copy.deepcopy(baseline)
         value["progression_scope"] = "owned_session"
         cases.append((value, False))
+    owned_project = {**copy.deepcopy(project), "version": 4,
+                     "progression_scope": "owned_session"}
+    cases.append((owned_project, True))
+    for template in ("provisioned_room", "connected_room"):
+        value = copy.deepcopy(owned_project)
+        value["candidates"][0]["blueprint"] = {"template": template}
+        cases.append((value, True))
+    for key in owned_project:
+        value = copy.deepcopy(owned_project)
+        del value[key]
+        cases.append((value, False))
+    for key, bad in (("version", 1), ("version", 2), ("version", 3), ("version", 5),
+                     ("forecast_scope", "current_stage"), ("forecast_scope", None),
+                     ("progression_scope", "candidate_only"), ("progression_scope", None),
+                     ("horizon_ticks", 0), ("automatic_continuation", True)):
+        value = copy.deepcopy(owned_project)
+        value[key] = bad
+        cases.append((value, False))
+    for bad in ({"key": "pause", "paused_target": True},
+                {"key": "actions", "actions": []},
+                {"key": "legacy", "blueprint": {"template": "dining_hall"}},
+                {"key": "recursive", "blueprint": {"template": "compare_candidates"}}):
+        value = copy.deepcopy(owned_project)
+        value["candidates"][0] = bad
+        cases.append((value, False))
     for request, accepted in cases:
         if validator.is_valid(request) != accepted:
             raise AssertionError(f"expected accepted={accepted}: {request!r}")

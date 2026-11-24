@@ -182,9 +182,12 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
                 (3, Some("current_stage"), Some("owned_session")) => {
                     (ForecastScope::CurrentStage, true)
                 }
+                (4, Some("complete_project"), Some("owned_session")) => {
+                    (ForecastScope::CompleteProject, true)
+                }
                 _ => {
                     return Err(invalid(
-                        "comparison requires version 1 without scopes, version 2 with complete_project, or version 3 with current_stage and owned_session progression",
+                        "comparison requires version 1 without scopes, version 2 with complete_project, version 3 with current_stage and owned_session, or version 4 with complete_project and owned_session",
                     ));
                 }
             };
@@ -615,7 +618,7 @@ pub(super) fn compare_with_owned_work(
         ));
     }
     if comparison.scope == ForecastScope::CompleteProject {
-        return project_comparison::compare(adapter, context, comparison, started);
+        return project_comparison::compare(adapter, context, comparison, started, owned);
     }
     let snapshot = adapter.snapshot();
     authorize(snapshot, context)?;

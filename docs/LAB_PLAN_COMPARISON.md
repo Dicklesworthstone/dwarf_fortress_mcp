@@ -168,10 +168,104 @@ failure or identity checks.
 Version 3 covers the current executable candidate stage. It does not compile
 future resource or room stages and does not poll deferred actions owned by
 another session; existing physical world jobs still evolve on the fork.
-Version 2 retains its separate complete-project model. Versions 1 and 2 retain
-their original progression assumptions. The emitted `select_candidate` request
+Version 2 retains its separate complete-project model. Version 4 combines
+complete projects with this owned-session progression, as described below.
+Versions 1 and 2 retain their original progression assumptions. The emitted `select_candidate` request
 remains version 1: selection freshly prepares the chosen current stage, and
 actual effects still need an explicit Commit.
+
+## Compare complete projects against owned work
+
+Use version 4 with `forecast_scope: "complete_project"` and
+`progression_scope: "owned_session"` to compare resource or room alternatives
+through their later stages while accounting for work already committed by the
+session:
+
+```json
+{
+  "template": "compare_candidates",
+  "version": 4,
+  "forecast_scope": "complete_project",
+  "progression_scope": "owned_session",
+  "horizon_ticks": 5000,
+  "candidates": [
+    {
+      "key": "current_labor",
+      "blueprint": {
+        "template": "production",
+        "quotas": [{"item": "BED", "minimum": 24}],
+        "acquire_resources": {"assign_labor": false}
+      }
+    },
+    {
+      "key": "allow_labor_setup",
+      "blueprint": {
+        "template": "production",
+        "quotas": [{"item": "BED", "minimum": 24}],
+        "acquire_resources": {"assign_labor": true}
+      }
+    }
+  ]
+}
+```
+
+As with version 2, alternatives must be typed production, provisioned-room or
+connected-room sources with one identical complete semantic goal and reserve
+frontier. Raw action and pause candidates are excluded. The source-bound
+`select_candidate` request remains version 1.
+
+Each alternative starts with the same authenticated peer census. Its initial
+stage and every hypothetical successor run on discarded forks using the
+foreground scheduler already used for original-goal forecasts. Existing live
+actions keep their retained commit order; recovered peers keep their real
+cadence, failure predicates and deadlines. Finite worker and input consumption,
+deferred pause/resume and exact reserve sampling therefore affect the complete
+candidate project. A candidate's successor is compiled only after its preceding
+actions are verified and its physical work is quiet, using supply actually
+present at that predicted frontier.
+
+Same-tick observations after each hypothetical candidate commit must not
+invalidate authenticated recovered peers. Such invalidation makes the
+candidate forecast unavailable, preventing its complete-goal shortcut from
+hiding the failure. This comparison policy does not change the independently
+selected-goal semantics of ordinary original forecasts.
+
+Later stages require current modeled effect authority, risk and scope,
+including grant expiry at that stage's anchor. All admitted stages contribute
+to `project_action_count`, `project_max_risk`,
+`project_requires_checkpoint` and `project_required_capabilities`.
+Stage actions, competing steps, retained custody, source work, predicate visits,
+polls and simulated ticks share one request budget and wall deadline. Later
+stages cannot renew those allowances. The report preserves every admitted
+stage and its cost even if a later stage is unavailable; incomplete evidence
+suppresses the comparison's recommendation.
+
+The result uses `dfmcp.plan-comparison/4`. Its complete staged prediction
+retains `owned_work`, `competing_work` and
+`shared_progression_work` alongside all complete-project outcomes.
+`horizon_tick` denotes the common project horizon; each admitted stage
+retains its own unextended obligation deadlines. A requested reserve still
+requires known True stock at the exact original frontier, independently of
+later action completion.
+
+Only this candidate's future stages are modeled. Other owned originals
+contribute their already committed work and recovered monitors, while their
+unreviewed future stages remain outside scope. Other sessions' deferred
+dispatch is also excluded. The forecast assumes the candidate's next review
+takes no additional time.
+
+Comparison changes no actual world, pending plan, original receipt, recovered
+monitor or proof. Selection prepares only the current executable stage under
+fresh current authority. Later real stages still require ordinary
+`continue_goal`, review and explicit Commit. Output overflow refuses the
+whole packet; it cannot discard a later stage or replace the pending plan.
+
+| Version | Candidate forecast | Competing deferred work |
+| --- | --- | --- |
+| 1 | Current executable stage | Candidate only |
+| 2 | Complete original project | Candidate only |
+| 3 | Current executable stage | Authenticated current-session live/recovered work |
+| 4 | Complete original project | Authenticated current-session live/recovered work |
 
 ## Forecast the complete resource or room project
 
@@ -341,12 +435,12 @@ frontier; a transport acknowledgment or completed action alone is insufficient.
 | `predicted_actions_complete` | Whether every action is predicted verified. |
 | `predicted_physical_quiescent` | Whether the candidate's original physical work is predicted quiet. |
 | `predicted_completion_tick` | The common frontier where all completion requirements hold; null otherwise. |
-| `horizon_tick` | The original plan's final obligation deadline, unchanged by comparison. |
+| `horizon_tick` | Current-stage profiles name the original action horizon; complete-project profiles name the common project horizon. Every stage keeps its original obligation deadlines. |
 | `simulation_horizon_tick` | Source game tick plus the requested common `horizon_ticks`. |
 | `simulation_horizon_reached` / `simulation_horizon_truncated` | Whether evaluation reached its cap and whether that cap stopped incomplete work before its original deadline. |
-| `resolution_ticks` | In versions 1 and 2, the common nominal maximum sampling stride; sealed deadlines and stability windows can require shorter advances. Version 3 uses the shared foreground schedule instead. |
+| `resolution_ticks` | In versions 1 and 2, the common nominal maximum sampling stride; sealed deadlines and stability windows can require shorter advances. Versions 3 and 4 use the shared foreground schedule instead. |
 | `sampling_policy` | The rule that inserts original obligation deadlines and final cadence-spaced stability observations into the nominal schedule. |
-| `simulation_slices` | Attempted model rounds for this candidate. Version 3 includes zero-time foreground polling and observes a reserve endpoint on the same shared fork. |
+| `simulation_slices` | Attempted model rounds for this candidate. Versions 3 and 4 include zero-time foreground polling and observes a reserve endpoint on the same shared fork. |
 | `blocked_by_pause` | The forecast cannot progress its outstanding work while the modeled world remains paused. |
 
 Candidates may finish early. No candidate simulates beyond the common horizon,
@@ -392,7 +486,7 @@ score or automatic effect dispatch.
 These are forecasts of the deterministic laboratory reference world under the
 assumption that no other agent acts. In versions 1 and 2, existing physical jobs
 evolve on each fork, but only the candidate's own deferred action chain is polled
-and dispatched. Version 3 explicitly includes this session's authenticated live
+and dispatched. Versions 3 and 4 explicitly include this session's authenticated live
 and recovered competing work as described above. Deferred dispatch owned by
 other sessions remains outside every profile. The actual adapter, clock, pending
 plan, action book and query-monitor roots remain unchanged by comparison.
@@ -415,7 +509,7 @@ publication. Opening another candidate does not reset that deadline.
 | Forecast source forks (versions 1 and 3) | 8 across the set; version 1 includes separate reserve forks, version 3 uses two source clones per candidate |
 | Simulation slices | 400 across the set |
 | Simulated ticks | Combined total at most the session's `max_game_ticks` |
-| Compiled action count | Combined total at most the session's `max_actions`; version 3 also charges all competing live/recovered steps for each candidate |
+| Compiled action count | Combined total at most the session's `max_actions`; versions 3 and 4 also charge all competing live/recovered steps for each candidate |
 | Action polls | At most `max_actions * 400` across the set |
 | Copied source records / canonical bytes | Combined fork totals within `max_entities` / `max_bytes` |
 | Complete encoded response | At most `min(max_bytes, max_output_tokens * 4)` bytes |
@@ -426,9 +520,9 @@ The common horizon itself must fit the game-tick budget. For example, granting
 `forecast_work` reports actual candidate, fork, action, poll, slice and
 simulated-tick costs. `actual_game_ticks_advanced` remains zero. Copied source
 bytes measure canonical snapshot work; retained adapter actions, plans,
-checkpoints and journal are not a measured heap-byte total. Version 3 additionally
-charges the canonical retained original and recovered-monitor custody of every
-copied candidate/peer set against those same record and byte allowances. Its
+checkpoints and journal are not a measured heap-byte total. Versions 3 and 4 additionally
+charge the canonical retained original and recovered-monitor custody of every
+copied candidate/peer set against those same record and byte allowances. Their
 aggregate predicate-work ceiling is 4,000,000 conservative node visits.
 
 Deadline and stability observations consume the same slice allowance as ordinary
@@ -521,3 +615,10 @@ costs, future capability failures, bounded horizons, ordinary current-stage
 selection and pending-plan preservation on output refusal. Test source does not
 by itself establish execution or full Rust qualification; the current status
 document records the commands that actually ran.
+
+Version 4 composes the complete-project source and stage machine with
+`owned_candidate_forecast.rs` and the metered original foreground model.
+Its model regressions cover later-stage costs and capability refusal, recovered
+peer invalidation, shared budgets and immutable canonical state. These remain
+source tests until executed; consult the current status for the exact
+validation boundary.

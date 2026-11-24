@@ -984,3 +984,59 @@ fn whole_project_incomplete_horizon_and_unavailable_final_stage_are_not_recommen
     assert_eq!(adapter.snapshot(), &before);
     Ok(())
 }
+
+#[test]
+fn owned_complete_project_requires_both_scopes_and_authenticated_session_work() -> Result<()> {
+    let valid = json!({
+        "template":"compare_candidates", "version":4,
+        "forecast_scope":"complete_project", "progression_scope":"owned_session",
+        "horizon_ticks":2_000, "candidates":production_candidates(),
+    });
+    let request = parse(&valid.to_string())?
+        .ok_or_else(|| invalid("owned project request not recognized"))?;
+    assert!(uses_owned_progression(&request));
+    for (field, value) in [
+        ("version", json!(3)),
+        ("version", json!(5)),
+        ("forecast_scope", json!("current_stage")),
+        ("forecast_scope", Value::Null),
+        ("progression_scope", json!("candidate_only")),
+        ("progression_scope", Value::Null),
+        ("candidates", pause_candidates()),
+        ("automatic_continuation", json!(true)),
+    ] {
+        let mut bad = valid.clone();
+        bad[field] = value;
+        assert_eq!(
+            parse(&bad.to_string())
+                .expect_err("ambiguous owned project accepted")
+                .code,
+            ErrorCode::InvalidRequest
+        );
+    }
+    for field in ["forecast_scope", "progression_scope"] {
+        let mut bad = valid.clone();
+        bad.as_object_mut()
+            .ok_or_else(|| invalid("request is not an object"))?
+            .remove(field);
+        assert_eq!(
+            parse(&bad.to_string())
+                .expect_err("implicit owned project scope accepted")
+                .code,
+            ErrorCode::InvalidRequest
+        );
+    }
+    let adapter = adapter()?;
+    let before = adapter.snapshot().clone();
+    let error = compare(
+        &adapter,
+        &context(&adapter),
+        IntentId::new(120),
+        &request,
+        Instant::now(),
+    )
+    .expect_err("snapshot-only comparison fabricated owned-session custody");
+    assert_eq!(error.code, ErrorCode::InvalidRequest);
+    assert_eq!(adapter.snapshot(), &before);
+    Ok(())
+}
