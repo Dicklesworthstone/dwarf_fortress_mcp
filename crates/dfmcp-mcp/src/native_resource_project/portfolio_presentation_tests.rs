@@ -2,7 +2,7 @@
 use super::*;
 use crate::live_production_runtime::{ProjectStockGoal, StockTargetsRequest};
 
-fn fixture(count: usize, assigning: bool) -> Value {
+pub(super) fn fixture(count: usize, assigning: bool) -> Value {
     let (_, mut child) = stock_watch::tests::fixture();
     let scalar = child["stock_target"].clone();
     let mut requested = Vec::new();

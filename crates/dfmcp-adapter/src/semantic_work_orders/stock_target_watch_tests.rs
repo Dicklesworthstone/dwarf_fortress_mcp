@@ -482,3 +482,53 @@ fn no_work_watch_sample_and_original_witnesses_are_deterministic_and_sensitive()
     assert_ne!(b.witness, changed.witness);
     Ok(())
 }
+
+#[test]
+fn no_work_watch_withheld_for_reviewed_time_preserves_only_authentic_stability() -> Result<()> {
+    let (mut watch, _, _) = initial(2, 200)?;
+    let first = sample(&mut watch, 130, 8, Some(20))?;
+    assert_eq!(first.stable_samples_observed, 1);
+    let witness = watch.witness();
+    watch.withhold_current_sample();
+    assert!(watch.latest().is_none());
+    assert!(!watch.current_goal_proven());
+    assert_eq!(watch.achieved_at(), None);
+    assert_eq!(watch.witness(), witness);
+    assert_eq!(watch.high_tick(), GameTick(130));
+    assert_eq!(sample(&mut watch, 130, 8, Some(20))?, first);
+    watch.withhold_current_sample();
+    let repeated_tick = sample(&mut watch, 130, 9, Some(20))?;
+    assert_eq!(repeated_tick.stable_samples_observed, 1);
+    assert_eq!(repeated_tick.last_counted_tick, Some(GameTick(130)));
+    watch.withhold_current_sample();
+    let complete = sample(&mut watch, 140, 10, Some(20))?;
+    assert_eq!(complete.stable_samples_observed, 2);
+    assert!(complete.continuous);
+    assert!(complete.current_goal_proven);
+    assert_eq!(complete.achieved_at, Some(GameTick(140)));
+    watch.withhold_current_sample();
+    assert!(!watch.current_goal_proven());
+    assert!(watch.latest().is_none());
+    assert_eq!(watch.achieved_at(), Some(GameTick(140)));
+    Ok(())
+}
+
+#[test]
+fn no_work_watch_withholding_does_not_erase_failed_or_missing_observations() -> Result<()> {
+    for failed in [false, true] {
+        let (mut watch, _, _) = initial(2, 200)?;
+        sample(&mut watch, 130, 8, Some(20))?;
+        if failed { watch.invalidate_current_sample(); }
+        watch.withhold_current_sample();
+        let sequence = if failed { 9 } else { 20 };
+        let restarted = sample(&mut watch, 140, sequence, Some(20))?;
+        assert_eq!(restarted.stable_samples_observed, 1);
+        assert!(!restarted.current_goal_proven);
+        assert!(!restarted.continuous);
+        watch.withhold_current_sample();
+        let complete = sample(&mut watch, 150, sequence + 1, Some(20))?;
+        assert!(complete.current_goal_proven);
+        assert_eq!(complete.achieved_at, Some(GameTick(150)));
+    }
+    Ok(())
+}

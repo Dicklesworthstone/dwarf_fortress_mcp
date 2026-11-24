@@ -57,6 +57,8 @@ mod portfolio_request;
 mod prerequisite_binding;
 mod project;
 mod project_goal;
+mod project_stock_clock;
+pub(crate) use project_stock_clock::StockWatchClockBasis;
 #[cfg(all(
     test,
     target_os = "linux",

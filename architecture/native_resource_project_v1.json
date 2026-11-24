@@ -10,7 +10,8 @@
     "df-dfhack-bridge-plane-c-pic.4",
     "dfmcp-reality-wiring-proof-4bf.14",
     "df-native-stock-target-3m9",
-    "df-production-preplan-inspection-7hd"
+    "df-production-preplan-inspection-7hd",
+    "df-combined-order-clock-c8m"
   ],
   "public_tools": [
     "fortress_open_session",
@@ -209,7 +210,9 @@
     "stock_targets_request_bytes": 8192,
     "other_plan_request_bytes": 4096,
     "production_inspection_request_bytes": 65536,
-    "production_clock_request_bytes": 2048
+    "production_clock_request_bytes": 2048,
+    "stock_watch_clock_request_bytes": 2048,
+    "stock_watch_clock_runs": 64
   },
   "output": {
     "agent_turn_schema": "dfmcp.agent_turn/1",
@@ -429,7 +432,19 @@
     "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_tests.rs",
     "crates/dfmcp-mcp/src/live_production_server.rs",
     "tests/stdio/combined_stock_target_runtime_peer.py",
-    "tests/stdio/combined_stock_targets_runtime_peer.py"
+    "tests/stdio/combined_stock_targets_runtime_peer.py",
+    "crates/dfmcp-mcp/src/native_resource_project/stock_clock_runtime.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/stock_clock.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/stock_clock_tests.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/stock_clock_recovery_tests.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/stock_clock_config_tests.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/stock_clock_presentation.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/stock_clock_presentation_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/project_stock_clock.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/project_stock_clock_runtime_tests.rs",
+    "crates/dfmcp-adapter/src/semantic_work_orders/stock_targets_watch.rs",
+    "crates/dfmcp-adapter/src/semantic_work_orders/stock_targets_watch_tests.rs",
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/native_resource_stock_clock_tests.rs"
   ],
   "qualification": {
     "pre_outage_ledger_component_cases_passed": 17,
@@ -525,7 +540,8 @@
       "generic_child_plan_bypass": false,
       "retained_completed_watch_can_restart_maintenance": false,
       "separate_effect_review_and_confirmation_required": true
-    }
+    },
+    "optional_time_control": "optional_stock_watch_clock"
   },
   "parent_tick_floor_validation": {
     "new_regressions": 5,
@@ -679,6 +695,76 @@
       "tests_executed": false,
       "compilation_completed": false,
       "blocker": "Execution environment unavailable; source review does not establish runtime or live qualification"
-    }
+    },
+    "all_met_watch_parent_clock": "separate optional_stock_watch_clock; no per-order target created"
+  },
+  "optional_stock_watch_clock": {
+    "selector": "stock_watch_clock: true",
+    "default": false,
+    "independent_source": "configured production inventory_clock, Run/1.13",
+    "private_journal": "stock-watch-clock.journal",
+    "checkpoint_field": "stock_clock",
+    "target_schema": "dfmcp.native-resource-stock-clock-target/1",
+    "checkpoint_schema": "dfmcp.native-resource-stock-clock/1",
+    "view_schema": "dfmcp.native-resource-stock-clock-view/1",
+    "guidance_schema": "dfmcp.resource-stock-clock-guidance/1",
+    "plan_kind": "stock_watch_run",
+    "plan_fields": [
+      "kind",
+      "original_paired_seal",
+      "game_ticks",
+      "wall_millis"
+    ],
+    "commit_wait_cancel_scope": "stock_clock",
+    "order_step_id_allowed": false,
+    "target_binds": [
+      "parent_journal_id",
+      "complete_parent_original",
+      "complete_original_stock_goal",
+      "acknowledged_native_production_custody",
+      "fortress",
+      "epoch",
+      "original_tick",
+      "absolute_deadline"
+    ],
+    "initialized_only_after_explicit_no_work_plan": true,
+    "no_order_or_created_receipt_required": true,
+    "initial_parent_ack_precedes_clock_file_creation": true,
+    "per_order_clock_slots_consumed": false,
+    "creation_marker_without_original_production": true,
+    "replay_enforces_immutable_opt_in": true,
+    "actual_journal_descendant_required": true,
+    "independent_tick_and_sequence_floors_monotone": true,
+    "known_head_to_initial_header_rollback_refused": true,
+    "current_review_restored": false,
+    "sample_history_restored": false,
+    "first_true_sample_without_counted_tick_can_advance": true,
+    "successful_interval_withholds_proof_preserves_authentic_streak": true,
+    "failed_observation_interrupts_streak": true,
+    "same_tick_counts_twice": false,
+    "fresh_complete_stock_true_required": true,
+    "fresh_final_native_edge_guard": true,
+    "paired_census_and_native_tick_match_required": true,
+    "parent_custody_verified_after_native_marker": true,
+    "complete_census_and_final_parent_retention_prepaid": true,
+    "single_original_wall_deadline": true,
+    "every_interval_separately_confirmed": true,
+    "automatic_unpause_or_chaining": false,
+    "pending_clock_withholds_goal_and_continuation": true,
+    "settled_receipt_is_current_stock_proof": false,
+    "later_production_keeps_historical_stock_clock": true,
+    "project_cancel_still_retires_later_production_preparation": true,
+    "expired_goal_can_reconcile": true,
+    "safety_cancel_authority": [
+      "Query",
+      "ControlClock"
+    ],
+    "safety_cancel_requires_plan_observe_or_current_stock": false,
+    "max_runs": 64,
+    "execution_validation": "see IMPLEMENTATION_STATUS.md; integrated MCP and live qualification remain unestablished",
+    "external_recovery_configuration": "stock_clock_recovery",
+    "external_and_acknowledged_heads_both_verified": true,
+    "external_pin_can_initialize_missing_journal": false,
+    "newer_consumed_floors_retained_after_parent_append_failure": true
   }
 }

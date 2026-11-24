@@ -162,6 +162,14 @@ impl StockTargetWatch {
         !self.fenced && self.latest.is_some_and(|sample| sample.current_goal_proven)
     }
 
+    /// Withhold the published sample during separately supervised time while
+    /// preserving only the authentic prior observation streak. This neither
+    /// counts a sample nor asserts continuity or current truth. The caller must
+    /// settle its clock before sampling again; failures still use invalidate.
+    pub fn withhold_current_sample(&mut self) {
+        self.latest = None;
+    }
+
     /// A failed acquisition or publication withdraws current proof and breaks
     /// only unfinished stability. Cadence and historical achievement survive.
     pub fn invalidate_current_sample(&mut self) {

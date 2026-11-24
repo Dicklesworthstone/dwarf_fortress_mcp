@@ -223,6 +223,9 @@ struct Input {
     #[serde(default)]
     appoint_manager: bool,
     manager_handoff: Option<Value>,
+    #[serde(default)]
+    stock_watch_clock: bool,
+    stock_clock_recovery: Option<Value>,
 }
 
 pub(super) struct Config {
@@ -236,6 +239,8 @@ pub(super) struct Config {
     pub(super) tree_handoff: Option<TreeProjectHandoff>,
     pub(super) manager: Option<ProjectManagerConfig>,
     pub(super) manager_handoff: Option<ManagerProjectHandoff>,
+    pub(super) stock_watch_clock: bool,
+    pub(super) stock_clock_recovery: Option<Value>,
     guard: Arc<dyn Fn() -> Result<()> + Send + Sync>,
 }
 
@@ -285,6 +290,23 @@ impl Config {
             .map_err(|_| invalid("invalid closed resource project configuration"))?;
         input.goal.canonicalize()?;
         directory(&input.directory)?;
+        if let Some(recovery) = &input.stock_clock_recovery {
+            if input.initialize || !input.stock_watch_clock {
+                return Err(invalid(
+                    "stock-clock recovery only narrows an existing opted-in project",
+                ));
+            }
+            super::runtime::stock_clock::ClockCheckpoint::from_json(recovery)?;
+        }
+        if input.stock_watch_clock {
+            let production: Value = serde_json::from_str(&raw[2])
+                .map_err(|_| invalid("invalid production configuration"))?;
+            if !production["inventory_clock"].is_object() {
+                return Err(invalid(
+                    "stock_watch_clock requires an independently configured production inventory clock",
+                ));
+            }
+        }
         if input.schema != "dfmcp.native-resource-project-development/1"
             || input.initialize == input.acknowledged.is_some()
             || (input.initialize
@@ -429,6 +451,9 @@ impl Config {
         if let Some(manager) = &manager {
             original["manager_policy"] = json!(manager.project_identity().to_hex());
         }
+        if input.stock_watch_clock {
+            original["stock_watch_clock"] = json!(true);
+        }
         Ok((
             Self {
                 directory: input.directory,
@@ -441,6 +466,8 @@ impl Config {
                 tree_handoff,
                 manager,
                 manager_handoff,
+                stock_watch_clock: input.stock_watch_clock,
+                stock_clock_recovery: input.stock_clock_recovery,
                 guard,
             },
             workshop,
@@ -637,3 +664,7 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "stock_clock_config_tests.rs"]
+mod stock_clock_tests;

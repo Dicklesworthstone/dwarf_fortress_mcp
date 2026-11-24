@@ -39,10 +39,7 @@ fn stock_seeded_with(
     Ok((journal, storage, acknowledgements, original))
 }
 
-fn stock_marker(
-    journal: &Journal<Memory, Memory>,
-    original: &Value,
-) -> TestResult<Checkpoint> {
+fn stock_marker(journal: &Journal<Memory, Memory>, original: &Value) -> TestResult<Checkpoint> {
     let mut checkpoint = journal.snapshot().checkpoint.clone();
     let goal: ProjectStockGoal = serde_json::from_value(original["goal"].clone())?;
     let production = checkpoint.production.as_ref().ok_or("missing production")?;
@@ -66,7 +63,10 @@ fn stock_marker(
 }
 
 fn stock_progress(checkpoint: &mut Checkpoint, tick: u64, sequence: u64) -> TestResult {
-    let clock = checkpoint.stock_clock.as_mut().ok_or("missing stock clock")?;
+    let clock = checkpoint
+        .stock_clock
+        .as_mut()
+        .ok_or("missing stock clock")?;
     clock["head"] = json!(
         Digest32::of_bytes(format!("stock clock descendant {tick} {sequence}").as_bytes()).to_hex()
     );
@@ -160,11 +160,18 @@ fn stock_clock_omission_preserves_exact_legacy_journal_bytes() -> TestResult {
 #[test]
 fn stock_clock_first_marker_requires_original_opt_in_and_control_authority() -> TestResult {
     let mut disabled = stock_original(false);
-    disabled.as_object_mut().ok_or("missing original")?.remove("stock_watch_clock");
+    disabled
+        .as_object_mut()
+        .ok_or("missing original")?
+        .remove("stock_watch_clock");
     let (mut journal, storage, acknowledgements, original) = stock_seeded_with(disabled)?;
     let checkpoint = stock_marker(&journal, &original)?;
     let bytes = (storage.raw(), acknowledgements.raw());
-    assert!(journal.advance(&context(), Stage::Production, checkpoint).is_err());
+    assert!(
+        journal
+            .advance(&context(), Stage::Production, checkpoint)
+            .is_err()
+    );
     assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
 
     for policy in [Value::Null, json!(false), json!("true")] {
@@ -193,18 +200,26 @@ fn stock_clock_first_marker_requires_original_opt_in_and_control_authority() -> 
     let checkpoint = stock_marker(&journal, &original)?;
     let bytes = (storage.raw(), acknowledgements.raw());
     let mut query_only = context();
-    query_only.grants.retain(|grant| grant.capability == Capability::Query);
-    assert!(journal.advance(&query_only, Stage::Production, checkpoint.clone()).is_err());
+    query_only
+        .grants
+        .retain(|grant| grant.capability == Capability::Query);
+    assert!(
+        journal
+            .advance(&query_only, Stage::Production, checkpoint.clone())
+            .is_err()
+    );
     assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
     let pin = journal.pin();
     drop(journal);
-    let mut recovered = reopen_stock(
-        &storage, &acknowledgements, &original, pin, Mode::Recover,
-    )?;
+    let mut recovered = reopen_stock(&storage, &acknowledgements, &original, pin, Mode::Recover)?;
     let bytes = (storage.raw(), acknowledgements.raw());
     let mut current = context();
     current.session_id = SessionId::new(7002);
-    assert!(recovered.advance(&current, Stage::Production, checkpoint).is_err());
+    assert!(
+        recovered
+            .advance(&current, Stage::Production, checkpoint)
+            .is_err()
+    );
     assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
     Ok(())
 }
@@ -217,8 +232,8 @@ fn stock_clock_first_marker_is_isolated_from_orders_and_requires_initial_custody
         let mut checkpoint = stock_marker(&journal, &original)?;
         match cause {
             0 => {
-                checkpoint.production.as_mut().ok_or("missing production")?
-                    ["observation_tick_floor"] = json!(131);
+                checkpoint.production.as_mut().ok_or("missing production")?["observation_tick_floor"] =
+                    json!(131);
             }
             1 => checkpoint.production_intent = Some(production_intent()),
             2 => {
@@ -241,8 +256,15 @@ fn stock_clock_first_marker_is_isolated_from_orders_and_requires_initial_custody
             _ => journal.cancel(&context()).map(|_| ())?,
         }
         let bytes = (storage.raw(), acknowledgements.raw());
-        let next = if cause == 6 { Stage::Cancelled } else { Stage::Production };
-        assert!(journal.advance(&context(), next, checkpoint).is_err(), "{cause}");
+        let next = if cause == 6 {
+            Stage::Cancelled
+        } else {
+            Stage::Production
+        };
+        assert!(
+            journal.advance(&context(), next, checkpoint).is_err(),
+            "{cause}"
+        );
         assert_eq!((storage.raw(), acknowledgements.raw()), bytes, "{cause}");
     }
     Ok(())
@@ -262,7 +284,11 @@ fn stock_clock_descendants_recover_and_drain_after_stop_without_restoring_proof(
             if stopped {
                 journal.cancel(&context())?;
             }
-            let stage = if stopped { Stage::Cancelled } else { Stage::Production };
+            let stage = if stopped {
+                Stage::Cancelled
+            } else {
+                Stage::Production
+            };
             let mut checkpoint = journal.snapshot().checkpoint.clone();
             stock_progress(&mut checkpoint, 170, 9)?;
             // The child is still at 130; the separate clock must raise the
@@ -277,7 +303,11 @@ fn stock_clock_descendants_recover_and_drain_after_stop_without_restoring_proof(
             );
             drop(journal);
             let mut recovered = reopen_stock(
-                &storage, &acknowledgements, &original, ancestor, Mode::Recover,
+                &storage,
+                &acknowledgements,
+                &original,
+                ancestor,
+                Mode::Recover,
             )?;
             assert_eq!(recovered.pin(), expected);
             assert_eq!(recovered.snapshot().checkpoint, checkpoint);
@@ -288,14 +318,19 @@ fn stock_clock_descendants_recover_and_drain_after_stop_without_restoring_proof(
             );
             assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
             assert_eq!(
-                (storage.state.borrow().writes, acknowledgements.state.borrow().writes),
+                (
+                    storage.state.borrow().writes,
+                    acknowledgements.state.borrow().writes
+                ),
                 writes
             );
             // A retained safety/reconciliation frontier may exceed the goal
             // deadline. It neither renews that deadline nor restores its truth.
             let mut current = context();
             current.session_id = SessionId::new(7002);
-            current.grants.retain(|grant| grant.capability == Capability::Query);
+            current
+                .grants
+                .retain(|grant| grant.capability == Capability::Query);
             stock_progress(&mut checkpoint, 1100, 10)?;
             recovered.advance(&current, stage, checkpoint.clone())?;
             assert_eq!(recovered.pin().authority_tick_floor, 1100);
@@ -353,7 +388,12 @@ fn stock_clock_binding_rejects_foreign_root_goal_source_and_fortress_before_firs
                 .to_json(),
             );
             let bytes = (storage.raw(), acknowledgements.raw());
-            assert!(journal.advance(&context(), Stage::Production, checkpoint).is_err(), "{cause}");
+            assert!(
+                journal
+                    .advance(&context(), Stage::Production, checkpoint)
+                    .is_err(),
+                "{cause}"
+            );
             assert_eq!((storage.raw(), acknowledgements.raw()), bytes, "{cause}");
         }
     }
@@ -376,11 +416,12 @@ fn settled_stock_clock_custody_survives_later_ordinary_production() -> TestResul
     assert_eq!(checkpoint.stock_clock, retained_clock);
     let pin = journal.pin();
     drop(journal);
-    let recovered = reopen_stock(
-        &storage, &acknowledgements, &original, pin, Mode::Recover,
-    )?;
+    let recovered = reopen_stock(&storage, &acknowledgements, &original, pin, Mode::Recover)?;
     assert_eq!(recovered.snapshot().checkpoint.stock_clock, retained_clock);
-    assert_eq!(recovered.snapshot().checkpoint.production_intent, checkpoint.production_intent);
+    assert_eq!(
+        recovered.snapshot().checkpoint.production_intent,
+        checkpoint.production_intent
+    );
     Ok(())
 }
 
@@ -399,7 +440,7 @@ fn checksummed_replay_cannot_rebind_or_regress_stock_clock_beneath_a_higher_pare
     let ack_chain = journal.ack_chain;
     let base = (storage.raw(), acknowledgements.raw());
     drop(journal);
-    for cause in 0..8 {
+    for cause in 0..9 {
         storage.replace(base.0.clone());
         acknowledgements.replace(base.1.clone());
         let mut changed = checkpoint.clone();
@@ -418,22 +459,24 @@ fn checksummed_replay_cannot_rebind_or_regress_stock_clock_beneath_a_higher_pare
                     json!(8);
             }
             4 => {
-                changed.production.as_mut().ok_or("missing production")?
-                    ["native_custody"]["order_journal_id"] =
+                changed.production.as_mut().ok_or("missing production")?["native_custody"]["order_journal_id"] =
                     json!(Digest32::of_bytes(b"replacement production journal").to_hex());
             }
             5 => {
-                changed.stock_clock.as_mut().ok_or("missing clock")?
-                    ["target"]["original_paired_seal"] =
+                changed.stock_clock.as_mut().ok_or("missing clock")?["target"]["original_paired_seal"] =
                     json!(Digest32::of_bytes(b"replacement stock clock seal").to_hex());
             }
             6 => {
-                changed.production.as_mut().ok_or("missing production")?
-                    ["workshop_prerequisite"]["checkpoint"]["tick"] = json!(129);
+                changed.production.as_mut().ok_or("missing production")?["workshop_prerequisite"]
+                    ["checkpoint"]["tick"] = json!(129);
             }
-            _ => {
+            7 => {
                 changed.stock_clock.as_mut().ok_or("missing clock")?["current_goal_proven"] =
                     json!(true);
+            }
+            _ => {
+                let clock = changed.stock_clock.as_mut().ok_or("missing clock")?;
+                clock["head"] = clock["journal_id"].clone();
             }
         }
         let body = serde_json::to_vec(&Body {
@@ -451,12 +494,22 @@ fn checksummed_replay_cannot_rebind_or_regress_stock_clock_beneath_a_higher_pare
             acknowledgements.state.borrow().writes,
         );
         assert!(
-            reopen_stock(&storage, &acknowledgements, &original, pin.clone(), Mode::Recover).is_err(),
+            reopen_stock(
+                &storage,
+                &acknowledgements,
+                &original,
+                pin.clone(),
+                Mode::Recover
+            )
+            .is_err(),
             "{cause}"
         );
         assert_eq!((storage.raw(), acknowledgements.raw()), bytes, "{cause}");
         assert_eq!(
-            (storage.state.borrow().writes, acknowledgements.state.borrow().writes),
+            (
+                storage.state.borrow().writes,
+                acknowledgements.state.borrow().writes
+            ),
             writes,
             "{cause}"
         );
@@ -469,7 +522,10 @@ fn checksummed_replay_cannot_rebind_or_regress_stock_clock_beneath_a_higher_pare
 #[test]
 fn checksummed_replay_cannot_add_a_stock_clock_to_a_legacy_original() -> TestResult {
     let mut original = stock_original(false);
-    original.as_object_mut().ok_or("missing original")?.remove("stock_watch_clock");
+    original
+        .as_object_mut()
+        .ok_or("missing original")?
+        .remove("stock_watch_clock");
     let (journal, storage, acknowledgements, original) = stock_seeded_with(original)?;
     let checkpoint = stock_marker(&journal, &original)?;
     let pin = journal.pin();
@@ -485,9 +541,7 @@ fn checksummed_replay_cannot_add_a_stock_clock_to_a_legacy_original() -> TestRes
     })?;
     append_stock_replay_frame(&storage, &acknowledgements, &pin, ack_chain, &body)?;
     let bytes = (storage.raw(), acknowledgements.raw());
-    assert!(
-        reopen_stock(&storage, &acknowledgements, &original, pin, Mode::Recover).is_err()
-    );
+    assert!(reopen_stock(&storage, &acknowledgements, &original, pin, Mode::Recover).is_err());
     assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
     Ok(())
 }
@@ -501,16 +555,20 @@ fn stock_clock_frontier_cannot_bypass_parent_authority_expiry() -> TestResult {
     let bytes = (storage.raw(), acknowledgements.raw());
     stock_progress(&mut checkpoint, 1201, 9)?;
     let mut query_only = context();
-    query_only.grants.retain(|grant| grant.capability == Capability::Query);
-    assert!(journal.advance(&query_only, Stage::Production, checkpoint).is_err());
+    query_only
+        .grants
+        .retain(|grant| grant.capability == Capability::Query);
+    assert!(
+        journal
+            .advance(&query_only, Stage::Production, checkpoint)
+            .is_err()
+    );
     assert_eq!(journal.pin().authority_tick_floor, 1201);
     assert!(journal.verify(&context()).is_err());
     assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
     let pin = journal.pin();
     drop(journal);
-    assert!(
-        reopen_stock(&storage, &acknowledgements, &original, pin, Mode::Recover).is_err()
-    );
+    assert!(reopen_stock(&storage, &acknowledgements, &original, pin, Mode::Recover).is_err());
     assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
     Ok(())
 }
@@ -521,8 +579,13 @@ fn stock_clock_marker_cannot_open_before_the_production_child() -> TestResult {
     let storage = Memory::default();
     let acknowledgements = Memory::default();
     let mut journal = Journal::open(
-        storage.clone(), acknowledgements.clone(), &context(),
-        Mode::Control, true, original.clone(), None,
+        storage.clone(),
+        acknowledgements.clone(),
+        &context(),
+        Mode::Control,
+        true,
+        original.clone(),
+        None,
     )?;
     let goal: ProjectStockGoal = serde_json::from_value(original["goal"].clone())?;
     let source = preplan_production();
@@ -538,11 +601,17 @@ fn stock_clock_marker_cannot_open_before_the_production_child() -> TestResult {
     let mut checkpoint = workshop();
     checkpoint.stock_clock = Some(
         ClockCheckpoint::prospective(
-            target, Digest32::of_bytes(b"separate no-order stock clock journal"),
-        )?.to_json(),
+            target,
+            Digest32::of_bytes(b"separate no-order stock clock journal"),
+        )?
+        .to_json(),
     );
     let bytes = (storage.raw(), acknowledgements.raw());
-    assert!(journal.advance(&context(), Stage::Workshop, checkpoint).is_err());
+    assert!(
+        journal
+            .advance(&context(), Stage::Workshop, checkpoint)
+            .is_err()
+    );
     assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
     Ok(())
 }

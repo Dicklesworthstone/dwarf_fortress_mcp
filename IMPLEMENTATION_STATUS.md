@@ -1,34 +1,67 @@
 # Implementation Status
 
-## Unreleased — Retain an independent no-order stock-watch clock
+## Unreleased — Advance original no-order stock goals with bounded time
 
-The native resource-project parent now has an internal bounded Run/1.13 owner
-for a no-order stock goal. Its immutable target binds the complete parent
-original, every stock minimum and temporal term, acknowledged native production
-custody, fortress and source epoch. It never invents a manager order or a Created
-receipt. A separate fixed private journal keeps later per-order clock slots
-available.
+The native resource-project development profile now integrates an optional
+Run/1.13 clock for scalar and complete portfolio stock goals that already have
+enough inventory but still need temporal stability. An immutable
+`stock_watch_clock: true` opt-in requires independently configured production
+inventory-clock authority. Current qualified True stock and unfinished original
+cadence can offer `stock_watch_run`; each bounded interval requires Plan review
+and a separate Commit confirmation under `scope: "stock_clock"`. Wait, Query
+and cancellation reconcile that same owner. No manager order or Created receipt
+is manufactured, and no automatic run loop or continuation is introduced.
 
-Parent replay authenticates an explicit immutable opt-in and acknowledges the
-exact prospective clock identity before file creation. First publication is a
-separate Production checkpoint while no order original exists. The target and
-journal identity cannot be replaced; tick and source-sequence rejection floors
-cannot regress, including beneath a higher parent floor or during cancelled
-project drain. Older originals keep their canonical omitted-field bytes.
+The clock target binds the complete parent original, every minimum and temporal
+term, acknowledged native production custody, fortress and source epoch. A
+separate fixed private journal preserves later per-order clock slots. The
+parent acknowledges its exact prospective identity before file creation in an
+isolated Production checkpoint with no order original. Replay refuses changed
+targets, replacement journals, regressed tick/source floors and historical-head
+rollback, including beneath a higher parent floor or during cancelled-project
+drain. Older originals retain their canonical omitted-field bytes.
 
-The owner retains one current reviewed interval, uses the existing final native
-guard and single-attempt unpause coordinator, and restores neither review nor
-stock proof on recovery. Query reconciliation and independently authorized
-safety cancellation retain the original deadline without requiring new stock
-truth. This checkpoint supplies the internal owner and durable custody; the
-public foreground stock-watch workflow is being wired separately.
+Prepare and Commit use fresh complete child censuses, independently authorized
+native control and the existing final guard and single-attempt unpause
+coordinator. The shared operation allowance reserves both censuses, native work,
+parent verification and the closing parent checkpoint before effect dispatch.
+Successful intervals withhold the old current sample while preserving authentic
+counted history; only later qualified samples advance stability. Same-tick
+reads add no count. False, unknown, expired, completed or source-fenced goals
+cannot borrow the clock path, and stock loss retains the separate original-goal
+continuation workflow.
 
-Seven core coordinator cases, ten parent custody/replay cases and a native
-private-file subprocess campaign are added as regression source. They have
-been reviewed against the existing owners but have not executed: the local
-executor disconnected during this work, and the current exact MCP dependency
-build remains unqualified as recorded below. No native/live qualification,
-compatibility admission or production mutation capability is claimed.
+Responses retain an external `stock_clock_recovery` descriptor even when the
+closing parent checkpoint fails. Reopening validates both the acknowledged
+parent pin and this exact clock owner against surviving journal ancestry and
+merges consumed tick/source floors monotonically. An unverified reopened owner
+cannot replace the supplied external descriptor. This descriptor restores no
+review, current pause proof or stock sample. Reconciliation and independently
+authorized safety cancellation remain available after the original deadline;
+retained preparation without a current review produces explicit inspection or
+cancellation guidance. Agent Turns preserve scalar/portfolio root evidence,
+separate clock custody, current confirmations and proof withdrawal while time
+remains unsettled.
+
+The complete production adapter library compiled from actual source on nightly.
+Scoped actual-source component execution passed **133 distinct cases**: 36 stock
+watch cases, 62 parent journal cases (including all ten new stock-clock recovery
+cases), 17 parent continuity cases, seven stock-clock coordinator cases, one
+native private-file factory case exercising three subprocess scenarios, and ten
+stock-clock JSON packet cases. Shared coordinator cases are counted once.
+The components use real core/world/intent/adapter implementations and the exact
+locked serialization dependencies. Nine packet tests are unchanged; the tenth
+retains all JSON assertions while excluding its final fastmcp codec assertion.
+The refreshed packet cases also preserve the newest actual clock pin and source
+floors beside historical run evidence and the acknowledged parent pin. The
+separate codec/chunking case is unexecuted.
+
+Full MCP compilation, the integrated parent/typed-child TCP campaign, wire-codec
+qualification and native game/live qualification remain unestablished. The
+exact MCP dependency build was previously killed while compiling unchanged
+Asupersync 0.6.2. Required `scripts/verify.sh` reached the missing `br` prerequisite;
+`scripts/qualify_local.sh` refused the dirty worktree. These component results do
+not complete either gate or change compatibility admission.
 
 Owners: `df-native-stock-target-3m9`, `df-combined-order-clock-c8m`,
 `dfmcp-reality-wiring-proof-4bf.14` (in progress).

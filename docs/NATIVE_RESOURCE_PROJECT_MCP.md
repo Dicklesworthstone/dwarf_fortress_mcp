@@ -236,7 +236,8 @@ call. Reopening a retained original still requires every acknowledged journal
 to exist and match its exact identity; it cannot recreate missing or partial
 custody. A one-order portfolio uses the retained first clock owner without
 requiring authority to create additional owners. An all-met stock watch has no
-original order or clock target and does not gain clock authority.
+original order or per-order clock target. The optional parent stock-watch clock
+below owns separate custody and still requires independent clock authority.
 
 ### Optional Manager stage
 
@@ -509,8 +510,10 @@ When that requirement is met and the current count is still sufficient, the
 typed child result can establish the parent's `original_goal_proven` at its
 exact observation anchor without creating any order or labor effect.
 
-The no-work path does not advance game time. Repeated Plan and Query calls
-cannot renew the deadline or manufacture samples. Failed observations or
+Ordinary no-work sampling does not advance game time. An explicitly configured
+parent stock-watch clock can advance one separately reviewed interval as
+described below. Repeated Plan and Query calls cannot renew the deadline or
+manufacture samples. Failed observations or
 publication withdraw current proof; consumption makes current truth false.
 Explicit goal/project cancellation withdraws the watch. Its sample history is
 process-local and is never restored from the retained census or recovery JSON.
@@ -694,15 +697,99 @@ queries the exact portfolio owner holding pending work, or explains an operator
 blocker such as zero allowance, missing independent authority or an expired
 original. A consumed newer source floor can therefore request a fresh sample
 without suggesting a stale interval. Source loss, Unknown truth and full
-retained history remain explicit limitations. No-work watches retain their
-existing observation lifecycle and have no original Created clock target.
+retained history remain explicit limitations. No-work watches have no original
+Created order target; their optional parent clock has its own binding and
+observation lifecycle.
+
+### Advance a no-order stock watch
+
+Set `stock_watch_clock: true` in the closed parent configuration before
+initialization to enable this path. The field defaults to false; null and
+caller-selected clock paths are rejected. It requires the existing independent
+production `inventory_clock` configuration, source generation, credential
+and control permission. A positive session game-tick allowance is also needed.
+The immutable original retains this opt-in, so an existing project cannot
+acquire it by editing restart configuration.
+
+After an explicit `stock_target` or `stock_targets` Plan finds every minimum
+already met, the parent acknowledges a separate clock target and exact initial
+journal identity before creating `stock-watch-clock.journal` in its private
+directory. This creates no order, production publication intent or native time
+advance. Per-order clock slots remain available if consumption later requires
+the first production original.
+
+The target binds the complete original goal, parent journal and acknowledged
+production source custody, including the original fortress, source epoch and
+absolute deadline. It does not use a process-local watch witness as a durable
+identity. Scalar and one-to-four-target portfolio goals use the same parent
+clock, and every original minimum must hold in the fresh joint census.
+
+1. Use `fortress_wait` with `scope: "goal"` for a fresh paused stock sample.
+   A True sample at the initial tick can justify the first cadence interval
+   even though it has contributed zero stable samples.
+2. Copy the exact `stock_clock_guidance.plan_request` into
+   `fortress_plan`. Its closed request has exactly four fields:
+
+   ```json
+   {
+     "kind": "stock_watch_run",
+     "original_paired_seal": "<exact published stock-clock original seal>",
+     "game_ticks": 10,
+     "wall_millis": 1000
+   }
+   ```
+
+3. Confirm the newly published `review_seal` with `fortress_commit`,
+   `scope: "stock_clock"` and `confirmed: true`. There is no
+   `order_step_id`, including for portfolios.
+4. Reconcile retained time-control work with `fortress_wait`,
+   `scope: "stock_clock"`. Once it settles, use a fresh
+   `fortress_wait(scope="goal")` to qualify the next stock sample.
+   Repeat only through another separately reviewed interval if the original
+   stability requirement remains unfinished.
+
+Prepare and Commit each requalify the complete unchanged stock watch. The final
+guard verifies the parent custody and a fresh citizen/operations census after
+the durable native marker; its paused tick must equal the independently
+observed Run/1.13 tick. Full census work, native work and the closing parent
+checkpoint are reserved before native contact. One original foreground wall
+deadline bounds the entire call.
+
+Pending or uncertain time control withholds stock proof and production
+continuation. A successful intentional interval hides the old current sample
+while preserving its authentic counted history; it does not create another
+sample. Same-tick reads never count twice. Failed observations, source gaps,
+missing members and failed publication retain the existing interruption rules.
+False stock follows the original `continue_stock_goal` path after clocks
+settle. Achieved goals cannot restart maintenance through this clock.
+
+Each original clock retains at most 64 runs. Native receipts report historical
+advancement and pause verification; they are not current pause, inventory or
+stability proof. A changed source, missing authority, exhausted history,
+insufficient allowance or expired original refuses a new interval.
+
+Recovery reopens the exact retained file and validates its ancestry. It never
+recreates a missing journal, restores a current review, or restores stock-watch
+sample history. Retain the separate `stock_clock_recovery` value returned in
+the recovery reference, including after failure, and supply it in the parent
+configuration when reopening. It is an additional exact clock pin, not a new
+original: both its head and the acknowledged parent clock head must occur in
+the surviving journal, and their rejection floors combine monotonically. It
+cannot initialize a missing file or enable the feature for an older project.
+A retained Prepared interval without its process-local watch
+must be explicitly cancelled in Control mode before rebuilding the unchanged
+watch. Recover mode can inspect and reconcile; it cannot promote itself to
+Control. Cancellation uses independent Query and ControlClock authority and
+remains available after the goal deadline or parent stop, without requiring
+Plan, Observe or current stock truth. Project cancellation still retires a
+later ordinary production preparation after its separate stock clock settles.
 
 ## Stop, close and recover
 
 Default `fortress_cancel` uses `scope: "project"`; `goal` is an alias.
 It first acknowledges the terminal parent stop, then retires the child's
 undispatched preparation. It cannot undo a designation or construction or remove an already
-inserted order. Explicit `clock`/`inventory_clock` cancellation delegates to
+inserted order. Explicit `clock`/`inventory_clock`/`stock_clock` cancellation delegates to
 the existing independently authorized safety-stop owner. Portfolio clock
 cancellation also requires the exact original `order_step_id`; project, goal
 and session cancellation reject selectors. Continue original reconciliation
@@ -717,6 +804,8 @@ Retain the complete recovery reference after every successful or failed call:
   `parent_acknowledged` pin.
 - Exact child custody, ACKs, original archive/frontier identities and clock pins.
 - Each immutable handoff from the parent checkpoint.
+- The separate `stock_clock` target and journal pin when configured, plus
+  `stock-watch-clock.journal`. Its floors remain binding after later production.
 - Any immutable `production_intent` from the parent checkpoint, including when
   the child original was not yet acknowledged in the next parent checkpoint.
 - Consumed authority/source floors and sticky discontinuity fences, including
@@ -885,6 +974,18 @@ historical custody and current production goal anchors remain explicit and
 separate.
 
 ## Validation record
+
+### No-order stock-watch time
+
+The independent owner, parent journal replay, fixed native header creation,
+scalar/vector monitor behavior, typed Runtime sampling and public guidance
+have focused regression source. Independent source review covered initial
+cadence, preserving authentic sample history across successful intervals,
+closing-checkpoint budget, cancellation after later production, recovery-mode
+authority and complete response evidence. Current execution results are
+recorded in `IMPLEMENTATION_STATUS.md`; historical component receipts below
+do not qualify this increment. Full MCP/stdio and live DFHack acceptance
+remain separate requirements.
 
 ### First portfolio publication after reopening
 

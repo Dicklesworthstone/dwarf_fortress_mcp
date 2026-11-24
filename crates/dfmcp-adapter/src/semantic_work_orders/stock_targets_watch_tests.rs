@@ -611,3 +611,64 @@ fn portfolio_watch_witnesses_are_canonical_and_bind_every_member_and_timing() ->
     assert_eq!(changed.stable_samples_observed, 1);
     Ok(())
 }
+
+#[test]
+fn portfolio_watch_withheld_for_reviewed_time_preserves_joint_streak_without_current_proof()
+-> Result<()> {
+    let (mut watch, _, _) = initial(2, 200)?;
+    let first = sample(&mut watch, 130, 8, [20; 4])?;
+    assert_eq!(first.stable_samples_observed, 1);
+    let witness = watch.witness();
+    watch.withhold_current_sample();
+    assert!(watch.latest().is_none());
+    assert!(!watch.current_goal_proven());
+    assert_eq!(watch.achieved_at(), None);
+    assert_eq!(watch.witness(), witness);
+    assert_eq!(watch.high_tick(), GameTick(130));
+    assert_eq!(sample(&mut watch, 130, 8, [20; 4])?, first);
+    watch.withhold_current_sample();
+    let repeated_tick = sample(&mut watch, 130, 9, [20; 4])?;
+    assert_eq!(repeated_tick.stable_samples_observed, 1);
+    assert_eq!(repeated_tick.last_counted_tick, Some(GameTick(130)));
+    watch.withhold_current_sample();
+    let complete = sample(&mut watch, 140, 10, [20; 4])?;
+    assert_eq!(complete.stable_samples_observed, 2);
+    assert!(complete.targets.iter().all(|row| row.current_truth == PredicateTruth::True));
+    assert!(complete.continuous);
+    assert!(complete.current_goal_proven);
+    assert_eq!(complete.achieved_at, Some(GameTick(140)));
+    watch.withhold_current_sample();
+    assert!(!watch.current_goal_proven());
+    assert!(watch.latest().is_none());
+    assert_eq!(watch.achieved_at(), Some(GameTick(140)));
+    Ok(())
+}
+
+#[test]
+fn portfolio_watch_withholding_never_rejoins_failed_gapped_or_lost_member_stability()
+-> Result<()> {
+    for cause in 0..3 {
+        let (mut watch, _, _) = initial(2, 200)?;
+        sample(&mut watch, 130, 8, [20; 4])?;
+        match cause {
+            0 => watch.invalidate_current_sample(),
+            1 => {}
+            _ => {
+                let lost = sample(&mut watch, 135, 9, [20, 20, 0, 20])?;
+                assert_eq!(lost.current_truth, PredicateTruth::False);
+                assert_eq!(lost.stable_samples_observed, 0);
+            }
+        }
+        watch.withhold_current_sample();
+        let sequence = match cause { 0 => 9, 1 => 20, _ => 10 };
+        let restarted = sample(&mut watch, 140, sequence, [20; 4])?;
+        assert_eq!(restarted.stable_samples_observed, 1);
+        assert!(!restarted.current_goal_proven);
+        if cause < 2 { assert!(!restarted.continuous); }
+        watch.withhold_current_sample();
+        let complete = sample(&mut watch, 150, sequence + 1, [20; 4])?;
+        assert!(complete.current_goal_proven);
+        assert_eq!(complete.achieved_at, Some(GameTick(150)));
+    }
+    Ok(())
+}

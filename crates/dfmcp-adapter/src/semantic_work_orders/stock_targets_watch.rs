@@ -185,6 +185,14 @@ impl StockTargetsWatch {
                 .is_some_and(|sample| sample.current_goal_proven)
     }
 
+    /// Withhold every current member during separately supervised time without
+    /// resetting the authentic joint streak. No sample, continuity or current
+    /// truth is created. Failed acquisition/publication still uses invalidate.
+    pub fn withhold_current_sample(&mut self) {
+        self.latest = None;
+        self.source_guard.withhold_current_sample();
+    }
+
     /// Failed acquisition/publication withdraws the entire cohort. It cannot
     /// leave earlier members visible or turn an incomplete sample into proof.
     pub fn invalidate_current_sample(&mut self) {

@@ -39,9 +39,12 @@ The stock goal can retain one to four furniture minima, including targets that
 need no new order. Each native effect keeps its own review, and completion
 requires current proof for the whole goal. Configured per-order clocks can
 advance production or unfinished inventory stability through separate reviewed
-and confirmed intervals. Already-satisfied goals with no original order still
-need externally advanced game time. This development source still requires full
-MCP/stdio and live-game qualification.
+and confirmed intervals. An opt-in parent stock-watch clock also advances
+already-satisfied scalar or portfolio goals that have no original order. It
+retains separate clock custody and uses fresh joint observations to establish
+the original stability requirement. Every interval needs its own review and
+confirmation. This development source still requires full MCP/stdio and
+live-game qualification.
 
 The motivating problem is not merely “let a model press keys.” Dwarf Fortress is an unusually rich
 long-horizon environment, but a naive automation layer would expose incomplete observations,

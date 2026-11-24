@@ -45,6 +45,9 @@ mod manager;
 
 #[path = "stock_clock.rs"]
 pub(super) mod stock_clock;
+#[path = "stock_clock_runtime.rs"]
+mod stock_clock_runtime;
+use stock_clock_runtime::{NativeStockClock, StockClockAction};
 
 fn invalid(message: &str) -> dfmcp_core::DfmcpError {
     error(ErrorCode::InvalidRequest, message)
@@ -355,6 +358,7 @@ pub(super) struct Runtime {
     workshop_config: ProjectWorkshopTemplate,
     journal: journal::PrivateJournal,
     child: Option<Child>,
+    stock_clock: Option<NativeStockClock>,
     mode: Mode,
     pub(super) session: SessionId,
     budget: WorkBudget,
@@ -411,12 +415,25 @@ impl Runtime {
                 Stage::WorkshopOpening
             },
         )?;
-        let high_tick = journal.pin().authority_tick_floor;
+        let mut high_tick = journal.pin().authority_tick_floor;
+        if let Some(recovery) = &config.stock_clock_recovery {
+            let prior = journal.snapshot().checkpoint.stock_clock.as_ref()
+                .ok_or_else(|| denied("external stock-clock recovery has no acknowledged owner"))?;
+            let prior = stock_clock::ClockCheckpoint::from_json(prior)?;
+            let recovery = stock_clock::ClockCheckpoint::from_json(recovery)?;
+            if prior.target() != recovery.target()
+                || prior.journal_id() != recovery.journal_id()
+            {
+                return Err(denied("external stock-clock recovery names another original owner"));
+            }
+            high_tick = high_tick.max(recovery.high_tick());
+        }
         let mut runtime = Self {
             config,
             workshop_config,
             journal,
             child: None,
+            stock_clock: None,
             mode,
             session,
             budget,
@@ -568,6 +585,10 @@ impl Runtime {
             return Err(e);
         }
         *slot = Some(reference);
+        if let Some(clock) = &self.stock_clock {
+            self.high_tick = self.high_tick.max(clock.high_tick());
+            checkpoint.stock_clock = Some(clock.recovery_checkpoint());
+        }
         let stage = if self.cancelled() {
             Stage::Cancelled
         } else {
@@ -743,7 +764,11 @@ impl Runtime {
                 "an unacknowledged production opening cannot adopt a selected preexisting original",
             ));
         }
-        let mut budget = work.child(MAX_BYTES, journal::WORK_BYTES)?;
+        let stock_recovery = self.journal.snapshot().checkpoint.stock_clock.is_some();
+        let reserve = if stock_recovery {
+            2 * journal::WORK_BYTES + stock_clock_runtime::OPEN_BYTES
+        } else { journal::WORK_BYTES };
+        let mut budget = work.child(MAX_BYTES, reserve)?;
         budget.max_output_tokens = budget.max_output_tokens.min(32_768);
         if config.clock.is_none() && config.inventory_clock.is_none() {
             budget.max_game_ticks = 0;
@@ -770,7 +795,13 @@ impl Runtime {
             child.validate_project_publication(&self.config.goal, intent)?;
         }
         self.save_child(work, Some(Stage::Production))?;
-        self.current_goal = status.to_json();
+        if stock_recovery {
+            self.open_stock_clock(work, false)?;
+            self.save_child(work, None)?;
+        }
+        if !self.stock_clock_withholds_goal() {
+            self.current_goal = status.to_json();
+        }
         Ok(())
     }
 
@@ -805,7 +836,11 @@ impl Runtime {
         // Both parent publications are prepaid before any child source read.
         // The first reservation cannot be reused by the child or final save.
         let reserved = work.reserve(&base, journal::WORK_BYTES)?;
-        let mut budget = work.child(MAX_BYTES, journal::WORK_BYTES)?;
+        let may_open_clock = self.config.stock_watch_clock && self.stock_clock.is_none();
+        let after = journal::WORK_BYTES + if may_open_clock {
+            2 * journal::WORK_BYTES + stock_clock_runtime::OPEN_BYTES
+        } else { 0 };
+        let mut budget = work.child(MAX_BYTES, after)?;
         let Some(Child::Production(child)) = &mut self.child else {
             return Err(denied("original production owner is unavailable"));
         };
@@ -866,7 +901,12 @@ impl Runtime {
                 .project_continue_stock_goal_recorded(&config.goal, request, &current, &mut record),
         }?;
         self.current_goal = child.project_status(&config.goal)?.to_json();
-        Ok(view.to_json())
+        let value = view.to_json();
+        if may_open_clock && child.project_has_stock_watch(&config.goal)? {
+            self.save_child(work, None)?;
+            self.open_stock_clock(work, true)?;
+        }
+        Ok(value)
     }
 
     fn advance_to_production(&mut self, raw: &str, work: &mut Work) -> Result<Value> {
@@ -946,6 +986,33 @@ impl Runtime {
             matches!(&self.child, Some(Child::Production(_))),
             self.config.goal.is_portfolio(),
         )?;
+        if let Some(clock_action) = StockClockAction::from_action(&action)? {
+            return self.perform_stock_clock(clock_action, work);
+        }
+        if self.journal.snapshot().checkpoint.stock_clock.is_some() {
+            let stopping = matches!(&action, Action::Cancel { scope, .. }
+                if matches!(scope.as_deref().unwrap_or("project"), "goal" | "project"));
+            // The root stop is already acknowledged by perform(). Safety
+            // cancellation keeps its own authority and does not need stock truth.
+            self.refresh_stock_clock(work)?;
+            if stopping {
+                if self.stock_clock_withholds_goal() {
+                    self.perform_stock_clock(StockClockAction::Cancel, work)?;
+                }
+                // Settled stock-clock history must not intercept cancellation
+                // of a subsequently published production original.
+            } else if self.stock_clock_withholds_goal() {
+                let floor = self.high_tick;
+                if let Some(Child::Production(child)) = &mut self.child {
+                    child.retain_project_stock_clock_tick(floor)?;
+                }
+                if !action.is_inspection() {
+                    return Err(denied(
+                        "settle or cancel the retained stock-watch clock before sampling stock or starting production",
+                    ));
+                }
+            }
+        }
         let mut stock_target = false;
         if let Action::Plan(raw) = &action {
             if raw.len() > 8192 {
@@ -1262,6 +1329,9 @@ impl Runtime {
         if outcome.is_err() {
             self.withdraw();
         }
+        if self.stock_clock_withholds_goal() {
+            self.current_goal = Value::Null;
+        }
         let retained = self.save_child(&mut work, None);
         self.accounting = work.accounting();
         if let Err(e) = retained {
@@ -1278,6 +1348,10 @@ impl Runtime {
 
     pub(super) fn withdraw(&mut self) {
         self.current_goal = Value::Null;
+        if let Some(clock) = &mut self.stock_clock {
+            clock.withdraw_review();
+            self.high_tick = self.high_tick.max(clock.high_tick());
+        }
         if let Some(child) = &mut self.child {
             child.withdraw();
             self.last_child_reference = child.reference();
@@ -1298,6 +1372,8 @@ impl Runtime {
             "parent_acknowledged":pin,
             "retained_stage":self.journal.snapshot(),
             "child_reference":self.last_child_reference,
+            "stock_clock":self.stock_clock_json(),
+            "stock_clock_recovery":self.stock_clock_recovery(),
             "authority_tick_floor":self.high_tick,
             "controller_fenced":self.fenced || self.journal.is_fenced(),
             "current_goal_available":false,
@@ -1314,8 +1390,10 @@ impl Runtime {
             "original":self.journal.original(),
             "stage":self.journal.snapshot().stage,
             "project_cancelled":self.cancelled(),
-            "current_stock_goal":self.current_goal,
-            "original_goal_proven":!self.cancelled() && self.current_goal["original_goal_proven"] == true,
+            "current_stock_goal":if self.stock_clock_withholds_goal() { Value::Null } else { self.current_goal.clone() },
+            "original_goal_proven":!self.cancelled() && !self.stock_clock_withholds_goal() && self.current_goal["original_goal_proven"] == true,
+            "stock_clock":self.stock_clock_json(),
+            "stock_clock_guidance":self.stock_clock_guidance(),
             "project_custody_currently_verified":true,
             "native_effects_cancelled":false,
             "automatic_stage_effects":false,

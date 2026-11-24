@@ -158,11 +158,13 @@ fn no_work_parent_floor(runtime: &mut Runtime, goal: &ProjectStockGoal) -> TestR
         assert_eq!(original_watch["targets"].as_array().map(Vec::len), Some(3));
     }
     for (phase, proved) in [("first_sample", false), ("second_sample", true)] {
+        stock_clock_guards::before_interval(runtime, goal)?;
         stage(phase)?;
         let c = runtime.context(false)?;
         let sample = runtime.wait(&c)?.value;
         assert_eq!(sample["original_goal_proven"], proved);
         assert_eq!(runtime.project_status(goal)?.original_goal_proven, proved);
+        stock_clock_guards::after_interval(runtime, goal, proved)?;
     }
     let anchor = runtime.anchor;
     let files = custody_bytes()?;
@@ -529,8 +531,11 @@ fn control(requested_case: &str) -> TestResult {
             for name in ORIGINAL_FILES {
                 assert!(!directory.join(name).exists());
             }
+            stock_clock_guards::initial_sample(&mut runtime, &goal)?;
             if case == "no_work_floor" {
                 no_work_parent_floor(&mut runtime, &goal)?;
+            } else {
+                stock_clock_guards::false_and_fenced_source(&mut runtime, &goal)?;
             }
         }
         "existing_slot" | "missing_authority" => {
@@ -578,6 +583,7 @@ fn control(requested_case: &str) -> TestResult {
             let intent =
                 ProjectProductionIntent::from_json(recorded.as_ref().ok_or("missing intent")?)?;
             runtime.validate_project_publication(&goal, &intent)?;
+            stock_clock_guards::published_original(&runtime, &goal)?;
             assert_eq!(
                 runtime.project_recovery_reference(),
                 intent.to_json()["recovery_reference"]
@@ -947,3 +953,6 @@ fn recorded_project_publication_recovers_exact_original_without_reexecution() ->
     );
     Ok(())
 }
+
+#[path = "project_stock_clock_runtime_tests.rs"]
+mod stock_clock_guards;

@@ -13,8 +13,8 @@ use dfmcp_adapter::bounded_run::rpc::RunSource;
 use dfmcp_adapter::bounded_run::{MAX_NATIVE_TICK, RunObservation, RunPlan};
 use dfmcp_adapter::control_effect_journal::EffectJournalStorage;
 use dfmcp_core::{
-    Capability, DfmcpError, Digest32, ErrorCode, FortressId, OperationContext, Result,
-    RiskTier, StateAnchor,
+    Capability, DfmcpError, Digest32, ErrorCode, FortressId, OperationContext, Result, RiskTier,
+    StateAnchor,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -67,26 +67,44 @@ pub(in crate::native_resource_project) fn original_digest(original: &Value) -> R
     while let Some((value, depth)) = stack.pop() {
         nodes = nodes.saturating_add(1);
         if nodes > 4096 || depth > 16 {
-            return Err(corrupt("stock clock parent original exceeds its shape bound"));
+            return Err(corrupt(
+                "stock clock parent original exceeds its shape bound",
+            ));
         }
         let mut text = |value: &str| -> Result<()> {
             text_bytes = text_bytes.saturating_add(value.len());
             if value.len() > 16 * 1024 || text_bytes > 64 * 1024 || value.contains('\0') {
-                return Err(corrupt("stock clock parent original exceeds its text bound"));
+                return Err(corrupt(
+                    "stock clock parent original exceeds its text bound",
+                ));
             }
             Ok(())
         };
         match value {
             Value::String(value) => text(value)?,
             Value::Array(values) => {
-                if values.len().saturating_add(stack.len()).saturating_add(nodes) > 4096 {
-                    return Err(corrupt("stock clock parent original exceeds its node bound"));
+                if values
+                    .len()
+                    .saturating_add(stack.len())
+                    .saturating_add(nodes)
+                    > 4096
+                {
+                    return Err(corrupt(
+                        "stock clock parent original exceeds its node bound",
+                    ));
                 }
                 stack.extend(values.iter().map(|value| (value, depth + 1)));
             }
             Value::Object(values) => {
-                if values.len().saturating_add(stack.len()).saturating_add(nodes) > 4096 {
-                    return Err(corrupt("stock clock parent original exceeds its node bound"));
+                if values
+                    .len()
+                    .saturating_add(stack.len())
+                    .saturating_add(nodes)
+                    > 4096
+                {
+                    return Err(corrupt(
+                        "stock clock parent original exceeds its node bound",
+                    ));
                 }
                 for (key, value) in values {
                     text(key)?;
@@ -94,7 +112,9 @@ pub(in crate::native_resource_project) fn original_digest(original: &Value) -> R
                 }
             }
             Value::Number(value) if value.as_u64().is_none() && value.as_i64().is_none() => {
-                return Err(corrupt("stock clock parent original has an unbounded numeric field"));
+                return Err(corrupt(
+                    "stock clock parent original has an unbounded numeric field",
+                ));
             }
             _ => {}
         }
@@ -102,24 +122,39 @@ pub(in crate::native_resource_project) fn original_digest(original: &Value) -> R
     let bytes = serde_json::to_vec(original)
         .map_err(|_| corrupt("stock clock parent original cannot be serialized"))?;
     if bytes.len() > 64 * 1024 {
-        return Err(corrupt("stock clock parent original exceeds its encoded bound"));
+        return Err(corrupt(
+            "stock clock parent original exceeds its encoded bound",
+        ));
     }
-    Ok(hash(b"dfmcp-native-resource-stock-clock-parent/1", &[&bytes]))
+    Ok(hash(
+        b"dfmcp-native-resource-stock-clock-parent/1",
+        &[&bytes],
+    ))
 }
 
 /// Only stable native custody participates. Dynamic heads, source floors and
 /// process-local watch witnesses cannot change this original target identity.
-pub(in crate::native_resource_project) fn production_source_digest(reference: &Value) -> Result<Digest32> {
+pub(in crate::native_resource_project) fn production_source_digest(
+    reference: &Value,
+) -> Result<Digest32> {
     if reference.get("schema").and_then(Value::as_str)
         != Some("dfmcp.project-production-recovery/1")
     {
-        return Err(corrupt("stock clock requires acknowledged production custody"));
+        return Err(corrupt(
+            "stock clock requires acknowledged production custody",
+        ));
     }
-    let custody = reference.get("native_custody").and_then(Value::as_object)
+    let custody = reference
+        .get("native_custody")
+        .and_then(Value::as_object)
         .filter(|object| object.len() == 2)
         .ok_or_else(|| corrupt("stock clock production native custody is incomplete"))?;
-    let field = |name| custody.get(name).and_then(Value::as_str)
-        .ok_or_else(|| corrupt("stock clock production native identity is missing"));
+    let field = |name| {
+        custody
+            .get(name)
+            .and_then(Value::as_str)
+            .ok_or_else(|| corrupt("stock clock production native identity is missing"))
+    };
     let workforce = digest(field("workforce_journal_id")?)?;
     let orders = digest(field("order_journal_id")?)?;
     Ok(hash(
@@ -185,7 +220,9 @@ impl WatchClockTarget {
         let original = digest(&descriptor.original_digest)?;
         let goal = digest(&descriptor.original_goal_digest)?;
         let production = digest(&descriptor.production_source_digest)?;
-        let fortress = descriptor.fortress_id.parse::<u64>()
+        let fortress = descriptor
+            .fortress_id
+            .parse::<u64>()
             .map_err(|_| corrupt("invalid stock clock fortress identity"))?;
         if descriptor.schema != TARGET_SCHEMA
             || fortress == 0
@@ -194,7 +231,9 @@ impl WatchClockTarget {
             || descriptor.original_tick >= descriptor.deadline_tick
             || descriptor.deadline_tick > MAX_NATIVE_TICK
         {
-            return Err(corrupt("stock clock changed its original scope or deadline"));
+            return Err(corrupt(
+                "stock clock changed its original scope or deadline",
+            ));
         }
         let fields: &[&[u8]] = &[
             parent.as_bytes(),
@@ -218,24 +257,35 @@ impl WatchClockTarget {
         if digest(&descriptor.target_digest)? != target
             || digest(&descriptor.original_paired_seal)? != seal
         {
-            return Err(corrupt("stock clock target commitment does not match its descriptor"));
+            return Err(corrupt(
+                "stock clock target commitment does not match its descriptor",
+            ));
         }
-        Ok(Self { descriptor, digest: target, original_seal: seal, fortress })
+        Ok(Self {
+            descriptor,
+            digest: target,
+            original_seal: seal,
+            fortress,
+        })
     }
 
     pub(in crate::native_resource_project) fn from_json(value: &Value) -> Result<Self> {
-        let object = value.as_object()
+        let object = value
+            .as_object()
             .filter(|object| object.len() == 11)
             .ok_or_else(|| corrupt("invalid closed stock clock target descriptor"))?;
         // Admit the entire small primitive record before cloning/deserializing.
         if object.iter().any(|(key, value)| {
-            key.len() > 64 || match value {
-                Value::String(text) => text.len() > 128,
-                Value::Number(number) => number.as_u64().is_none(),
-                _ => true,
-            }
+            key.len() > 64
+                || match value {
+                    Value::String(text) => text.len() > 128,
+                    Value::Number(number) => number.as_u64().is_none(),
+                    _ => true,
+                }
         }) {
-            return Err(corrupt("stock clock target descriptor exceeds its closed shape"));
+            return Err(corrupt(
+                "stock clock target descriptor exceeds its closed shape",
+            ));
         }
         let descriptor: Descriptor = serde_json::from_value(value.clone())
             .map_err(|_| corrupt("invalid closed stock clock target fields"))?;
@@ -253,11 +303,16 @@ impl WatchClockTarget {
         })
     }
 
-    pub(in crate::native_resource_project) fn matches_goal(&self, goal: &ProjectStockGoal) -> Result<()> {
+    pub(in crate::native_resource_project) fn matches_goal(
+        &self,
+        goal: &ProjectStockGoal,
+    ) -> Result<()> {
         if self.descriptor.original_goal_digest != goal_digest(goal)?.to_hex()
             || self.descriptor.deadline_tick != goal.deadline_tick()
         {
-            return Err(denied("stock clock cannot replace any original stock goal term"));
+            return Err(denied(
+                "stock clock cannot replace any original stock goal term",
+            ));
         }
         Ok(())
     }
@@ -274,39 +329,62 @@ impl WatchClockTarget {
             || self.descriptor.original_digest != original.to_hex()
             || self.descriptor.production_source_digest != production.to_hex()
         {
-            return Err(denied("stock clock differs from its acknowledged parent or production custody"));
+            return Err(denied(
+                "stock clock differs from its acknowledged parent or production custody",
+            ));
         }
         Ok(())
     }
 
-    pub(in crate::native_resource_project) fn fortress(&self) -> FortressId { self.fortress }
-    pub(in crate::native_resource_project) fn epoch(&self) -> u64 { self.descriptor.epoch }
-    pub(in crate::native_resource_project) fn digest(&self) -> Digest32 { self.digest }
-    pub(in crate::native_resource_project) fn original_paired_seal(&self) -> Digest32 { self.original_seal }
-    pub(in crate::native_resource_project) fn original_tick(&self) -> u64 { self.descriptor.original_tick }
-    pub(in crate::native_resource_project) fn deadline_tick(&self) -> u64 { self.descriptor.deadline_tick }
+    pub(in crate::native_resource_project) fn fortress(&self) -> FortressId {
+        self.fortress
+    }
+    pub(in crate::native_resource_project) fn epoch(&self) -> u64 {
+        self.descriptor.epoch
+    }
+    pub(in crate::native_resource_project) fn digest(&self) -> Digest32 {
+        self.digest
+    }
+    pub(in crate::native_resource_project) fn original_paired_seal(&self) -> Digest32 {
+        self.original_seal
+    }
+    pub(in crate::native_resource_project) fn original_tick(&self) -> u64 {
+        self.descriptor.original_tick
+    }
+    pub(in crate::native_resource_project) fn deadline_tick(&self) -> u64 {
+        self.descriptor.deadline_tick
+    }
 }
 impl GoalClockTarget for WatchClockTarget {
     const REQUEST_KIND: &'static str = "stock_watch_run";
     const CANDIDATE_KEY: &'static str = "stock-watch-clock-candidate";
     const PURPOSE: &'static str = "advance_original_resource_stock_stability";
 
-    fn digest(&self) -> Digest32 { self.digest }
-    fn original_paired_seal(&self) -> Digest32 { self.original_seal }
-    fn original_tick(&self) -> u64 { self.descriptor.original_tick }
+    fn digest(&self) -> Digest32 {
+        self.digest
+    }
+    fn original_paired_seal(&self) -> Digest32 {
+        self.original_seal
+    }
+    fn original_tick(&self) -> u64 {
+        self.descriptor.original_tick
+    }
     fn context(&self, c: &OperationContext) -> Result<()> {
         if c.anchor.fortress_id != self.fortress
             || c.anchor.cursor.epoch != self.descriptor.epoch
             || c.anchor.tick.get() < self.descriptor.original_tick
         {
-            return Err(stale("stock clock cannot cross its original fortress, epoch or tick floor"));
+            return Err(stale(
+                "stock clock cannot cross its original fortress, epoch or tick floor",
+            ));
         }
         // Do not apply the goal deadline here: overdue reconciliation and a
         // separately authorized safety pause must retain their original target.
         c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)
     }
     fn capture(&self, capture: &RunObservation) -> Result<u64> {
-        let tick = capture.tick()
+        let tick = capture
+            .tick()
             .filter(|tick| *tick >= self.descriptor.original_tick)
             .ok_or_else(|| stale("stock clock source precedes its original tick"))?;
         if !capture.eligible() {
@@ -316,11 +394,14 @@ impl GoalClockTarget for WatchClockTarget {
     }
     fn plan(&self, plan: &RunPlan) -> Result<()> {
         let tick = self.capture(plan.before())?;
-        if tick.checked_add(u64::from(plan.spec().game_ticks()))
+        if tick
+            .checked_add(u64::from(plan.spec().game_ticks()))
             .is_none_or(|end| end > self.descriptor.deadline_tick)
             || plan.key() != self.key(plan.digest())
         {
-            return Err(corrupt("stock clock run changes the original target or deadline"));
+            return Err(corrupt(
+                "stock clock run changes the original target or deadline",
+            ));
         }
         Ok(())
     }
@@ -334,7 +415,11 @@ impl GoalClockTarget for WatchClockTarget {
     fn seal(&self, journal: Digest32, plan: &RunPlan) -> Digest32 {
         hash(
             b"dfmcp-native-resource-stock-clock-review/1",
-            &[self.digest.as_bytes(), journal.as_bytes(), &plan.canonical_bytes()],
+            &[
+                self.digest.as_bytes(),
+                journal.as_bytes(),
+                &plan.canonical_bytes(),
+            ],
         )
     }
 }
@@ -355,32 +440,57 @@ impl ClockCheckpoint {
         journal_id: Digest32,
     ) -> Result<Self> {
         if journal_id == Digest32::ZERO {
-            return Err(corrupt("stock clock requires its exact prospective journal identity"));
+            return Err(corrupt(
+                "stock clock requires its exact prospective journal identity",
+            ));
         }
         let high_tick = target.original_tick();
-        Ok(Self { target, journal_id, head: journal_id, high_tick, high_sequence: 0 })
+        Ok(Self {
+            target,
+            journal_id,
+            head: journal_id,
+            high_tick,
+            high_sequence: 0,
+        })
     }
 
     pub(in crate::native_resource_project) fn from_json(value: &Value) -> Result<Self> {
-        let object = value.as_object()
+        let object = value
+            .as_object()
             .filter(|object| object.len() == 6)
             .ok_or_else(|| corrupt("invalid closed stock clock checkpoint"))?;
         if object.get("schema").and_then(Value::as_str) != Some(CHECKPOINT_SCHEMA) {
             return Err(corrupt("invalid stock clock checkpoint schema"));
         }
         let target = WatchClockTarget::from_json(
-            object.get("target").ok_or_else(|| corrupt("stock clock target is missing"))?,
+            object
+                .get("target")
+                .ok_or_else(|| corrupt("stock clock target is missing"))?,
         )?;
-        let field = |name| object.get(name).and_then(Value::as_str)
-            .ok_or_else(|| corrupt("stock clock checkpoint identity is missing"));
+        let field = |name| {
+            object
+                .get(name)
+                .and_then(Value::as_str)
+                .ok_or_else(|| corrupt("stock clock checkpoint identity is missing"))
+        };
         let journal_id = digest(field("journal_id")?)?;
         let head = digest(field("head")?)?;
-        let high_tick = object.get("authority_tick_floor").and_then(Value::as_u64)
+        let high_tick = object
+            .get("authority_tick_floor")
+            .and_then(Value::as_u64)
             .filter(|tick| *tick >= target.original_tick() && *tick <= MAX_NATIVE_TICK)
             .ok_or_else(|| corrupt("stock clock checkpoint tick floor is invalid"))?;
-        let high_sequence = object.get("high_source_sequence").and_then(Value::as_u64)
+        let high_sequence = object
+            .get("high_source_sequence")
+            .and_then(Value::as_u64)
             .ok_or_else(|| corrupt("stock clock checkpoint source floor is invalid"))?;
-        Ok(Self { target, journal_id, head, high_tick, high_sequence })
+        Ok(Self {
+            target,
+            journal_id,
+            head,
+            high_tick,
+            high_sequence,
+        })
     }
 
     pub(in crate::native_resource_project) fn to_json(&self) -> Value {
@@ -394,23 +504,39 @@ impl ClockCheckpoint {
     /// The actual journal still verifies ancestry. Parent monotonicity cannot
     /// authorize new data or substitute for the retained private file.
     pub(in crate::native_resource_project) fn validate_successor(&self, next: &Self) -> Result<()> {
-        if self.target != next.target || self.journal_id != next.journal_id
-            || self.high_tick > next.high_tick || self.high_sequence > next.high_sequence
+        if self.target != next.target
+            || self.journal_id != next.journal_id
+            || self.high_tick > next.high_tick
+            || self.high_sequence > next.high_sequence
+            || (self.head != self.journal_id && next.head == next.journal_id)
         {
-            return Err(corrupt("stock clock recovery replaced its target or regressed source custody"));
+            return Err(corrupt(
+                "stock clock recovery replaced its target or regressed journal/source custody",
+            ));
         }
         Ok(())
     }
 
     pub(in crate::native_resource_project) fn is_initial(&self) -> bool {
-        self.head == self.journal_id && self.high_sequence == 0
+        self.head == self.journal_id
+            && self.high_sequence == 0
             && self.high_tick == self.target.original_tick()
     }
-    pub(in crate::native_resource_project) fn target(&self) -> &WatchClockTarget { &self.target }
-    pub(in crate::native_resource_project) fn journal_id(&self) -> Digest32 { self.journal_id }
-    pub(in crate::native_resource_project) fn head(&self) -> Digest32 { self.head }
-    pub(in crate::native_resource_project) fn high_tick(&self) -> u64 { self.high_tick }
-    pub(in crate::native_resource_project) fn high_sequence(&self) -> u64 { self.high_sequence }
+    pub(in crate::native_resource_project) fn target(&self) -> &WatchClockTarget {
+        &self.target
+    }
+    pub(in crate::native_resource_project) fn journal_id(&self) -> Digest32 {
+        self.journal_id
+    }
+    pub(in crate::native_resource_project) fn head(&self) -> Digest32 {
+        self.head
+    }
+    pub(in crate::native_resource_project) fn high_tick(&self) -> u64 {
+        self.high_tick
+    }
+    pub(in crate::native_resource_project) fn high_sequence(&self) -> u64 {
+        self.high_sequence
+    }
 }
 
 pub(in crate::native_resource_project) struct StockClock<J: EffectJournalStorage> {
@@ -427,12 +553,21 @@ impl<J: EffectJournalStorage> StockClock<J> {
     ) -> Self {
         Self {
             inner: bounded_goal_clock::Clock::new(journal),
-            target, latest: None, inspection_required: true, current_review: None,
+            target,
+            latest: None,
+            inspection_required: true,
+            current_review: None,
         }
     }
-    pub(in crate::native_resource_project) fn target(&self) -> &WatchClockTarget { &self.target }
-    pub(in crate::native_resource_project) fn latest(&self) -> Option<&ClockView> { self.latest.as_ref() }
-    pub(in crate::native_resource_project) fn is_control(&self) -> bool { self.inner.is_control() }
+    pub(in crate::native_resource_project) fn target(&self) -> &WatchClockTarget {
+        &self.target
+    }
+    pub(in crate::native_resource_project) fn latest(&self) -> Option<&ClockView> {
+        self.latest.as_ref()
+    }
+    pub(in crate::native_resource_project) fn is_control(&self) -> bool {
+        self.inner.is_control()
+    }
     pub(in crate::native_resource_project) fn high_tick(&self) -> u64 {
         self.inner.high_tick().max(self.target.original_tick())
     }
@@ -443,10 +578,13 @@ impl<J: EffectJournalStorage> StockClock<J> {
         self.inspection_required || self.latest.as_ref().is_none_or(ClockView::may_be_running)
     }
     pub(in crate::native_resource_project) fn current_review(&self) -> Option<Digest32> {
-        if self.inspection_required { return None; }
+        if self.inspection_required {
+            return None;
+        }
         let active = self.latest.as_ref()?.active()?;
         self.current_review.filter(|seal| {
-            *seal == active.review_seal && active.entry.state() == RunState::Prepared
+            *seal == active.review_seal
+                && active.entry.state() == RunState::Prepared
                 && !active.entry.unresolved()
         })
     }
@@ -456,9 +594,13 @@ impl<J: EffectJournalStorage> StockClock<J> {
     pub(in crate::native_resource_project) fn recovery_checkpoint(&self) -> Value {
         let (journal_id, head, high_tick, high_sequence) = self.inner.recovery_checkpoint();
         ClockCheckpoint {
-            target: self.target.clone(), journal_id, head,
-            high_tick: high_tick.max(self.target.original_tick()), high_sequence,
-        }.to_json()
+            target: self.target.clone(),
+            journal_id,
+            head,
+            high_tick: high_tick.max(self.target.original_tick()),
+            high_sequence,
+        }
+        .to_json()
     }
     pub(in crate::native_resource_project) fn verify_recovery(
         &mut self,
@@ -470,11 +612,17 @@ impl<J: EffectJournalStorage> StockClock<J> {
         self.inspection_required = true;
         let checkpoint = ClockCheckpoint::from_json(value)?;
         if checkpoint.target != self.target {
-            return Err(corrupt("stock clock recovery changed its immutable original target"));
+            return Err(corrupt(
+                "stock clock recovery changed its immutable original target",
+            ));
         }
         self.inner.verify_recovery(
-            checkpoint.journal_id, checkpoint.head, checkpoint.high_tick,
-            checkpoint.high_sequence, c, n,
+            checkpoint.journal_id,
+            checkpoint.head,
+            checkpoint.high_tick,
+            checkpoint.high_sequence,
+            c,
+            n,
         )
     }
     fn remember(&mut self, result: &Result<ClockView>) {
@@ -492,10 +640,14 @@ impl<J: EffectJournalStorage> StockClock<J> {
         let result = self.inner.inspect(Some(&self.target), c, n);
         self.remember(&result);
         if result.as_ref().is_err()
-            || self.latest.as_ref().and_then(ClockView::active).is_none_or(|run| {
-                run.entry.state() != RunState::Prepared
-                    || run.entry.plan().before().tick() != Some(c.anchor.tick.get())
-            })
+            || self
+                .latest
+                .as_ref()
+                .and_then(ClockView::active)
+                .is_none_or(|run| {
+                    run.entry.state() != RunState::Prepared
+                        || run.entry.plan().before().tick() != Some(c.anchor.tick.get())
+                })
         {
             self.current_review = None;
         }
@@ -509,13 +661,19 @@ impl<J: EffectJournalStorage> StockClock<J> {
         n: &OperationContext,
         guard: F,
     ) -> Result<ClockView>
-    where N: RunSource, F: FnMut(&OperationContext) -> Result<()> {
+    where
+        N: RunSource,
+        F: FnMut(&OperationContext) -> Result<()>,
+    {
         self.current_review = None;
         self.inspection_required = true;
-        let result = self.inner.prepare_guarded(&self.target, request, source, c, n, guard);
+        let result = self
+            .inner
+            .prepare_guarded(&self.target, request, source, c, n, guard);
         self.remember(&result);
         if let Ok(view) = &result {
-            self.current_review = view.active()
+            self.current_review = view
+                .active()
                 .filter(|run| run.entry.state() == RunState::Prepared && !run.entry.unresolved())
                 .map(|run| run.review_seal);
         }
@@ -530,14 +688,21 @@ impl<J: EffectJournalStorage> StockClock<J> {
         n: &OperationContext,
         guard: F,
     ) -> Result<ClockView>
-    where N: RunSource, F: FnMut(&OperationContext) -> Result<()> {
+    where
+        N: RunSource,
+        F: FnMut(&OperationContext) -> Result<()>,
+    {
         let current = self.current_review();
         self.current_review = None;
         self.inspection_required = true;
         if !confirmed || current != Some(seal) {
-            return Err(denied("prepare and confirm this owner's current stock clock review"));
+            return Err(denied(
+                "prepare and confirm this owner's current stock clock review",
+            ));
         }
-        let result = self.inner.commit_guarded(&self.target, seal, true, source, c, n, guard);
+        let result = self
+            .inner
+            .commit_guarded(&self.target, seal, true, source, c, n, guard);
         self.remember(&result);
         result
     }
@@ -567,12 +732,14 @@ impl<J: EffectJournalStorage> StockClock<J> {
     }
     pub(in crate::native_resource_project) fn to_json(&self) -> Value {
         let mut value = self.latest.as_ref().map_or_else(
-            || json!({
-                "journal_id":self.inner.recovery_checkpoint().0.to_hex(),
-                "head":self.inner.recovery_checkpoint().1.to_hex(),
-                "active_run":null, "runs":[], "run_count":0,
-                "current_pause_proven":false, "original_goal_proven":false,
-            }),
+            || {
+                json!({
+                    "journal_id":self.inner.recovery_checkpoint().0.to_hex(),
+                    "head":self.inner.recovery_checkpoint().1.to_hex(),
+                    "active_run":null, "runs":[], "run_count":0,
+                    "current_pause_proven":false, "original_goal_proven":false,
+                })
+            },
             ClockView::to_json,
         );
         value["schema"] = json!("dfmcp.native-resource-stock-clock-view/1");
@@ -588,6 +755,9 @@ impl<J: EffectJournalStorage> StockClock<J> {
         value["review_available"] = json!(self.current_review().is_some());
         value["high_tick"] = json!(self.high_tick());
         value["high_source_sequence"] = json!(self.inner.recovery_checkpoint().3);
+        // A refused operation can advance the actual journal or rejection
+        // floors without publishing a newer inspected history view.
+        value["recovery_checkpoint"] = self.recovery_checkpoint();
         value["sample_history_durable"] = json!(false);
         value["recovery_restores_current_proof"] = json!(false);
         value

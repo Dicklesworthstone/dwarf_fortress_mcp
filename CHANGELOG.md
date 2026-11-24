@@ -1,16 +1,33 @@
 # Changelog
 
-## Unreleased — Retain bounded time custody for no-order stock goals
+## Unreleased — Advance no-order stock stability through reviewed intervals
 
-- Add a separate Run/1.13 stock-watch owner bound to the complete original
-  resource goal and acknowledged production source custody.
-- Acknowledge the exact prospective private journal before creation; preserve
-  immutable targets, actual ancestry and monotone source floors on recovery.
-- Keep review process local and preserve overdue reconciliation and separately
-  authorized cancellation. Add core, private-file and parent replay regression
-  source; execution remains unverified while the local executor is unavailable.
-- Keep this first checkpoint internal; public foreground integration follows
-  without changing the admitted production surface or compatibility registry.
+- Integrate an explicitly opted-in Run/1.13 stock-watch clock into native
+  resource-project Plan, Commit, Query, Wait and cancellation. Scalar and complete
+  portfolio goals use current qualified stock, the original cadence/deadline and
+  independent inventory-clock authority; each interval needs separate review.
+- Bind a separate private journal to the complete original goal and native
+  production custody. Acknowledge its prospective identity before creation and
+  retain immutable targets, actual ancestry and monotone source floors without
+  manufacturing an order or consuming later per-order clock slots.
+- Preserve authentic stability history while withholding samples across bounded
+  time advancement. Recheck current source and parent custody at the final native
+  edge, and reserve closing parent publication before dispatch.
+- Retain an external `stock_clock_recovery` pin after failed parent publication;
+  verify both retained heads and merge rejection floors on reopen. Recovery
+  restores no review or current proof, and overdue reconciliation and separately
+  authorized safety cancellation retain the original owner.
+- Publish usable scalar/portfolio clock recommendations, independent confirmation
+  and retained custody. Unsettled time withdraws stock proof and continuation;
+  a retained preparation without current review offers explicit reconciliation.
+- Compile the complete actual production adapter and pass 133 distinct scoped
+  component cases: 36 stock watches, 62 journal, 17 continuity, seven clock core,
+  one native factory case with three subprocess scenarios, and ten JSON packet
+  cases, including newer actual recovery pins beside historical views. Packet
+  execution excludes codec assertions and the codec/chunking case. Full MCP,
+  parent TCP, codec and game/live qualification remain open. Verification stops
+  at missing `br`; local qualification refuses the dirty worktree. Compatibility
+  admission and owner completion status remain unchanged.
 
 ## Unreleased — Run independent laboratory Task monitors together
 

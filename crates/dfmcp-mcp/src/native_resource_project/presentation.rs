@@ -14,6 +14,11 @@ mod manager;
 mod tree;
 #[path = "production_presentation.rs"]
 mod production;
+#[path = "stock_clock_presentation.rs"]
+mod stock_clock;
+#[cfg(test)]
+#[path = "stock_clock_presentation_tests.rs"]
+mod stock_clock_tests;
 #[cfg(test)]
 #[path = "production_presentation_tests.rs"]
 mod production_tests;
@@ -190,6 +195,15 @@ fn review(result: &Value) -> Option<(&str, Value)> {
     None
 }
 
+fn current_review<'a>(result: &'a Value, reference: &Value) -> Option<(&'a str, Value)> {
+    if let Some(seal) = stock_clock::review(result, reference) {
+        return Some(("stock_clock", seal));
+    }
+    stock_clock::permits_goal_sample(result, reference)
+        .then(|| review(result))
+        .flatten()
+}
+
 /// Build only from actual child offers. The child's ordinary planner still
 /// revalidates the selected evidence and all native permissions.
 fn observed_plan(result: &Value) -> Option<Value> {
@@ -337,7 +351,8 @@ fn no_work_stock_goal(result: &Value, reference: &Value) -> Value {
         && parent["no_work_stock_goal"] == *raw
         && parent["original_goal_proven"] == proven
         && result["original_goal_proven"] == proven
-        && (!proven || parent["current_goal_anchor"] == raw["sample"]["anchor"]);
+        && (!proven || parent["current_goal_anchor"] == raw["sample"]["anchor"])
+        && stock_clock::permits_goal_sample(result, reference);
     stock_watch::summary(child, Some(&child["anchor"]), current)
 }
 
@@ -378,6 +393,8 @@ fn next_step(
             "fortress_query",
             "Inspect retained parent and child custody before any recovery or further action.",
         )
+    } else if let Some(next) = stock_clock::pending_next(result, reference, session) {
+        return next;
     } else if result["project_cancelled"] == true {
         arguments["scope"] = json!("goal");
         (
@@ -394,7 +411,15 @@ fn next_step(
             "fortress_explain",
             "Inspect the retained no-work goal whose current identity could not be verified. Preserve its original target and deadline before further planning.",
         )
-    } else if let Some((scope, seal)) = review(result) {
+    } else if stock_clock::has_custody(result, reference)
+        && !stock_clock::permits_goal_sample(result, reference)
+        && stock_clock::review(result, reference).is_none()
+    {
+        (
+            "fortress_explain",
+            "Inspect the original stock-clock target and complete acknowledged custody before another plan or goal claim.",
+        )
+    } else if let Some((scope, seal)) = current_review(result, reference) {
         confirmation = true;
         arguments["scope"] = json!(scope);
         arguments["review_seal"] = seal;
@@ -443,6 +468,8 @@ fn next_step(
                 "fortress_plan",
                 "Continue the unfinished original stock goal through its acknowledged first production publication. Fresh sources must qualify current deficits and workers under every unchanged minimum and deadline; effects require separate reviews.",
             )
+        } else if let Some(next) = stock_clock::next(result, reference, session) {
+            return next;
         } else {
             arguments["scope"] = json!("goal");
             (
@@ -600,6 +627,7 @@ pub(super) fn packet(
         result["current_state_proven"] = json!(false);
     }
     withdraw_retained_stock_goals(&mut reference);
+    stock_clock::withdraw_retained(&mut reference);
     let mut turn = AgentTurnBuilder::new(operation, phase(operation)).continuity(
         ContinuityStatus::Indeterminate,
         None,
@@ -615,13 +643,16 @@ pub(super) fn packet(
     }
     let publication_pending = publication_pending(&reference);
     let pending = (!publication_pending && reference["controller_fenced"] != true)
-        .then(|| review(&result))
+        .then(|| current_review(&result, &reference))
         .flatten()
         .map(|(scope, seal)| {
             let mut confirmation = json!({
                 "scope":scope, "review_seal":seal, "requires_confirmation":true,
                 "complete_evidence_pointer":"/result/child", "restored_from_recovery":false,
             });
+            if scope == "stock_clock" {
+                confirmation["complete_evidence_pointer"] = json!("/result/stock_clock");
+            }
             if let Some((step, index)) = portfolio_clock_review_step(&result, scope) {
                 confirmation["order_step_id"] = json!(step);
                 confirmation["complete_evidence_pointer"] =
@@ -690,6 +721,32 @@ pub(super) fn packet(
         (child, child_path)
     };
     let mut actions = clock_actions(clock_child, clock_path);
+    let stock_clock = if result["stock_clock"].is_object() {
+        Some((&result["stock_clock"], "/result/stock_clock"))
+    } else if reference["stock_clock"].is_object() {
+        Some((&reference["stock_clock"], "/retained_reference/stock_clock"))
+    } else if original["stock_clock"].is_object() {
+        Some((&original["stock_clock"], "/retained_reference/retained_stage/checkpoint/stock_clock"))
+    } else {
+        None
+    };
+    if let Some((clock, path)) = stock_clock {
+        let mut action = clock_action(clock, "stock_clock", path.to_owned(), None);
+        if let Some(actual) = clock.get("recovery_checkpoint").filter(|pin| pin.is_object()) {
+            action["journal_id"] = actual["journal_id"].clone();
+            action["head"] = actual["head"].clone();
+            action["authority_tick_floor"] = actual["authority_tick_floor"].clone();
+            action["high_source_sequence"] = actual["high_source_sequence"].clone();
+            action["recovery_checkpoint_pointer"] = json!(format!("{path}/recovery_checkpoint"));
+        }
+        action["inspection_required"] = json!(clock["inspection_required"] != false);
+        action["target_digest"] = clock.get("target_digest")
+            .unwrap_or(&clock["target"]["target_digest"]).clone();
+        action["target_scope"] = json!("original_resource_project_stock_goal");
+        action["original_goal_digest"] = clock["target"]["original_goal_digest"].clone();
+        action["grants_authority"] = json!(false);
+        actions.push(action);
+    }
     if let Some(original) = &manager_original {
         actions.push(json!({
             "scope":"manager", "original":original,
@@ -705,8 +762,9 @@ pub(super) fn packet(
         Vec::new()
     };
     for action in &actions {
-        if matches!(action["scope"].as_str(), Some("clock" | "inventory_clock"))
-            && (action["unresolved"] == true || action["may_be_running"] == true)
+        if matches!(action["scope"].as_str(), Some("clock" | "inventory_clock" | "stock_clock"))
+            && (action["unresolved"] == true || action["may_be_running"] == true
+                || action["inspection_required"] == true)
         {
             let mut effect = json!({
                 "scope":action["scope"], "current_pause_proven":false,
@@ -739,6 +797,7 @@ pub(super) fn packet(
                 .then_some("/retained_reference/retained_stage/checkpoint/tree_handoff"),
             "workshop_original":original["workshop"]["original"],
             "production_original":original["production"]["recovery"],
+            "stock_clock_original":original["stock_clock"]["target"],
             "project_cancelled":reference["retained_stage"]["stage"] == "cancelled",
             "exact_custody_pointer":"/retained_reference",
         })
@@ -761,6 +820,12 @@ pub(super) fn packet(
         json!({"uncertainty_id":"stop_and_recovery","epistemic_state":"indeterminate",
             "statement":"A project stop prevents new stages and new reviews. It does not remove an appointed Manager, undo construction, cancel an already inserted order or prove a clock paused. Preserve all recovery references; independently reconcile or cancel the active clock. Opening markers never grant replayed initialization."}),
     ];
+    if stock_clock.is_some() {
+        uncertainty.push(json!({
+            "uncertainty_id":"stock_watch_time_control","epistemic_state":"observed",
+            "statement":"The separately configured stock-watch clock belongs to this complete original project goal, not to a native order. Every bounded interval needs its own current review and confirmation. Pending or uncertain time control withdraws current stock proof and continuation; settled historical pause evidence still requires fresh stock samples. Recovery restores neither a review nor process-local stability history.",
+        }));
+    }
     if goal["goal"]["targets"].is_array() {
         uncertainty.push(json!({"uncertainty_id":"portfolio_time_control","epistemic_state":"observed",
             "statement":"This fixed stock portfolio preserves every original minimum, cadence and deadline. Configured order and inventory clocks belong to an explicit original order StepId and require independent review and confirmation. Foreground wait reconciles every retained owner without implicitly advancing time. Optional Tree and Workshop prefix clocks keep their separate authority."}));
@@ -813,7 +878,10 @@ pub(super) fn packet(
         "confirmation_required":true, "grants_authority":false,
         "complete_evidence_pointer":"/result/child/observation",
     })).into_iter().collect();
-    affordances.extend(production::affordances(&result, &reference));
+    if stock_clock::permits_goal_sample(&result, &reference) {
+        affordances.extend(production::affordances(&result, &reference));
+    }
+    affordances.extend(stock_clock::affordances(&result, &reference));
     let mut built = turn
         .briefing(json!({
             "profile":"native-resource-project",
@@ -853,6 +921,7 @@ pub(super) fn packet(
             "development_review_available":pending.is_some(),
             "production_publication_pending":publication_pending,
             "production_clock_guidance":production::summary(&result, &reference),
+            "stock_clock_guidance":stock_clock::summary(&result, &reference),
         }))
         .active_work(json!({
             "pending_plans":pending.clone().into_iter().collect::<Vec<_>>(),
@@ -1020,6 +1089,10 @@ fn texts(mut packet: Value) -> Option<Vec<String>> {
             "complete_recovery":descriptor,
             "current_goal_available":false,
         });
+    }
+    if packet.to_string().len() > FIRST_TEXT_BYTES && packet["result"]["stock_clock"].is_object() {
+        let clock = packet["result"]["stock_clock"].clone();
+        packet["result"]["stock_clock"] = json_blocks(&clock, "/result/stock_clock", &mut texts);
     }
     if packet.to_string().len() > FIRST_TEXT_BYTES {
         let child = packet["result"]["child"].clone();
@@ -1305,7 +1378,7 @@ mod tests {
         Ok(())
     }
 
-    fn no_work_project_fixture() -> Value {
+    pub(super) fn no_work_project_fixture() -> Value {
         let (_, child) = stock_watch::tests::fixture();
         json!({
             "ok":true,"mode":"control","stage":"production",
