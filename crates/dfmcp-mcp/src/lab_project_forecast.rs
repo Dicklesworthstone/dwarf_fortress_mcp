@@ -58,6 +58,11 @@ impl ProjectSource {
         }
     }
 
+    /// Account for the exact immutable request retained by a shared model.
+    pub(crate) fn source_bytes(&self) -> usize {
+        self.canonical_json().len()
+    }
+
     pub(crate) fn source_digest(&self) -> Digest32 {
         let mut bytes = b"dfmcp-project-forecast-source/1\0".to_vec();
         bytes.extend_from_slice(self.canonical_json().as_bytes());

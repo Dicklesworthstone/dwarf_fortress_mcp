@@ -317,10 +317,14 @@ impl OwnedWork {
             budget.begin_candidate(adapter.snapshot(), plan, context)?;
         }
         let plan_bytes = archive(plan, context, started)?.len() as u64;
+        // The unchanged typed request is retained for every modeled successor.
+        let project_bytes = project.map_or(0, |source| source.source_bytes() as u64);
         budget.admit_owned_candidate(
             self.actions.len().saturating_add(self.carried.len()) as u64,
             self.records.saturating_add(plan.steps.len() as u64),
-            self.bytes.saturating_add(plan_bytes),
+            self.bytes
+                .saturating_add(plan_bytes)
+                .saturating_add(project_bytes),
             context,
         )?;
         // The existing engine snapshots a committed private world. Account for
@@ -624,7 +628,7 @@ impl OwnedWork {
             decorate_project(&mut value, row, source, plan, adapter.snapshot())?;
             value["horizon_tick"] = json!(meter.budget.horizon_tick());
             value["simulation_horizon_truncated"] =
-                json!(!complete && tick >= meter.budget.horizon_tick());
+                json!(prediction["stop_reason"] == "horizon_reached");
             value["stop_reason"] = prediction["stop_reason"].clone();
         }
         Ok(value)

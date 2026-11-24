@@ -80,11 +80,12 @@ pub(super) fn finish(
         && payload["forecast_scope"] == "complete_project"
         && payload["progression_scope"] == "owned_session";
     let owned_progression = owned_current_stage || owned_project;
-    if matches!(
+    let owned_envelope = matches!(
         payload["schema"].as_str(),
         Some("dfmcp.plan-comparison/3" | "dfmcp.plan-comparison/4")
-    ) && !owned_progression
-    {
+    ) || (payload["kind"] == "compare_candidates"
+        && (payload["version"] == 3 || payload["version"] == 4));
+    if owned_envelope && !owned_progression {
         return Err(invariant(
             "owned-session forecast publication lost its explicit versioned scope",
         ));

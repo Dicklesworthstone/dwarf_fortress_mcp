@@ -1,5 +1,29 @@
 # Implementation Status
 
+## Unreleased — Bound retained project source and preserve owned forecast scope
+
+Complete-project comparisons now charge the exact immutable normalized project
+request alongside the initial plan archive and authenticated peer custody.
+Admission checks this complete census before the first private fork. A focused
+regression covers a budget that fits the world and archive but cannot also
+retain the project source; it requires zero forks, zero simulated ticks and
+unchanged canonical state.
+
+Version 4 truncation now follows the shared scheduler's exact horizon stop,
+so terminal attention at the same tick is not mislabeled as a horizon cutoff.
+The response publisher also recognizes owned generations from their version:
+a version 3 or 4 packet carrying a legacy or unknown schema cannot fall through
+to legacy forecast assumptions. Publication regressions retain active peer and
+pending catalogs and refuse oversized later-stage evidence without clipping.
+
+Independent source review and exact uploaded-blob checks completed. These
+incremental Rust changes and regressions have not been compiled or executed
+in this session because no execution environment is available. The preceding
+commits' recorded checks below do not establish validation of these additions.
+
+Owners: `df-lab-plan-comparison-c9r`, `df-lab-joint-original-forecast-c2s`,
+`df-lab-project-forecast-p7q` (in progress).
+
 ## Unreleased — Complete project comparisons include owned competing work
 
 Laboratory comparison version 4 combines complete original production or room

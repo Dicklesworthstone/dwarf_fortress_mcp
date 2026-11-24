@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Bound project custody and retain owned forecast semantics
+
+- Charge immutable project-source bytes before the first complete-project
+  forecast clone and cover the zero-clone budget refusal.
+- Report truncation only for the scheduler's actual horizon stop.
+- Refuse owned-generation packets with legacy or unknown schema labels;
+  retain active catalogs and all later-stage evidence through publication.
+- Add focused boundary regressions. Source review completed; these incremental
+  Rust changes remain uncompiled and unexecuted in this session.
+
 ## Unreleased — Compare complete projects with owned work
 
 - Add laboratory comparison version 4: complete_project plus owned_session.

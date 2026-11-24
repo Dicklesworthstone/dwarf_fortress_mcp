@@ -506,3 +506,43 @@ fn generated_stage_archives_share_one_byte_budget_across_candidates() -> Result<
     assert_eq!(format!("{adapter:?}"), before);
     Ok(())
 }
+
+#[test]
+fn complete_project_source_custody_is_admitted_before_any_private_clone() -> Result<()> {
+    let adapter = project_fixture()?;
+    let source = bed_project()?;
+    let plan = prepare_project(&adapter, &source)?;
+    let peers = owned(&adapter, Vec::new(), Vec::new());
+    let current = project_context(&adapter);
+    let before = format!("{adapter:?}");
+    let started = Instant::now();
+    let mut measure = ForecastBudget::new_project(&current, started, 0)?;
+    let world_bytes = measure.admit_source(adapter.snapshot(), &current)?["canonical_bytes"]
+        .as_u64()
+        .ok_or_else(|| invalid("missing original world byte census"))?;
+    let plan_bytes = archive(&plan, &current, started)?.len() as u64;
+    assert!(source.source_bytes() > 0);
+    let mut narrow = current.clone();
+    // The world and sealed stage fit exactly, but its immutable full-project
+    // request is additional retained custody even before any later review.
+    narrow.budget.max_bytes = world_bytes
+        .checked_add(plan_bytes)
+        .ok_or_else(|| invalid("fixture original custody allowance overflow"))?;
+    assert!(narrow.budget.max_bytes <= current.budget.max_bytes);
+    let started = Instant::now();
+    let mut budget = ForecastBudget::new_project(&narrow, started, 0)?;
+    let refused = peers.forecast_project(
+        &adapter,
+        &source,
+        &plan,
+        &narrow,
+        None,
+        started,
+        &mut budget,
+    );
+    assert!(matches!(refused, Err(error) if error.code == ErrorCode::BudgetExceeded));
+    assert_eq!(budget.work_json()["source_forks"], 0);
+    assert_eq!(budget.work_json()["simulated_game_ticks"], 0);
+    assert_eq!(format!("{adapter:?}"), before);
+    Ok(())
+}

@@ -659,6 +659,11 @@ mod owned_project {
     use dfmcp_core::WorkBudget;
 
     fn projection() -> TemporalResponseProjection {
+        let mut active_work = crate::agent_turn::empty_active_work();
+        active_work["pending_plans"] = json!([{"plan_digest":"prior-review"}]);
+        active_work["actions"] = json!([{"action_id":"peer-action", "state":"Prepared"}]);
+        active_work["carried_obligations"] =
+            json!([{"plan_digest":"recovered-peer", "state":"dispatched"}]);
         TemporalResponseProjection {
             session_id: "903".to_owned(),
             request_id: "17".to_owned(),
@@ -670,7 +675,7 @@ mod owned_project {
                 max_output_tokens: 16_384,
                 ..WorkBudget::default()
             },
-            active_work: crate::agent_turn::empty_active_work(),
+            active_work,
             objectives: json!([]),
         }
     }
@@ -711,8 +716,17 @@ mod owned_project {
             "owned_work",
             "forecast_scope",
             "progression_scope",
+            "source_work",
+            "forecast_work",
         ] {
             assert_eq!(result[field], input[field]);
+        }
+        for field in ["pending_plans", "actions", "carried_obligations"] {
+            assert_eq!(
+                result["agent_turn"]["active_work"][field],
+                view.active_work[field],
+                "complete {field}",
+            );
         }
         assert_eq!(
             result["agent_turn"]["briefing"]["forecast_scope"],
@@ -738,6 +752,9 @@ mod owned_project {
         let view = projection();
         for (field, value) in [
             ("schema", json!("dfmcp.plan-comparison/3")),
+            ("schema", json!("dfmcp.plan-comparison/1")),
+            ("schema", json!("unknown")),
+            ("kind", json!("select_candidate")),
             ("version", json!(3)),
             ("version", json!(5)),
             ("forecast_scope", json!("current_stage")),
@@ -752,5 +769,21 @@ mod owned_project {
                 Err(error) if error.code == ErrorCode::InternalInvariantViolation
             ));
         }
+    }
+
+    #[test]
+    fn later_stage_evidence_overflow_is_refused_without_clipping_complete_predictions() {
+        let mut view = projection();
+        view.budget.max_output_tokens = 4_096;
+        let mut input = payload(&view);
+        input["candidates"][0]["prediction"]["stages"][1]["required_evidence"] =
+            json!("x".repeat(16_384));
+        let original = input.clone();
+        assert!(matches!(
+            finish(&view, input.clone(), query_work(), None),
+            Err(error) if error.code == ErrorCode::BudgetExceeded
+        ));
+        assert_eq!(input, original);
+        assert_eq!(view.active_work["pending_plans"][0]["plan_digest"], "prior-review");
     }
 }
