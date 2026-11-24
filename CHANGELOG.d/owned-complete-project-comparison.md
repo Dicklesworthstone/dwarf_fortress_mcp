@@ -9,6 +9,8 @@
 - Detect recovered-peer invalidation after hypothetical successor commits
   before publishing candidate completion.
 - Keep current-stage-only selection and older comparison/query behavior.
-- Add eight model regressions and a closed request/schema matrix. Python schema
-  tests and dated-nightly syntax/format checks pass; full Rust and live
-  qualification remain open as described in IMPLEMENTATION_STATUS.md.
+- Add eight model regressions, a closed request/schema matrix and four public
+  facade/packet regressions, including comparison-to-actual Commit/Wait parity
+  and whole-packet refusal. Python schema tests and dated-nightly syntax/format
+  checks pass; full Rust and live qualification remain open as described in
+  IMPLEMENTATION_STATUS.md.

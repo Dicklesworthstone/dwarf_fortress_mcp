@@ -653,3 +653,104 @@ mod objective_briefing {
         }
     }
 }
+
+mod owned_project {
+    use super::super::*;
+    use dfmcp_core::WorkBudget;
+
+    fn projection() -> TemporalResponseProjection {
+        TemporalResponseProjection {
+            session_id: "903".to_owned(),
+            request_id: "17".to_owned(),
+            anchor: json!({"fortress_id":"19", "epoch":1, "sequence":3,
+                "game_tick":101, "state_hash":"b".repeat(64)}),
+            paused: false,
+            budget: WorkBudget {
+                max_bytes: 65_536,
+                max_output_tokens: 16_384,
+                ..WorkBudget::default()
+            },
+            active_work: crate::agent_turn::empty_active_work(),
+            objectives: json!([]),
+        }
+    }
+
+    fn payload(view: &TemporalResponseProjection) -> Value {
+        json!({
+            "ok":true, "kind":"compare_candidates",
+            "schema":"dfmcp.plan-comparison/4", "version":4,
+            "forecast_scope":"complete_project", "progression_scope":"owned_session",
+            "anchor":view.anchor, "session_id":view.session_id,
+            "selection_scope":"current_reviewed_stage_only",
+            "automatic_continuation":false, "effect_evidence":false,
+            "owned_work":{"live_originals":["peer"], "recovered_originals":[]},
+            "candidates":[{"key":"project", "prediction":{
+                "stages":[{"stage":"acquire_resources"}, {"stage":"production"}],
+                "competing_work":{"live_originals":["peer"]},
+                "predicted_complete":true,
+                "project_action_count":3}}],
+            "source_work":{"records":32, "canonical_bytes":4096},
+            "forecast_work":{"actual_game_ticks_advanced":0},
+        })
+    }
+
+    fn query_work() -> Value {
+        json!({"query_baselines":[], "query_watches":[], "condition_watches":[]})
+    }
+
+    #[test]
+    fn complete_owned_project_publication_keeps_stages_and_declares_exact_model_scope() -> Result<()>
+    {
+        let view = projection();
+        let input = payload(&view);
+        let output = finish(&view, input.clone(), query_work(), None)?;
+        let result: Value =
+            serde_json::from_str(&output).map_err(|_| invariant("invalid project test packet"))?;
+        for field in [
+            "candidates",
+            "owned_work",
+            "forecast_scope",
+            "progression_scope",
+        ] {
+            assert_eq!(result[field], input[field]);
+        }
+        assert_eq!(
+            result["agent_turn"]["briefing"]["forecast_scope"],
+            "complete_project"
+        );
+        assert_eq!(
+            result["agent_turn"]["briefing"]["forecast_future_stages"],
+            "candidate_only_discarded_copies"
+        );
+        assert_eq!(result["automatic_continuation"], false);
+        assert_eq!(result["effect_evidence"], false);
+        assert_eq!(result["agent_turn"]["recommendations"], json!([]));
+        let limits = result["agent_turn"]["uncertainty"][0]["consequence"]
+            .as_str()
+            .ok_or_else(|| invariant("missing project uncertainty"))?;
+        assert!(limits.contains("Other originals' future stages"));
+        assert!(limits.contains("current executable candidate stage"));
+        Ok(())
+    }
+
+    #[test]
+    fn publication_refuses_crossed_owned_project_generations_and_scopes() {
+        let view = projection();
+        for (field, value) in [
+            ("schema", json!("dfmcp.plan-comparison/3")),
+            ("version", json!(3)),
+            ("version", json!(5)),
+            ("forecast_scope", json!("current_stage")),
+            ("forecast_scope", Value::Null),
+            ("progression_scope", json!("candidate_only")),
+            ("progression_scope", Value::Null),
+        ] {
+            let mut input = payload(&view);
+            input[field] = value;
+            assert!(matches!(
+                finish(&view, input, query_work(), None),
+                Err(error) if error.code == ErrorCode::InternalInvariantViolation
+            ));
+        }
+    }
+}

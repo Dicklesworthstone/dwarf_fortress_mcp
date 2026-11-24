@@ -1070,3 +1070,235 @@ fn public_complete_project_comparison_predicts_later_production_but_selects_only
     }
     Ok(())
 }
+
+#[test]
+fn public_owned_complete_project_predicts_later_stages_but_selects_only_current_harvest()
+-> TestResult {
+    let _serial = crate::test_serial();
+    let owner = open_project_resources()?;
+    let previous = pause_plan(&owner)?;
+    let old_pending = text_field(&previous, "plan_digest")?;
+    let before = snapshot(&owner)?;
+    let blueprint = json!({
+        "template":"compare_candidates", "version":4,
+        "forecast_scope":"complete_project", "progression_scope":"owned_session",
+        "horizon_ticks":5_000,
+        "candidates":[
+            {"key":"alpha","blueprint":{
+                "template":"production", "quotas":[{"item":"BED","minimum":24}],
+                "acquire_resources":{"assign_labor":false},
+            }},
+            {"key":"staffed","blueprint":{
+                "template":"production", "quotas":[{"item":"BED","minimum":24}],
+                "acquire_resources":{"assign_labor":true},
+            }},
+        ],
+    });
+    let report = plan_blueprint(&owner, &blueprint.to_string())?;
+    assert_eq!(report["ok"], true, "{report}");
+    assert_eq!(report["schema"], "dfmcp.plan-comparison/4");
+    assert_eq!(report["progression_scope"], "owned_session");
+    assert_eq!(report["owned_work"]["live_originals"], json!([]));
+    assert_eq!(
+        report["agent_turn"]["briefing"]["forecast_scope"],
+        "complete_project"
+    );
+    assert_eq!(
+        report["agent_turn"]["briefing"]["forecast_future_stages"],
+        "candidate_only_discarded_copies"
+    );
+    assert_eq!(report["agent_turn"]["phase"], "compare");
+    assert_eq!(report["forecast_scope"], "complete_project");
+    assert_eq!(report["selection_scope"], "current_reviewed_stage_only");
+    assert_eq!(report["forecast_work"]["actual_game_ticks_advanced"], 0);
+    assert_eq!(report["pending_plan_changed"], false);
+    assert_eq!(report["effect_evidence"], false);
+    assert!(report["recommended_candidate"].is_string(), "{report}");
+    for key in ["alpha", "staffed"] {
+        let row = candidate(&report, key)?;
+        assert_eq!(row["prediction"]["predicted_complete"], true, "{row}");
+        assert_eq!(row["prediction"]["predicted_goal_truth"], "true", "{row}");
+        assert_eq!(
+            row["prediction"]["stages"].as_array().map(Vec::len),
+            Some(2),
+            "{row}"
+        );
+        assert_eq!(
+            row["prediction"]["stages"][0]["stage"], "acquire_resources",
+            "{row}"
+        );
+        assert_eq!(
+            row["prediction"]["stages"][1]["stage"], "production",
+            "{row}"
+        );
+        assert_eq!(row["max_risk"], row["prediction"]["project_max_risk"]);
+        assert_eq!(
+            row["action_count"],
+            row["prediction"]["project_action_count"]
+        );
+    }
+    assert_eq!(snapshot(&owner)?, before);
+    assert_eq!(
+        pending_digest(&owner)?.as_deref(),
+        Some(old_pending.as_str())
+    );
+
+    // Whole-packet refusal cannot replace the existing pending plan with even
+    // the first stage of an otherwise successful model.
+    output_budget(&owner, 256)?;
+    let refused = plan_blueprint(&owner, &blueprint.to_string())?;
+    refusal(&refused, "budget_exceeded");
+    assert_eq!(snapshot(&owner)?, before);
+    assert_eq!(
+        pending_digest(&owner)?.as_deref(),
+        Some(old_pending.as_str())
+    );
+    output_budget(&owner, 20_000)?;
+
+    let selected_raw = selection(&report, "alpha")?;
+    let selected_request = parsed(&selected_raw)?;
+    assert_eq!(selected_request["version"], 1);
+    let selected = plan_blueprint(&owner, &selected_raw)?;
+    assert_eq!(selected["ok"], true, "{selected}");
+    assert_eq!(selected["kind"], "select_candidate");
+    assert_eq!(
+        selected["production"]["resource_workflow"]["stage"], "acquire_resources",
+        "{selected}"
+    );
+    let digest = text_field(&selected, "plan_digest")?;
+    assert_eq!(pending_digest(&owner)?.as_deref(), Some(digest.as_str()));
+    assert_eq!(snapshot(&owner)?, before);
+    {
+        let session = resolve_session(Some(owner.id.clone()))?;
+        let guard = session.lock().map_err(|_| "session poisoned")?;
+        let pending = guard
+            .pending
+            .as_ref()
+            .ok_or("selected current stage missing")?;
+        assert_eq!(
+            pending.plan.steps.len() as u64,
+            candidate(&report, "alpha")?["current_stage"]["action_count"]
+                .as_u64()
+                .ok_or("current-stage count missing")?
+        );
+        assert!(
+            guard.open_actions.is_empty(),
+            "forecast dispatched canonical actions"
+        );
+        let PlanSource::Production { raw, .. } = &pending.source else {
+            return Err("project selection changed source family".into());
+        };
+        assert_eq!(parsed(raw)?["quotas"], json!([{"item":"BED","minimum":24}]));
+    }
+    Ok(())
+}
+
+#[test]
+fn public_owned_complete_project_includes_deferred_peers_and_matches_actual_pause() -> TestResult {
+    let _serial = crate::test_serial();
+    let owner = open(false, Some(20_000))?;
+    let peer = commit_ready_peer_pause(&owner)?;
+    let pending = text_field(&pause_plan(&owner)?, "plan_digest")?;
+    let before = comparison_state(&owner)?;
+    let source = snapshot(&owner)?;
+    let legacy = plan_blueprint(
+        &owner,
+        &json!({"template":"compare_candidates", "version":2,
+            "forecast_scope":"complete_project", "horizon_ticks":1_000,
+            "candidates":production_candidates()})
+        .to_string(),
+    )?;
+    assert_eq!(legacy["ok"], true, "{legacy}");
+    assert_eq!(legacy["version"], 2);
+    assert!(legacy["progression_scope"].is_null());
+    assert_eq!(
+        candidate(&legacy, "ordinary")?["prediction"]["predicted_complete"],
+        true
+    );
+    let raw = json!({"template":"compare_candidates", "version":4,
+        "forecast_scope":"complete_project", "progression_scope":"owned_session",
+        "horizon_ticks":1_000, "candidates":production_candidates()})
+    .to_string();
+    let report = plan_blueprint(&owner, &raw)?;
+    assert_eq!(report["ok"], true, "{report}");
+    assert_eq!(report["schema"], "dfmcp.plan-comparison/4");
+    assert_eq!(report["version"], 4);
+    assert_eq!(report["forecast_scope"], "complete_project");
+    assert_eq!(report["progression_scope"], "owned_session");
+    assert_eq!(
+        report["agent_turn"]["briefing"]["forecast_progression_scope"],
+        "owned_session"
+    );
+    assert_eq!(
+        report["agent_turn"]["briefing"]["forecast_recovered_observation"],
+        "discarded_copies_only"
+    );
+    assert_eq!(
+        report["agent_turn"]["briefing"]["recovered_work_observation"],
+        "retained_not_reobserved"
+    );
+    let model_scope = &report["agent_turn"]["uncertainty"][0];
+    assert!(model_scope["statement"].as_str().is_some_and(|statement| {
+        statement.contains("complete candidate project")
+            && statement.contains("authenticated current-session work")
+    }));
+    assert!(
+        model_scope["consequence"]
+            .as_str()
+            .is_some_and(|limits| limits.contains("Other originals' future stages"))
+    );
+    assert!(
+        !model_scope
+            .to_string()
+            .contains("Other plans' deferred steps are excluded")
+    );
+    assert_eq!(report["owned_work"]["live_originals"], json!([peer]));
+    assert_eq!(
+        report["owned_work"]["recovered_dispatch_handles_restored"],
+        false
+    );
+    assert_eq!(report["forecast_work"]["source_forks"], 4);
+    assert_eq!(report["forecast_work"]["simulated_game_ticks"], 0);
+    assert_eq!(report["pending_plan_changed"], false);
+    assert_eq!(report["effect_evidence"], false);
+    assert!(report["recommended_candidate"].is_null());
+    for key in ["ordinary", "conditional"] {
+        let row = candidate(&report, key)?;
+        assert_eq!(row["status"], "evaluated", "{row}");
+        assert_eq!(row["prediction"]["predicted_complete"], false);
+        assert_eq!(row["prediction"]["blocked_by_pause"], true);
+        assert_eq!(row["prediction"]["predicted_frontier_tick"], source.tick.0);
+        assert_eq!(
+            row["prediction"]["shared_progression_work"]["deferred_dispatches"],
+            1
+        );
+    }
+    assert_eq!(comparison_state(&owner)?, before);
+    assert_eq!(pending_digest(&owner)?.as_deref(), Some(pending.as_str()));
+    output_budget(&owner, 1)?;
+    refusal(&plan_blueprint(&owner, &raw)?, "budget_exceeded");
+    assert_eq!(comparison_state(&owner)?, before);
+    output_budget(&owner, 20_000)?;
+
+    let selected_raw = selection(&report, "ordinary")?;
+    assert_eq!(parsed(&selected_raw)?["version"], 1);
+    let selected = plan_blueprint(&owner, &selected_raw)?;
+    assert_eq!(selected["ok"], true, "{selected}");
+    assert_eq!(selected["kind"], "select_candidate");
+    assert_eq!(snapshot(&owner)?, source);
+    assert_ne!(text_field(&selected, "plan_digest")?, pending);
+    let committed = parsed(&crate::agent_facade::fortress_commit(
+        Some(owner.id.clone()),
+        text_field(&selected, "plan_digest")?,
+    ))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    let waited = parsed(&crate::agent_facade::fortress_wait(
+        Some(owner.id.clone()),
+        Some(1_000),
+    ))?;
+    assert_eq!(waited["ok"], true, "{waited}");
+    let actual = snapshot(&owner)?;
+    assert!(actual.paused);
+    assert_eq!(actual.tick, source.tick);
+    Ok(())
+}

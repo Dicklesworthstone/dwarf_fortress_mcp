@@ -619,6 +619,10 @@ document records the commands that actually ran.
 Version 4 composes the complete-project source and stage machine with
 `owned_candidate_forecast.rs` and the metered original foreground model.
 Its model regressions cover later-stage costs and capability refusal, recovered
-peer invalidation, shared budgets and immutable canonical state. These remain
+peer invalidation, shared budgets and immutable canonical state. Public facade
+regressions exercise full-project comparison and current-stage selection,
+existing deferred pause effects, normal Commit/Wait and whole-packet refusal.
+Packet regressions retain every stage and owned-work census, report the precise
+prediction limits and reject crossed version/scope metadata. These remain
 source tests until executed; consult the current status for the exact
 validation boundary.

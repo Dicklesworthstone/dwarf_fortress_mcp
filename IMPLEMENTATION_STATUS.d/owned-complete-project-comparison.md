@@ -24,7 +24,10 @@ Eight new real-model regression groups cover staged harvest/production,
 finite competing pause/resume, future authority and expiry, aggregate action
 and generated-archive budgets across candidates, exact reserves, zero horizon,
 later-stage recovered-peer invalidation and complete room outcomes. Public
-facade/packet regressions are part of the subsequent validation batch.
+facade regressions also exercise complete-project compare/select/commit/wait,
+owned pause effects, lossless packet output and whole-packet refusal. Packet
+regressions reject crossed version/scope metadata and retain every stage and
+the owned-work census with the correct forecast limitations.
 
 Executed checks: the Python request-schema suite passed 15 accepted and 91
 rejected cases; Python syntax and whitespace checks passed. The eleven changed
@@ -35,7 +38,9 @@ including exact u64 boundaries; original schema variant bytes were preserved.
 The host disconnected twice. After recovery, exact locked dependencies were
 fetched without substitution. The one-job locked/offline Rust check stopped
 with ENOSPC while checking getrandom 0.2.17 before reaching dfmcp-mcp; no
-Rust test execution or compilation success is established by this entry. Latest-nightly,
+Rust test execution or compilation success is established by this entry. A
+retry uses the same exact dependencies after relocating this task's caches.
+Latest-nightly,
 full-workspace, native, live-game and admission qualification remain open.
 No compatibility registry or production protocol map is widened.
 
