@@ -91,10 +91,40 @@ streak or joint achievement; a missed original deadline is never renewed.
 No-work portfolio sampling creates no original effect plan, insertion key,
 native preparation, labor assignment, clock run or goal-history sidecar.
 `worker_prerequisite_checked` remains false, even with `assign_labor=true`.
-Stock loss is reported against the original goal without sizing a replacement
-order. Game-time progression is managed separately. The root resource-project
-request continues to accept one stock goal; this extension applies to the
-combined production portfolio request.
+Stock loss is reported against the original goal without automatically sizing
+an order. Game-time progression is managed separately. The native
+resource-project profile also accepts scalar or complete portfolio goals.
+
+### Continue the unchanged unfinished stock goal
+
+If stock falls before a retained no-work watch has ever achieved its required
+stability, the current Control Agent Turn can offer this explicit Plan:
+
+```json
+{"kind":"continue_stock_goal","goal_witness":"<retained original watch witness>"}
+```
+
+The two-field request keeps the original targets, selected workers, finite
+amount caps, assignment choice, deadline, cadence and stability. It reacquires
+the original citizen selection and a complete current inventory census and
+requires current independent production/labor authority, original prerequisites
+and an empty paused native order queue. Fresh positive deficits create the
+first finite original; a still all-met census, over-cap deficit, source fence
+or completed/cancelled/expired watch refuses. Previous False evidence is only
+advice and never supplies the new amount.
+
+The original watch witness is bound into the new plan's identity and preserved
+through strict archive recovery as historical predecessor identity. It grants
+no authority or restored proof. Prepublication refusal retains the watch and
+deadline, withdraws current samples and preserves consumed rejection floors;
+partial durable publication fences the owner. Native resource-project parents
+retain the same acknowledged-intent-before-child-publication boundary.
+
+Planning performs no native Prepare/Commit and advances no game time. Review
+and explicitly confirm each later original effect independently. The prior
+watch's elapsed samples are not credited to production stability. See
+[the continuation contract](NATIVE_STOCK_TARGET.md#continue-an-unfinished-watch-after-stock-loss)
+for source, recovery and failure semantics.
 
 ## Operator configuration
 

@@ -307,6 +307,7 @@ mod tests {
                     workshop,
                     manager,
                     input_supply: Some(input),
+                    stock_watch: None,
                 };
                 let summary = prerequisite_binding::summary("Furniture goal".into(), origins)?;
                 assert_eq!(
@@ -342,6 +343,28 @@ mod tests {
                 );
             }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn continuation_marker_follows_conserved_inputs_and_salts_the_full_original() -> Result<()> {
+        use super::super::prerequisite_binding::{self, Origins};
+        let witness = Digest32::of_bytes(b"original stock watch with all prerequisites");
+        let origins = Origins {
+            workshop: Some(witness), manager: Some(witness),
+            input_supply: Some(binding()), stock_watch: Some(witness),
+        };
+        let marked = prerequisite_binding::summary("Original stock goal".into(), origins)?;
+        assert_eq!(prerequisite_binding::parse_summary(&marked)?, (origins, "Original stock goal"));
+        let mut lines: Vec<_> = marked.lines().collect();
+        assert_eq!(lines.len(), 5);
+        lines.swap(2, 3);
+        assert!(prerequisite_binding::parse_summary(&lines.join("\n")).is_err());
+        let mut continued = b"original finite stock".to_vec();
+        let mut legacy = continued.clone();
+        prerequisite_binding::append_identity(&mut continued, origins)?;
+        prerequisite_binding::append_identity(&mut legacy, Origins {stock_watch: None, ..origins})?;
+        assert_ne!(continued, legacy);
         Ok(())
     }
 }

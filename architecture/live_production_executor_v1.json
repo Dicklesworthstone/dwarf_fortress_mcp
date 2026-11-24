@@ -1524,6 +1524,31 @@
         "latest_nightly_formatting_qualified": false,
         "rust_typechecking_or_runtime_tests_executed": false
       }
+    },
+    "stock_goal_continuation": {
+      "contract": "native_stock_target_v1.json#no_work_goal_continuation",
+      "request_kind": "continue_stock_goal",
+      "fixed_original_watch_witness_required": true,
+      "fresh_source_and_independent_authority_required": true,
+      "current_agent_turn_suggests_only_unfinished_false_sample": true,
+      "failed_retained_offline_closed_views_offer_continuation": false,
+      "predecessor_identity_retained_in_original_archive": true,
+      "parent_first_publication_ack_preserved": true,
+      "source_paths": [
+        "crates/dfmcp-mcp/src/live_production_runtime/stock_goal_continuation.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/prerequisite_binding.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/stock_target.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/stock_targets.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/stock_target_tests.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_tests.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/project_publication_runtime_tests.rs",
+        "crates/dfmcp-mcp/src/live_production_server.rs",
+        "crates/dfmcp-mcp/src/native_resource_project/runtime.rs",
+        "crates/dfmcp-mcp/src/native_resource_project/presentation.rs",
+        "tests/stdio/combined_stock_target_runtime_peer.py",
+        "tests/stdio/combined_stock_targets_runtime_peer.py",
+        "tests/stdio/project_publication_runtime_peer.py"
+      ]
     }
   },
   "selected_work_order_goal_monitor": {

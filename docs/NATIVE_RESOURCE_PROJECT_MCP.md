@@ -584,6 +584,37 @@ offline, uncertain, fenced, expired or partial views supply no fresh review
 offer. Calling Plan obtains a review only; the later Commit requires a separate
 fresh confirmation.
 
+### Continue an unfinished no-work goal after consumption
+
+A scalar or portfolio no-work watch may lose stock before ever satisfying its
+required stability. The parent accepts the child's exact closed continuation
+request through `fortress_plan`:
+
+```json
+{"kind":"continue_stock_goal","goal_witness":"<the child's retained watch witness>"}
+```
+
+The watch must still belong to the current Production stage and the unchanged
+root goal. The request cannot replace any target, worker selection, order cap,
+labor-assignment policy or original timing. Current production authority and,
+when selected originally, labor authority are checked before source reads.
+The child freshly qualifies the complete original citizen selection, inventory
+and empty paused native queue; only a fresh bounded deficit can publish work.
+A completed, cancelled, expired or fenced watch cannot continue.
+
+This uses the existing first-production publication boundary: the parent
+acknowledges the exact immutable production intent before the child writes its
+original archive, citizen capsule, associations or execution journal. The new
+original binds the watch's witness as historical predecessor identity while
+preserving all root minima and the absolute deadline. The ordinary separate
+step review, Commit and clock confirmation rules then apply.
+
+A refused read or prepublication check retains the watch and consumed source
+floors while withdrawing current proof. Partial publication remains fenced.
+Neither recovery JSON nor the marker in a later archive recreates a watch or
+its prior stability samples. After timely watch achievement, later stock loss
+is current evidence loss and does not authorize another maintenance cycle.
+
 ### 5. Verify the original outcome
 
 `fortress_wait` performs one foreground reconciliation or goal sample. It

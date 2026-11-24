@@ -66,6 +66,7 @@ mod project_goal;
 mod project_publication_runtime_tests;
 mod request;
 mod review;
+mod stock_goal_continuation;
 mod stock_target;
 mod stock_target_binding;
 mod stock_target_request;
@@ -118,6 +119,8 @@ pub(crate) use portfolio_request::PortfolioRequest;
 use prerequisite_binding::Origins;
 pub(crate) use project::ProjectStockGoal;
 pub(crate) use request::Request;
+use stock_goal_continuation::StockGoalContinuation;
+pub(crate) use stock_goal_continuation::StockGoalContinuationRequest;
 use stock_target::{SharedStockTarget, StockTargetNoWork};
 pub(crate) use stock_target_request::StockTargetRequest;
 use stock_targets::SharedStockTargets;
@@ -1252,6 +1255,7 @@ impl Runtime {
             "input_supply":self.input_supply.as_ref().map(SharedInputSupply::status),
             "stock_target":self.stock_target_json(),
             "no_work_stock_goal":self.no_work_recovery_json(),
+            "stock_goal_continuation":self.stock_continuation_json(),
             "stock_targets":self.stock_targets_json(),
             "portfolio":self.portfolio_json(),
             "selected_parent_goal":null,
@@ -1366,6 +1370,7 @@ impl Runtime {
             "input_supply":self.input_supply.as_ref().map(SharedInputSupply::status),
             "stock_target":self.stock_target_json(),
             "no_work_stock_goal":self.no_work_goal_json(),
+            "stock_goal_continuation":self.stock_continuation_json(),
             "stock_targets":self.stock_targets_json(),
             "portfolio":self.portfolio_json(),
             "selected_parent_goal":if self.portfolio.is_some(){self.selected_parent_goal_json()}else{Value::Null},
@@ -1434,13 +1439,27 @@ impl Runtime {
         }
         self.basis = None;
         let mut work = Work::new(c)?;
+        let basis = self.acquire_planning_basis(&request, &mut work)?;
+        self.anchor = basis.projection.snapshot.anchor();
+        self.basis = Some(basis);
+        self.view(&mut work)
+    }
+
+    /// Shared fresh source acquisition for initial planning and an explicit
+    /// continuation. Acquiring a new basis never removes a retained stock watch.
+    fn acquire_planning_basis(
+        &mut self,
+        request: &ObserveRequest,
+        work: &mut Work,
+    ) -> Result<Basis> {
+        let c = work.current()?;
         // Reserve the complete optional capture before contacting either source.
         let operations_budget = request
             .include_production()
             .then(|| work.take(planning_inspection::CAPTURE_BYTES))
             .transpose()?;
-        let cursor = self.planning_inspection.next_cursor(c)?;
-        inventory_baseline::authorize_observe(c, self.observation_tick_floor)?;
+        let cursor = self.planning_inspection.next_cursor(&c)?;
+        inventory_baseline::authorize_observe(&c, self.observation_tick_floor)?;
         let capsule = self.config.workforce.acquire(&work.take(16 * MIB)?)?;
         let projection = project_live_capsule(&capsule, self.anchor.fortress_id, cursor)?;
         if projection.snapshot.tick < self.anchor.tick.max(self.observation_tick_floor) {
@@ -1462,13 +1481,13 @@ impl Runtime {
             &capsule,
             &projection,
             self.config.workforce.acceptance(),
-            &request,
+            request,
             &work.take(2 * MIB)?,
         )?;
         let seal = observation_seal(&capsule, &projection);
         let (choices, existing_labor_capture) = if selection.is_empty() {
             (
-                choices::empty(projection.snapshot.anchor(), seal, &request)?,
+                choices::empty(projection.snapshot.anchor(), seal, request)?,
                 None,
             )
         } else {
@@ -1501,7 +1520,7 @@ impl Runtime {
                 &projection,
                 scope,
                 &capture,
-                &request,
+                request,
                 &work.take(4 * MIB)?,
             )?;
             (choices, Some(capture))
@@ -1511,15 +1530,13 @@ impl Runtime {
         }
         self.config.current()?;
         work.current()?;
-        self.anchor = projection.snapshot.anchor();
-        self.basis = Some(Basis {
+        Ok(Basis {
             seal,
             capsule,
             projection,
             choices: Some(choices),
             existing_labor_capture,
-        });
-        self.view(&mut work)
+        })
     }
     pub(crate) fn plan(&mut self, request: Request, c: &OperationContext) -> Result<View> {
         request.validate()?;
@@ -1665,6 +1682,37 @@ impl Runtime {
             Origins,
         ) -> Result<PreparedPlan>,
     ) -> Result<View> {
+        self.plan_existing_workers_from_watch(
+            observation,
+            selection,
+            portfolio,
+            objectives,
+            inputs,
+            c,
+            publication,
+            None,
+            compile,
+        )
+    }
+
+    fn plan_existing_workers_from_watch(
+        &mut self,
+        observation: Digest32,
+        selection: (Vec<dfmcp_core::EntityId>, String),
+        portfolio: bool,
+        objectives: &[&orders::request::Objective],
+        inputs: PlanInputs,
+        c: &OperationContext,
+        publication: Option<project::ProjectPublication<'_>>,
+        continuation: Option<StockGoalContinuation>,
+        compile: impl FnOnce(
+            &PredicateEvidence<'_>,
+            &ExistingLaborRequirement,
+            &InventoryBaselines,
+            &OperationContext,
+            Origins,
+        ) -> Result<PreparedPlan>,
+    ) -> Result<View> {
         let (selected, labor) = selection;
         let basis = self
             .basis
@@ -1676,13 +1724,14 @@ impl Runtime {
             denied("existing-labor planning requires a fresh selected workforce capture")
         })?;
         let scope = self.config.workforce.acceptance().clone();
-        self.plan_compiled_recorded(
+        self.plan_compiled_from_watch(
             observation,
             portfolio,
             objectives,
             inputs,
             c,
             publication,
+            continuation,
             |evidence, baselines, current, origin| {
                 let identity =
                     LiveRoutingEvidence::citizens_v1(evidence.clone(), &projection, &capsule)?;
@@ -1754,11 +1803,41 @@ impl Runtime {
             Origins,
         ) -> Result<PreparedPlan>,
     ) -> Result<View> {
+        self.plan_compiled_from_watch(
+            observation,
+            portfolio,
+            objectives,
+            inputs,
+            c,
+            publication,
+            None,
+            compile,
+        )
+    }
+
+    fn plan_compiled_from_watch(
+        &mut self,
+        observation: Digest32,
+        portfolio: bool,
+        objectives: &[&orders::request::Objective],
+        inputs: PlanInputs,
+        c: &OperationContext,
+        publication: Option<project::ProjectPublication<'_>>,
+        continuation: Option<StockGoalContinuation>,
+        compile: impl FnOnce(
+            &PredicateEvidence<'_>,
+            &InventoryBaselines,
+            &OperationContext,
+            Origins,
+        ) -> Result<PreparedPlan>,
+    ) -> Result<View> {
         self.check(c, true)?;
-        self.require_no_active_stock_watch()?;
+        if let Some(continuation) = continuation {
+            continuation.verify(self, c)?;
+        } else {
+            self.require_no_active_stock_watch()?;
+        }
         self.planning_inspection.withdraw();
-        self.stock_target_no_work = None;
-        self.stock_targets_no_work = None;
         if self.original.is_some() {
             return Err(invalid(
                 "retain original combined plan; prepare its next step without recompiling",
@@ -1818,6 +1897,7 @@ impl Runtime {
             workshop,
             manager,
             input_supply,
+            stock_watch: continuation.map(StockGoalContinuation::witness),
         };
         let plan = compile(&evidence, &baselines, &work.take(8 * MIB)?, origins)?;
         if prerequisite_binding::requirements(&plan)? != origins {
@@ -1900,6 +1980,10 @@ impl Runtime {
         self.seal = Some(expected);
         self.identity_digest = Some(identity_digest);
         self.original = Some(plan.clone());
+        // The complete effect-bearing original now owns the immutable prior
+        // watch witness. Earlier refusals retained the original monitor.
+        self.stock_target_no_work = None;
+        self.stock_targets_no_work = None;
         self.layout = Some(layout);
         self.stock_target = stock_target;
         self.stock_targets = stock_targets;

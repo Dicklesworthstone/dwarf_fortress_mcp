@@ -283,7 +283,7 @@ impl PortfolioRequest {
             // allowance. Legacy plans retain their original policy and bytes.
             planner.policy.max_string_bytes = 1024;
         }
-        if origins.input_supply.is_some() {
+        if origins.input_supply.is_some() || origins.stock_watch.is_some() {
             planner.policy.max_string_bytes = 2048;
         }
         let mut plan = planner.prepare_with_evidence(evidence, &intent, c)?;

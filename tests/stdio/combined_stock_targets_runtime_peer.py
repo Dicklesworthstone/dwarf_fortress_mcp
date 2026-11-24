@@ -74,7 +74,7 @@ def run_case(executable, test_name, requested_case):
                 super().__init__(production)
                 self.existing_labor_ready = not assignment
                 self.inventory = {
-                    "BED": 6 if case == "already" else 2,
+                    "BED": 6 if case == "already" or case.startswith("continue") else 2,
                     "DOOR": 1 if case.startswith("multiple") or case == "four" else 3,
                 }
                 self.last_stage = None
@@ -101,6 +101,16 @@ def run_case(executable, test_name, requested_case):
                 if value == self.last_stage:
                     return
                 self.last_stage = value
+                if case.startswith("continue") and value.startswith("continue_"):
+                    offset = {"continue_all_met": 5, "continue_deficit": 10,
+                              "continue_fresh": 15}[value]
+                    self.order_tick = self.workforce_tick = self.no_work_citizen_tick = combined.TICK + offset
+                    self.inventory = {
+                        "BED": 2 if value == "continue_fresh" else 6,
+                        "DOOR": (0 if value == "continue_deficit" else
+                                 1 if value == "continue_fresh" and case.endswith("multiple") else 3),
+                    }
+                    return
                 if case == "already":
                     offsets = {
                         "goal_first": (5, 5), "goal_second": (10, 10),
@@ -150,7 +160,7 @@ def run_case(executable, test_name, requested_case):
 
             def reply(self, plugin, operation, request):
                 self.apply_stage()
-                if case == "already" and plugin == "dfmcp_bridge":
+                if (case == "already" or case.startswith("continue")) and plugin == "dfmcp_bridge":
                     return combined.citizen_reply(
                         operation, request, self.citizen_ids,
                         tick=self.no_work_citizen_tick,
@@ -227,8 +237,8 @@ def run_case(executable, test_name, requested_case):
                 assert not peer.inventory_clock_commits
 
             if case in ("mixed", "parent_regression", "parent_clock", "lost", "multiple", "four",
-                        "multiple_extra", "multiple_retired"):
-                expected_count = 4 if case == "four" else 2 if case == "multiple" else 1
+                        "multiple_extra", "multiple_retired", "continue", "continue_multiple"):
+                expected_count = 4 if case == "four" else 2 if case in ("multiple", "continue_multiple") else 1
                 assert calls.count("PrepareOrder") == expected_count
                 assert calls.count("CommitOrder") == expected_count
                 assert len(peer.created_keys) == expected_count
@@ -272,7 +282,7 @@ def run_case(executable, test_name, requested_case):
                                    for operation in calls), calls
                 assert not peer.order_created
 
-            if case == "lost":
+            if case == "lost" or case.startswith("continue"):
                 retained = json.loads(retained_path.read_text())
                 reopened = combined.reopen_environment(
                     environment, retained["recovery"],
@@ -290,13 +300,17 @@ def run_case(executable, test_name, requested_case):
                 before_calls = list(peer.calls)
                 before_files = combined.custody_files(production)
                 helpers.run_child(
-                    executable, test_name, "offline", requested_case, offline,
+                    executable, test_name,
+                    "continuation_offline" if case.startswith("continue") else "offline",
+                    requested_case, offline,
                     retained_path, directory / "offline.json",
                 )
                 assert before_calls == peer.calls, "Offline contacted a native source"
                 assert before_files == combined.custody_files(production), (
                     "Offline changed original custody"
                 )
+                if case.startswith("continue"):
+                    return
                 helpers.run_child(
                     executable, test_name, "reconcile", requested_case, reopened,
                     retained_path, directory / "reconciled.json",
@@ -332,6 +346,7 @@ def main():
                        "assignment_before_stock", "assignment_after_stock", "assignment_lost",
                        "assignment_multiple_extra", "assignment_multiple_retired",
                        "assignment_parent_regression", "assignment_parent_clock"),
+        "continuation": ("continue", "continue_multiple", "assignment_continue", "assignment_continue_multiple"),
     }[campaign]
     for case in cases:
         run_case(executable, test_name, case)

@@ -195,7 +195,8 @@ citizen/operations observation and independent qualification. The returned
 timely achievement and current proof separately from the unchanged historical
 `stock_target` assessment. Query does not acquire another sample. A repeat of
 the same Plan retains its timing and progress; changed planning is refused until
-the original watch is explicitly cancelled.
+the original watch is explicitly cancelled. The explicit continuation below can
+pursue the unchanged unfinished goal after a fresh deficit.
 
 This path never dispatches an order, labor change or clock run. The game must
 reach later observed ticks for spaced samples to accumulate. Current proof
@@ -251,14 +252,71 @@ identity without a current sample; restarting restores no joint achievement,
 unfinished streak or current proof.
 
 This path creates no insertion keys, effect-bearing original, native preparation,
-labor assignment, clock run or goal-history sidecar. It cannot replace consumed
-stock with a new order. The root resource-project request remains single-target;
-the portfolio monitor is available through the combined production requests.
+labor assignment, clock run or goal-history sidecar. Sampling reports stock loss
+without automatically creating an order. Scalar and one-to-four-target native
+resource-project roots can consume the typed watch proof. An explicit
+continuation can pursue an unfinished watch as described below.
 The adapter sources contain eighteen portfolio regression cases alongside the
 fourteen single-target cases. Runtime/native-peer and presentation coverage
 address the public sampling, cancellation and proof-withdrawal boundaries.
 Execution evidence for these bytes belongs in `IMPLEMENTATION_STATUS.md`;
 source presence and authored tests add no qualification or admission.
+
+## Continue an unfinished watch after stock loss
+
+An initially satisfied goal can lose stock before its required stability
+interval finishes. In a current Control session, use the existing Plan tool
+with this closed request:
+
+```json
+{
+  "kind": "continue_stock_goal",
+  "goal_witness": "<exact retained no_work_stock_goal.goal_witness>"
+}
+```
+
+The selector names the retained scalar or complete portfolio watch. It accepts
+no replacement targets, workers, observation seal, order amount or timing.
+The original recipe set, minima, finite order caps, selected citizens, labor,
+assignment choice, absolute deadline, cadence and sample requirement remain
+fixed. A current False sample can expose this request in the Agent Turn; the
+request itself always reacquires and qualifies a complete fresh citizen and
+inventory basis before computing any deficit.
+
+The watch must still be unfinished, uncancelled, unfenced and inside its
+original deadline. A previous timely achievement makes it ineligible even if
+the latest sample or current proof was later withdrawn. Completed goals do not
+become recurring maintenance. Restart does not reconstruct a lost process-local
+watch from historical recovery JSON.
+
+Continuation requires current Plan and production authority, plus labor
+authority when the original request selected assignment. It rechecks eligible
+original workers, complete current inventory, all required Workshop/Manager/input
+prerequisites and a fresh empty paused native order queue. Only positive
+deficits create finite orders; every original portfolio minimum remains in the
+complete goal. An oversized deficit or a still wholly met census refuses
+publication. A stale False sample cannot determine an order's amount.
+
+The resulting first effect-bearing original includes the predecessor witness
+in a closed `dfmcp-stock-watch-continuation/1` summary marker and a separate
+identity domain before deriving intent IDs, idempotency keys and obligations.
+Legacy plans without that marker keep their exact prior identity bytes.
+Archive recovery checks the complete marked original; its predecessor marker
+is historical identity and restores no watch, proof, permit or authority.
+
+Before durable publication starts, refusal retains the same watch and original
+deadline while withdrawing current proof and unfinished stability. Decoded
+source, tick and allocation floors are retained, and source regression remains
+a fence. Once first publication starts, partial custody remains fenced and
+cannot become permission to create another original. A resource-project parent
+acknowledges the exact production intent before child files are created, using
+the existing first-publication and strict recovery path.
+
+Plan publishes a finite original only. Each labor/order effect still needs its
+own subsequent review and explicit Commit; production and inventory clocks
+retain their separate review/confirmation. No elapsed watch samples are credited
+to the new production obligation. The new stock-goal proof must satisfy the
+unchanged deadline and stability requirement from qualified current evidence.
 
 ## Evidence boundary
 

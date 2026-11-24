@@ -69,6 +69,7 @@ fn acquire(
     consumed: &mut GameTick,
     input: Option<&SharedInputSupply>,
     initial: bool,
+    watch: Option<&mut StockTargetWatch>,
     c: &OperationContext,
 ) -> Result<StockTargetAssessment> {
     if c.anchor.tick < *consumed {
@@ -109,12 +110,16 @@ fn acquire(
     // Retain decoded input floors immediately, but no-work stock plans do not
     // depend on input readiness. Only a positive deficit consumes this policy.
     let mut input_note_failure = input.and_then(|input| input.note_capture(&operations).err());
+    let watch_note_failure = watch.and_then(|watch| watch.note_capture(&operations).err());
     if !initial && let Some(cause) = input_note_failure.take() {
         return Err(cause);
     }
     drop(source);
     // Even a later pin/tick/census refusal cannot revive an expired grant.
     *consumed = (*consumed).max(operations.jobs.tick());
+    if let Some(cause) = watch_note_failure {
+        return Err(cause);
+    }
     inventory_baseline::authorize_observe(&work.current()?, *consumed)?;
     shell.check_environment()?;
     let projection = InventoryBaselineProjection::new(
@@ -326,6 +331,7 @@ impl Owner {
             &mut self.consumed_tick,
             input,
             false,
+            None,
             &work.take(CENSUS_BYTES + input.map_or(0, |_| input_supply::ASSESS_BYTES))?,
         )?;
         if assessment.witness() != self.binding.witness()
@@ -407,6 +413,23 @@ impl Runtime {
         self.stock_target_no_work = None;
         self.stock_targets_no_work = None;
         self.planning_inspection.withdraw();
+        self.plan_stock_target_fresh(request, c, publication, None)
+    }
+
+    pub(super) fn plan_stock_target_fresh(
+        &mut self,
+        request: StockTargetRequest,
+        c: &OperationContext,
+        publication: Option<project::ProjectPublication<'_>>,
+        continuation: Option<StockGoalContinuation>,
+    ) -> Result<View> {
+        request.validate()?;
+        self.check(c, true)?;
+        if let Some(continuation) = continuation {
+            continuation.single_request(self, &request, c)?;
+        } else {
+            self.require_no_active_stock_watch()?;
+        }
         if self.original.is_some() {
             return Err(invalid(
                 "retain the original stock target; never recalculate its amount",
@@ -459,6 +482,17 @@ impl Runtime {
             &mut self.observation_tick_floor,
             self.input_supply.as_ref(),
             true,
+            if continuation.is_some() {
+                Some(
+                    &mut self
+                        .stock_target_no_work
+                        .as_mut()
+                        .ok_or_else(|| denied("stock continuation lost its source guard"))?
+                        .monitor,
+                )
+            } else {
+                None
+            },
             &work.take(
                 CENSUS_BYTES
                     + self
@@ -468,12 +502,28 @@ impl Runtime {
             )?,
         )?;
         if assessment.amount().is_none() {
+            if continuation.is_some() {
+                return Err(denied(
+                    "the original stock goal has no fresh deficit; retain its watch",
+                ));
+            }
             self.stock_target_no_work = Some(StockTargetNoWork::new(
                 assessment,
                 request,
                 &work.take(STOCK_TARGET_WATCH_BYTES)?,
             )?);
             return self.view(&mut work);
+        }
+        if continuation.is_some() {
+            self.check_stock_continuation_queue(&mut work)?;
+            let mut authority = work.current()?;
+            authority.anchor.tick = authority.anchor.tick.max(self.authority_tick_floor());
+            authority.authorize(
+                Capability::ConfigureProduction,
+                RiskTier::Guarded,
+                &[],
+                None,
+            )?;
         }
         if request.assign_labor {
             // A positive assigned target must be runnable under current grants.
@@ -495,19 +545,20 @@ impl Runtime {
             // The qualified assessment already owns the one inventory baseline.
             // Reuse the ordinary assignment compiler and durable two-step owner;
             // neither acquire a second baseline nor bypass native labor review.
-            return self.plan_compiled_recorded(
+            return self.plan_compiled_from_watch(
                 request.observation()?,
                 false,
                 &[],
                 PlanInputs::captured(std::slice::from_ref(&assessment))?,
                 &work.current()?,
                 publication,
+                continuation,
                 |evidence, _, current, origin| {
                     request.compile_with_labor_assignment(&assessment, evidence, current, origin)
                 },
             );
         }
-        self.plan_existing_workers_recorded(
+        self.plan_existing_workers_from_watch(
             request.observation()?,
             (request.unit_ids()?, request.labor.clone()),
             false,
@@ -515,6 +566,7 @@ impl Runtime {
             PlanInputs::captured(std::slice::from_ref(&assessment))?,
             &work.current()?,
             publication,
+            continuation,
             |evidence, requirement, _, current, origin| {
                 request.compile(&assessment, evidence, requirement, current, origin)
             },

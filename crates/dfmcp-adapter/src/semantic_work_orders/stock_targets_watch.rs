@@ -172,6 +172,11 @@ impl StockTargetsWatch {
         self.latest.as_ref()
     }
 
+    /// Historical joint achievement is independent of current proof withdrawal.
+    pub const fn achieved_at(&self) -> Option<GameTick> {
+        self.achieved_at
+    }
+
     pub fn current_goal_proven(&self) -> bool {
         !self.fenced()
             && self

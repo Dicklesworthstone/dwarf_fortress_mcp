@@ -37,9 +37,11 @@ It can own Manager appointment, Tree harvesting, Workshop construction and
 finite furniture production under one original goal and absolute deadline.
 The stock goal can retain one to four furniture minima, including targets that
 need no new order. Each native effect keeps its own review, and completion
-requires current proof for the whole goal. Portfolio production currently
-requires externally advanced game time. This development source still requires
-full MCP/stdio and live-game qualification.
+requires current proof for the whole goal. Configured per-order clocks can
+advance production or unfinished inventory stability through separate reviewed
+and confirmed intervals. Already-satisfied goals with no original order still
+need externally advanced game time. This development source still requires full
+MCP/stdio and live-game qualification.
 
 The motivating problem is not merely “let a model press keys.” Dwarf Fortress is an unusually rich
 long-horizon environment, but a naive automation layer would expose incomplete observations,

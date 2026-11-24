@@ -28,7 +28,8 @@ fn stage(name: &str) -> TestResult {
     std::fs::write(std::env::var(STAGE)?, name)?;
     Ok(())
 }
-fn custody_bytes() -> TestResult<std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>> {
+pub(super) fn custody_bytes() -> TestResult<std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>>
+{
     let mut files = std::collections::BTreeMap::new();
     for name in [
         "DFMCP_COMBINED_PRODUCTION_CONFIG",
@@ -489,6 +490,13 @@ fn no_work_watch(runtime: &mut Runtime, planned: &Value) -> TestResult {
 }
 
 fn control(case: &str) -> TestResult {
+    if case
+        .strip_prefix("assignment_")
+        .unwrap_or(case)
+        .starts_with("continue")
+    {
+        return continuation_control(case);
+    }
     if let Some(behavior) = case.strip_prefix("assignment_") {
         return assignment_control(case, behavior);
     }
@@ -613,6 +621,209 @@ fn control(case: &str) -> TestResult {
     assert_eq!(committed["frontier"]["all_applied"], true);
     assert_eq!(committed["original_goal_proven"], false);
     sample_goal(&mut runtime, &planned, case, 0)
+}
+
+fn continuation_request(witness: &Value) -> TestResult<StockGoalContinuationRequest> {
+    Ok(StockGoalContinuationRequest::parse(
+        &json!({
+            "kind":"continue_stock_goal", "goal_witness":witness,
+        })
+        .to_string(),
+    )?)
+}
+
+fn continuation_control(case: &str) -> TestResult {
+    let mut runtime = open(Mode::Control)?;
+    let context = runtime.context(false)?;
+    let observed = runtime.observe(ObserveRequest::default(), &context)?.value;
+    let original = request(&runtime, &observed, case)?;
+    let context = runtime.context(false)?;
+    let watched = runtime
+        .plan_stock_targets(original.clone(), &context)?
+        .value;
+    let witness = watched["no_work_stock_goal"]["goal_witness"].clone();
+    assert_eq!(watched["stock_targets"]["status"], "already_satisfied");
+    assert!(runtime.original.is_none());
+    let files = custody_bytes()?;
+    let start = runtime.anchor.tick.get();
+    stage("continue_all_met")?;
+    let context = runtime.context(false)?;
+    assert!(
+        runtime
+            .continue_stock_goal(continuation_request(&witness)?, &context)
+            .is_err()
+    );
+    let retained = runtime
+        .stock_targets_no_work
+        .as_ref()
+        .ok_or("retained vector watch")?;
+    assert_eq!(retained.request, original);
+    assert_eq!(retained.monitor.witness().to_hex(), text(&witness)?);
+    assert!(retained.monitor.latest().is_none());
+    assert_eq!(runtime.authority_tick_floor().get(), start + 5);
+    assert_eq!(custody_bytes()?, files);
+    stage("continue_deficit")?;
+    let context = runtime.context(false)?;
+    let false_sample = runtime.wait(&context)?.value;
+    assert_eq!(
+        false_sample["no_work_stock_goal"]["sample"]["current_truth"],
+        "false"
+    );
+    assert_eq!(
+        false_sample["no_work_stock_goal"]["sample"]["targets"][0]["observed_stack_units"],
+        6
+    );
+    assert_eq!(
+        false_sample["no_work_stock_goal"]["sample"]["targets"][1]["observed_stack_units"],
+        0
+    );
+    assert_eq!(
+        false_sample["no_work_stock_goal"]["continuation_request"]["goal_witness"],
+        witness
+    );
+    stage("continue_fresh")?;
+    let context = runtime.context(false)?;
+    let continued = runtime
+        .continue_stock_goal(continuation_request(&witness)?, &context)?
+        .value;
+    assert!(runtime.stock_targets_no_work.is_none());
+    assert!(continued["no_work_stock_goal"].is_null());
+    assert!(runtime.portfolio.is_some());
+    assert_eq!(
+        continued["stock_goal_continuation"]["original_watch_witness"],
+        witness
+    );
+    assert_eq!(
+        continued["stock_targets"]["targets"][0]["recipe"],
+        "wooden_bed"
+    );
+    assert_eq!(
+        continued["stock_targets"]["targets"][0]["baseline_stack_units"],
+        2
+    );
+    assert_eq!(continued["stock_targets"]["targets"][0]["amount"], 4);
+    assert_eq!(
+        continued["stock_targets"]["targets"][1]["target_stack_units"],
+        3
+    );
+    let plan = runtime
+        .original
+        .as_ref()
+        .ok_or("continued vector original")?;
+    assert_eq!(
+        prerequisite_binding::requirements(plan)?
+            .stock_watch
+            .map(Digest32::to_hex),
+        Some(text(&witness)?.to_owned())
+    );
+    assert_eq!(
+        runtime
+            .layout
+            .as_ref()
+            .ok_or("continued layout")?
+            .inventory_minima()
+            .len(),
+        2
+    );
+    let multiple = case.ends_with("multiple");
+    let steps = continued["original_plan"]["steps"]
+        .as_array()
+        .ok_or("continued vector steps")?;
+    assert_eq!(
+        steps.len(),
+        usize::from(original.assign_labor) + if multiple { 2 } else { 1 }
+    );
+    for step in steps
+        .iter()
+        .filter(|step| step["action"]["kind"] == "create_work_order")
+    {
+        assert_eq!(step["obligation"]["deadline_tick"], original.deadline_tick);
+        assert_eq!(
+            step["obligation"]["poll_interval_ticks"],
+            original.poll_interval_ticks
+        );
+        assert_eq!(
+            step["obligation"]["stable_samples"],
+            original.stable_samples
+        );
+    }
+    let digest = plan.digest;
+    let mut committed = continued.clone();
+    for step in steps {
+        let prepared = prepare(&mut runtime, digest)?;
+        assert_eq!(prepared["review"]["idempotency_key"], step["key"]);
+        committed = commit(&mut runtime, &prepared)?;
+        assert_same(&committed, &continued);
+    }
+    assert_eq!(committed["frontier"]["all_applied"], true);
+    assert_eq!(committed["original_goal_proven"], false);
+    output(&committed)
+}
+
+fn continuation_offline() -> TestResult {
+    let retained: Value = serde_json::from_str(&std::fs::read_to_string(std::env::var(INPUT)?)?)?;
+    let mut runtime = open(Mode::Offline)?;
+    let reopened = inspect(&mut runtime)?;
+    assert_same(&reopened, &retained);
+    assert_eq!(
+        reopened["stock_goal_continuation"],
+        retained["stock_goal_continuation"]
+    );
+    assert!(runtime.stock_targets_no_work.is_none());
+    assert!(reopened["no_work_stock_goal"].is_null());
+    assert_eq!(reopened["original_goal_proven"], false);
+    let context = runtime.context(false)?;
+    assert!(
+        runtime
+            .continue_stock_goal(
+                continuation_request(
+                    &retained["stock_goal_continuation"]["original_watch_witness"]
+                )?,
+                &context
+            )
+            .is_err()
+    );
+    output(&reopened)
+}
+
+#[test]
+fn original_stock_portfolio_continuation_preserves_all_minima_and_original_timing() -> TestResult {
+    if let Ok(phase) = std::env::var(PHASE) {
+        let case = std::env::var(CASE)?;
+        match phase.as_str() {
+            "control" => continuation_control(&case)?,
+            "continuation_offline" => continuation_offline()?,
+            _ => return Err("unknown stock portfolio continuation phase".into()),
+        }
+        println!("combined-stock-target-runtime:{phase}:{case}:checked");
+        return Ok(());
+    }
+    let full = format!(
+        "{}::original_stock_portfolio_continuation_preserves_all_minima_and_original_timing",
+        module_path!()
+    );
+    let (_, name) = full
+        .split_once("::")
+        .ok_or("stock portfolio continuation test name")?;
+    let driver = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/stdio/combined_stock_targets_runtime_peer.py");
+    let result = Command::new("python3")
+        .arg("-B")
+        .arg(driver)
+        .arg(std::env::current_exe()?)
+        .args([name, "continuation"])
+        .output()?;
+    assert!(
+        result.status.success(),
+        "stock portfolio continuation campaign: {}{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&result.stdout)
+            .contains("combined-stock-targets-campaign:continuation:checked")
+    );
+    Ok(())
 }
 
 fn sample_goal(runtime: &mut Runtime, planned: &Value, case: &str, order_step: u32) -> TestResult {

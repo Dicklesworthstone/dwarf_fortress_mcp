@@ -446,13 +446,13 @@ fn control(requested_case: &str) -> TestResult {
             assert_eq!(intended["recovery_reference"]["inventory_clock"], prior["inventory_clock"]);
         }
         recorded = Some(intended);
-        if case == "ack_refusal" {
+        if matches!(case, "ack_refusal" | "continue_ack_refusal") {
             return Err(denied("injected parent ACK refusal"));
         }
         if case == "slot_collision" {
             foreign_clock_file(&collision_path)?;
         }
-        if case == "partial" {
+        if matches!(case, "partial" | "continue_partial") {
             // A successful parent ACK followed by a competing/incomplete child
             // capsule publication. Production must neither overwrite nor fix it.
             use std::os::unix::fs::OpenOptionsExt;
@@ -466,7 +466,7 @@ fn control(requested_case: &str) -> TestResult {
         Ok(())
     };
     let c = runtime.context(false)?;
-    let result = if portfolio {
+    let mut result = if portfolio {
         runtime.project_plan_stock_targets_recorded(
             &goal,
             StockTargetsRequest::parse(&request.to_string())?,
@@ -480,6 +480,27 @@ fn control(requested_case: &str) -> TestResult {
             &c,
             &mut record,
         )
+    };
+    let prior_watch = if case.starts_with("continue_") {
+        let watched = result?.value;
+        assert!(watched["original_plan"].is_null());
+        let watch = watched["no_work_stock_goal"].clone();
+        assert!(watch["goal_witness"].is_string());
+        assert_eq!(watch["deadline_tick"], goal.deadline_tick());
+        assert_eq!(custody_bytes()?, before_plan);
+        stage("continue_deficit")?;
+        let c = runtime.context(false)?;
+        result = runtime.project_continue_stock_goal_recorded(
+            &goal,
+            StockGoalContinuationRequest::parse(&json!({
+                "kind":"continue_stock_goal", "goal_witness":watch["goal_witness"],
+            }).to_string())?,
+            &c,
+            &mut record,
+        );
+        Some(watch)
+    } else {
+        None
     };
     match case {
         "no_work" | "no_work_floor" => {
@@ -535,7 +556,7 @@ fn control(requested_case: &str) -> TestResult {
             }
             assert_eq!(std::fs::read(&collision_path)?, FOREIGN_CLOCK);
         }
-        "ack_refusal" => {
+        "ack_refusal" | "continue_ack_refusal" => {
             assert!(result.is_err());
             assert_eq!(calls, 1);
             assert!(!runtime.initialization_failed);
@@ -544,14 +565,14 @@ fn control(requested_case: &str) -> TestResult {
                 assert!(!directory.join(name).exists());
             }
         }
-        "partial" => {
+        "partial" | "continue_partial" => {
             assert!(result.is_err());
             assert_eq!(calls, 1);
             assert!(runtime.initialization_failed);
             assert!(directory.join("original.plan").is_file());
             assert!(!directory.join("execution.journal").exists());
         }
-        "published" | "advanced" | "prepared_floor" => {
+        "published" | "advanced" | "prepared_floor" | "continue_published" => {
             result?;
             assert_eq!(calls, 1);
             let intent =
@@ -620,6 +641,21 @@ fn control(requested_case: &str) -> TestResult {
             }
         }
         _ => return Err("unknown project publication case".into()),
+    }
+    if let Some(watch) = prior_watch {
+        if case == "continue_published" {
+            assert!(runtime.no_work_goal_json().is_null());
+            assert_eq!(runtime.stock_continuation_json()["original_watch_witness"], watch["goal_witness"]);
+            let original = runtime.original.as_ref().ok_or("continued project original missing")?;
+            goal.validate_original(original, origin)?;
+        } else {
+            let retained = runtime.no_work_goal_json();
+            for field in ["goal_witness", "deadline_tick", "poll_interval_ticks", "stable_samples_required", "targets", "target_stack_units"] {
+                assert_eq!(retained[field], watch[field], "parent refusal changed original watch {field}");
+            }
+            assert!(retained["sample"].is_null());
+            assert_eq!(runtime.initialization_failed, case == "continue_partial");
+        }
     }
     output(&json!({
         "intent": recorded,"prior":prior,"goal":goal,

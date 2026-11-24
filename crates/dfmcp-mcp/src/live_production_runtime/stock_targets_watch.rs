@@ -96,6 +96,7 @@ impl Runtime {
             "cancelled":goal.cancelled,
             "source_fenced":goal.monitor.fenced(),
             "consumed_tick_floor":goal.monitor.high_tick().get(),
+            "continuation_request":self.stock_continuation_request_json(),
             "original_goal_proven":self.no_work_goal_proven(),
             "current_inventory_proven":self.no_work_goal_proven(),
             "sample":current.map(|sample| json!({

@@ -763,10 +763,12 @@ fn manager_and_workshop_four_target_original_recovers_all_minima_and_exact_polic
         };
         let legacy = compile(Origins::default())?;
         prerequisite_binding::assert_manager_variants(&legacy, compile)?;
+        prerequisite_binding::assert_stock_watch_variants(&legacy, compile)?;
         let origins = Origins {
             workshop: Some(Digest32::of_bytes(b"workshop")),
             manager: Some(Digest32::of_bytes(b"manager")),
             input_supply: None,
+            stock_watch: None,
         };
         let original = compile(origins)?;
         assert!(original.summary.len() <= 1024);
@@ -784,6 +786,7 @@ fn manager_and_workshop_four_target_original_recovers_all_minima_and_exact_polic
                 workshop: None,
                 manager: origins.manager,
                 input_supply: None,
+                stock_watch: None,
             },
         ] {
             let mut stripped = original.clone();

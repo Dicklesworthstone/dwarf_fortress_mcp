@@ -200,6 +200,14 @@ fn no_work_watch(runtime: &mut Runtime, planned: &Value) -> TestResult {
     assert_eq!(withdrawn["original_goal_proven"], false);
     assert!(withdrawn["no_work_stock_goal"]["sample"].is_null());
     assert_same_target(&withdrawn, planned);
+    let completed = StockGoalContinuationRequest::parse(&json!({
+        "kind":"continue_stock_goal", "goal_witness":planned["no_work_stock_goal"]["goal_witness"]
+    }).to_string())?;
+    let context = runtime.context(false)?;
+    assert!(
+        runtime.continue_stock_goal(completed, &context).is_err(),
+        "withdrawing a sample must not reopen a historically completed goal"
+    );
     stage("stock_consumed")?;
     let context = runtime.context(false)?;
     let consumed = runtime.wait(&context)?.value;
@@ -240,6 +248,13 @@ fn no_work_watch(runtime: &mut Runtime, planned: &Value) -> TestResult {
 }
 
 fn control(case: &str) -> TestResult {
+    if case
+        .strip_prefix("assignment_")
+        .unwrap_or(case)
+        .starts_with("continue")
+    {
+        return continuation_control(case);
+    }
     if let Some(behavior) = case.strip_prefix("assignment_") {
         return assignment_control(case, behavior);
     }
@@ -400,6 +415,220 @@ fn control(case: &str) -> TestResult {
         }
     }
     Ok(())
+}
+
+fn continuation_request(witness: &Value) -> TestResult<StockGoalContinuationRequest> {
+    Ok(StockGoalContinuationRequest::parse(
+        &json!({
+            "kind":"continue_stock_goal", "goal_witness":witness,
+        })
+        .to_string(),
+    )?)
+}
+
+fn continuation_control(case: &str) -> TestResult {
+    let behavior = case.strip_prefix("assignment_").unwrap_or(case);
+    let mut runtime = open(Mode::Control)?;
+    let context = runtime.context(false)?;
+    let observed = runtime.observe(ObserveRequest::default(), &context)?.value;
+    let mut original = request(&runtime, &observed, case)?;
+    if behavior == "continue_cap" {
+        original.max_order_amount = 2;
+    }
+    let context = runtime.context(false)?;
+    let planned = runtime.plan_stock_target(original.clone(), &context)?.value;
+    if behavior == "continue_cap" {
+        assert_eq!(planned["stock_target"]["status"], "already_satisfied");
+        assert_eq!(planned["stock_target"]["max_order_amount"], 2);
+    } else {
+        assert_report(&planned, 6, 0, "already_satisfied")?;
+    }
+    let witness = planned["no_work_stock_goal"]["goal_witness"].clone();
+    let start = runtime.anchor.tick.get();
+    let files = super::stock_targets_tests::custody_bytes()?;
+
+    // Identity and present authority refusals happen before any new source
+    // reads and leave both watch bytes and monotone floors unchanged.
+    let bad = json!(Digest32::of_bytes(b"another retained goal").to_hex());
+    let context = runtime.context(false)?;
+    assert!(
+        runtime
+            .continue_stock_goal(continuation_request(&bad)?, &context)
+            .is_err()
+    );
+    assert_eq!(runtime.no_work_goal_json(), planned["no_work_stock_goal"]);
+    runtime.opening_orders = false;
+    let context = runtime.context(false)?;
+    assert!(
+        runtime
+            .continue_stock_goal(continuation_request(&witness)?, &context)
+            .is_err()
+    );
+    runtime.opening_orders = true;
+    assert_eq!(runtime.no_work_goal_json(), planned["no_work_stock_goal"]);
+    assert_eq!(runtime.authority_tick_floor().get(), start);
+    assert_eq!(super::stock_targets_tests::custody_bytes()?, files);
+
+    // A later all-met census refuses without replacing or restarting the
+    // original watch. Source time survives even though current proof withdraws.
+    for (stage_name, floor) in [
+        ("continue_all_met", 5),
+        ("continue_source_ahead", 15),
+        ("continue_source_behind", 15),
+    ] {
+        stage(stage_name)?;
+        let context = runtime.context(false)?;
+        assert!(
+            runtime
+                .continue_stock_goal(continuation_request(&witness)?, &context)
+                .is_err()
+        );
+        let retained = runtime
+            .stock_target_no_work
+            .as_ref()
+            .ok_or("retained watch lost")?;
+        assert_eq!(retained.request, original);
+        assert_eq!(retained.monitor.witness().to_hex(), text(&witness)?);
+        assert_eq!(retained.monitor.high_tick().get(), start + floor);
+        assert!(retained.monitor.latest().is_none());
+        assert_eq!(runtime.authority_tick_floor().get(), start + floor);
+        assert!(runtime.original.is_none());
+        assert!(!runtime.initialization_failed);
+        assert_eq!(super::stock_targets_tests::custody_bytes()?, files);
+    }
+    stage("continue_deficit")?;
+    let context = runtime.context(false)?;
+    let deficit = runtime.wait(&context)?.value;
+    assert_eq!(
+        deficit["no_work_stock_goal"]["sample"]["current_truth"],
+        "false"
+    );
+    assert_eq!(
+        deficit["no_work_stock_goal"]["sample"]["observed_stack_units"],
+        0
+    );
+    assert_eq!(
+        deficit["no_work_stock_goal"]["continuation_request"]["goal_witness"],
+        witness
+    );
+
+    stage("continue_fresh")?;
+    if behavior == "continue_partial" {
+        std::fs::write(
+            runtime.config.path("original.plan"),
+            b"occupied original path",
+        )?;
+    }
+    let context = runtime.context(false)?;
+    let result = runtime.continue_stock_goal(continuation_request(&witness)?, &context);
+    if behavior != "continue" {
+        assert!(
+            result.is_err(),
+            "fresh continuation prerequisite was not checked: {behavior}"
+        );
+        let retained = runtime
+            .stock_target_no_work
+            .as_ref()
+            .ok_or("refusal lost watch")?;
+        assert_eq!(retained.request, original);
+        assert_eq!(retained.monitor.witness().to_hex(), text(&witness)?);
+        assert!(retained.monitor.latest().is_none());
+        assert_eq!(runtime.authority_tick_floor().get(), start + 25);
+        assert_eq!(
+            runtime.initialization_failed,
+            behavior == "continue_partial"
+        );
+        assert_eq!(retained.monitor.fenced(), behavior == "continue_generation");
+        assert!(runtime.original.is_none());
+        if behavior != "continue_partial" {
+            assert_eq!(super::stock_targets_tests::custody_bytes()?, files);
+        }
+        return output(&runtime.opening_recovery_reference());
+    }
+    let continued = result?.value;
+    assert_report(&continued, 2, 4, "planned")?;
+    assert!(continued["no_work_stock_goal"].is_null());
+    assert_eq!(
+        continued["stock_goal_continuation"]["original_watch_witness"],
+        witness
+    );
+    assert_eq!(
+        continued["stock_goal_continuation"]["recovery_restores_watch"],
+        false
+    );
+    assert_eq!(continued["original_plan"]["anchor"]["tick"], start + 25);
+    let plan = runtime
+        .original
+        .as_ref()
+        .ok_or("continued original absent")?;
+    assert_eq!(
+        prerequisite_binding::requirements(plan)?
+            .stock_watch
+            .map(Digest32::to_hex),
+        Some(text(&witness)?.to_owned())
+    );
+    let steps = continued["original_plan"]["steps"]
+        .as_array()
+        .ok_or("continued steps")?;
+    assert_eq!(steps.len(), if original.assign_labor { 2 } else { 1 });
+    let order = steps.last().ok_or("continued order absent")?;
+    assert_eq!(
+        order["action"]["amount"], 4,
+        "old False sample was incorrectly used as a baseline"
+    );
+    assert_eq!(order["obligation"]["deadline_tick"], original.deadline_tick);
+    assert_eq!(
+        order["obligation"]["poll_interval_ticks"],
+        original.poll_interval_ticks
+    );
+    assert_eq!(
+        order["obligation"]["stable_samples"],
+        original.stable_samples
+    );
+    assert!(continued["review"].is_null());
+    let digest = plan.digest;
+    let context = runtime.context(false)?;
+    assert!(
+        runtime
+            .continue_stock_goal(continuation_request(&witness)?, &context)
+            .is_err()
+    );
+    let mut committed = continued.clone();
+    for step in steps {
+        let prepared = prepare(&mut runtime, digest)?;
+        assert_eq!(prepared["review"]["idempotency_key"], step["key"]);
+        committed = commit(&mut runtime, &prepared)?;
+        assert_same_target(&committed, &continued);
+    }
+    assert_eq!(committed["frontier"]["all_applied"], true);
+    assert_eq!(committed["original_goal_proven"], false);
+    output(&committed)
+}
+
+fn continuation_offline() -> TestResult {
+    let retained: Value = serde_json::from_str(&std::fs::read_to_string(std::env::var(INPUT)?)?)?;
+    let mut runtime = open(Mode::Offline)?;
+    let reopened = inspect(&mut runtime)?;
+    assert_same_target(&reopened, &retained);
+    assert_eq!(
+        reopened["stock_goal_continuation"],
+        retained["stock_goal_continuation"]
+    );
+    assert!(runtime.stock_target_no_work.is_none());
+    assert!(reopened["no_work_stock_goal"].is_null());
+    assert_eq!(reopened["original_goal_proven"], false);
+    let context = runtime.context(false)?;
+    assert!(
+        runtime
+            .continue_stock_goal(
+                continuation_request(
+                    &retained["stock_goal_continuation"]["original_watch_witness"]
+                )?,
+                &context
+            )
+            .is_err()
+    );
+    output(&reopened)
 }
 
 fn assignment_control(case: &str, behavior: &str) -> TestResult {
@@ -630,6 +859,7 @@ fn campaign(kind: &str, test: &str) -> TestResult {
         match phase.as_str() {
             "control" => control(&case)?,
             "offline" | "reconcile" => recover(&phase, &case)?,
+            "continuation_offline" => continuation_offline()?,
             _ => return Err("unknown stock-target fixture phase".into()),
         }
         println!("combined-stock-target-runtime:{phase}:{case}:checked");
@@ -688,5 +918,13 @@ fn assigned_stock_target_fences_later_inventory_and_recovers_original_order() ->
     campaign(
         "assignment_recovery",
         "assigned_stock_target_fences_later_inventory_and_recovers_original_order",
+    )
+}
+
+#[test]
+fn original_stock_watch_continues_only_with_fresh_deficit_and_preserved_deadline() -> TestResult {
+    campaign(
+        "continuation",
+        "original_stock_watch_continues_only_with_fresh_deficit_and_preserved_deadline",
     )
 }

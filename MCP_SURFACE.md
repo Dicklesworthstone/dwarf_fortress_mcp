@@ -278,6 +278,19 @@ all-applied is distinct from current state or terminal-goal proof. Separate
 family source pins, write grants and custody remain mandatory. This host adds
 no native method, production runner or admission.
 
+The combined/staged production and fixed native resource-project profiles also
+accept `kind="continue_stock_goal"` with only the exact retained
+`goal_witness` through Plan. This continues an originally satisfied scalar or
+one-to-four-target stock watch only while it is unfinished. Fresh original
+citizens, complete inventory and an empty paused native queue must qualify a
+positive bounded deficit under current independent authority. All original
+targets, workers, assignment choice, deadline, cadence and stability remain
+fixed. A completed, cancelled, expired, fenced or lost process-local watch
+refuses. The first production original binds its predecessor witness, retains
+the parent's publication ACK when present, and still requires separate native
+step reviews and Commit confirmations. See
+[stock-goal continuation](docs/NATIVE_STOCK_TARGET.md#continue-an-unfinished-watch-after-stock-loss).
+
 ### `fortress.open_session`
 
 Negotiates fortress, versions, compatibility, requested capability scopes, observation profile,

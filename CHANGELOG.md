@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — Continue unfinished stock watches into finite production
+
+- Add `continue_stock_goal` to the existing Plan operation for an exact
+  retained scalar or portfolio watch that has never completed. Fresh citizens,
+  stock and an empty paused native queue determine bounded deficits under the
+  original targets, workers, assignment choice and absolute timing.
+- Bind the predecessor witness into the first production original before
+  deriving intent IDs, step keys and obligations. Preserve legacy identity
+  bytes and strict recovery; the marker restores no watch, proof or authority.
+- Retain the same watch and consumed floors on prepublication refusal, fence
+  partial publication, and preserve the resource parent's intent ACK before
+  child writes. Each later effect still needs a separate review and Commit.
+- Offer the exact continuation from current ordinary/staged and native-parent
+  Agent Turns; reject completed, cancelled, expired, fenced and retained views.
+- Add seventeen Runtime/native-TCP scenarios, a 32-plan identity/archive matrix,
+  closed-request and presentation regressions. All changed Rust sources parse,
+  Python drivers pass AST checks and independent review finds no blocker.
+  New Rust execution and full native/live qualification remain unverified.
+
 ## Unreleased — Compare candidates against the session's committed work
 
 - Add opt-in comparison version 3 with `forecast_scope: "current_stage"`

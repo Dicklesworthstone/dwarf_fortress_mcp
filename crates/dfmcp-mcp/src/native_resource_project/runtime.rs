@@ -6,8 +6,8 @@ use super::error;
 use super::journal::{self, Checkpoint, Mode, Stage};
 use crate::live_production_runtime::{
     Config as ProductionConfig, InspectionRequest, Mode as ProductionMode, ObserveRequest,
-    ProjectProductionIntent,
-    ProjectStockGoal, Runtime as ProductionRuntime, StockTargetRequest, StockTargetsRequest,
+    ProjectProductionIntent, ProjectStockGoal, Runtime as ProductionRuntime,
+    StockGoalContinuationRequest, StockTargetRequest, StockTargetsRequest,
 };
 use crate::manager_appointment_server::{
     ManagerProjectHandoff, ProjectManagerAction as ManagerAction,
@@ -120,7 +120,9 @@ pub(super) enum Action {
 impl Action {
     pub(super) fn query(request: Option<&str>, order_step_id: Option<u32>) -> Result<Self> {
         if order_step_id.is_some_and(|step| step > 4) {
-            return Err(invalid("order_step_id must name an original order from zero through four"));
+            return Err(invalid(
+                "order_step_id must name an original order from zero through four",
+            ));
         }
         match request {
             Some(raw) => Ok(Self::InspectProduction(
@@ -148,28 +150,38 @@ impl Action {
     fn validate_order_scope(&self, production: bool, portfolio: bool) -> Result<()> {
         self.validate_query_scope(production, portfolio)?;
         let (scope, order_step_id) = match self {
-            Self::Commit { scope, order_step_id, .. }
-            | Self::Cancel { scope, order_step_id } => (scope.as_deref(), *order_step_id),
+            Self::Commit {
+                scope,
+                order_step_id,
+                ..
+            }
+            | Self::Cancel {
+                scope,
+                order_step_id,
+            } => (scope.as_deref(), *order_step_id),
             _ => return Ok(()),
         };
         if production && matches!(scope, Some("clock" | "inventory_clock")) {
             validate_clock_order(order_step_id, portfolio)
         } else if order_step_id.is_some() {
-            Err(invalid("order_step_id is only valid for an original production portfolio clock"))
+            Err(invalid(
+                "order_step_id is only valid for an original production portfolio clock",
+            ))
         } else {
             Ok(())
         }
     }
 
     fn is_inspection(&self) -> bool {
-        matches!(self, Self::Inspect | Self::InspectOrder(_) | Self::InspectProduction(..))
+        matches!(
+            self,
+            Self::Inspect | Self::InspectOrder(_) | Self::InspectProduction(..)
+        )
     }
 }
 
 fn validate_clock_order(order_step_id: Option<u32>, portfolio: bool) -> Result<()> {
-    if order_step_id.is_some_and(|step| step > 4)
-        || portfolio != order_step_id.is_some()
-    {
+    if order_step_id.is_some_and(|step| step > 4) || portfolio != order_step_id.is_some() {
         return Err(invalid(
             "portfolio clocks require an explicit original order_step_id; scalar clocks have no order selector",
         ));
@@ -204,7 +216,9 @@ impl ProductionClockRequest {
         let request: Self = serde_json::from_str(raw)
             .map_err(|_| invalid("invalid closed original production clock request"))?;
         if !matches!(request.kind.as_str(), "run" | "inventory_run") {
-            return Err(invalid("production clock kind must be run or inventory_run"));
+            return Err(invalid(
+                "production clock kind must be run or inventory_run",
+            ));
         }
         validate_clock_order(request.order_step_id, portfolio)?;
         let canonical = json!({
@@ -212,7 +226,8 @@ impl ProductionClockRequest {
             "original_paired_seal":request.original_paired_seal,
             "game_ticks":request.game_ticks,
             "wall_millis":request.wall_millis,
-        }).to_string();
+        })
+        .to_string();
         Ok((canonical, request.order_step_id))
     }
 }
@@ -220,10 +235,19 @@ impl ProductionClockRequest {
 enum ProductionTargetRequest {
     Single(StockTargetRequest),
     Portfolio(StockTargetsRequest),
+    Continue(StockGoalContinuationRequest),
 }
 
 impl ProductionTargetRequest {
     fn parse(raw: &str, goal: &ProjectStockGoal) -> Result<Self> {
+        if raw.len() > 8192 {
+            return Err(invalid("production target request exceeds 8192 bytes"));
+        }
+        let value: Value =
+            serde_json::from_str(raw).map_err(|_| invalid("invalid production target request"))?;
+        if value["kind"] == "continue_stock_goal" {
+            return StockGoalContinuationRequest::parse(raw).map(Self::Continue);
+        }
         if goal.is_portfolio() {
             let request = StockTargetsRequest::parse(raw)?;
             goal.validate_targets_request(&request)?;
@@ -835,6 +859,8 @@ impl Runtime {
             ),
             ProductionTargetRequest::Portfolio(request) => child
                 .project_plan_stock_targets_recorded(&config.goal, request, &current, &mut record),
+            ProductionTargetRequest::Continue(request) => child
+                .project_continue_stock_goal_recorded(&config.goal, request, &current, &mut record),
         }?;
         self.current_goal = child.project_status(&config.goal)?.to_json();
         Ok(view.to_json())
@@ -940,7 +966,7 @@ impl Runtime {
             }
             stock_target = matches!(
                 value["kind"].as_str(),
-                Some("stock_target" | "stock_targets")
+                Some("stock_target" | "stock_targets" | "continue_stock_goal")
             );
         }
         if matches!(&action, Action::Plan(_) | Action::Commit { .. }) {
@@ -1057,7 +1083,10 @@ impl Runtime {
                         "clock" => WorkshopAction::WaitClock,
                         _ => return Err(invalid("unknown Workshop wait scope")),
                     },
-                    Action::Cancel { scope, order_step_id } => match scope.as_deref().unwrap_or("project") {
+                    Action::Cancel {
+                        scope,
+                        order_step_id,
+                    } => match scope.as_deref().unwrap_or("project") {
                         _ if order_step_id.is_some() => {
                             return Err(invalid("Workshop has no production order selector"));
                         }
@@ -1096,7 +1125,7 @@ impl Runtime {
                         let value: Value = serde_json::from_str(&raw)
                             .map_err(|_| invalid("invalid production project request"))?;
                         match value["kind"].as_str() {
-                            Some("stock_target" | "stock_targets") => {
+                            Some("stock_target" | "stock_targets" | "continue_stock_goal") => {
                                 return Err(denied(
                                     "stock targets require their parent publication intent",
                                 ));
@@ -1178,7 +1207,10 @@ impl Runtime {
                             child.wait(&current)
                         }
                     }
-                    Action::Cancel { scope, order_step_id } => match scope.as_deref().unwrap_or("project") {
+                    Action::Cancel {
+                        scope,
+                        order_step_id,
+                    } => match scope.as_deref().unwrap_or("project") {
                         "goal" | "project" => child.cancel(&current),
                         "clock" => {
                             child.select_order(order_step_id, &current)?;

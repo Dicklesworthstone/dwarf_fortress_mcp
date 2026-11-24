@@ -203,7 +203,10 @@ impl Runtime {
             for slot in slots {
                 floor = floor
                     .max(slot.clock.map_or(0, |pin| pin.authority_tick_floor))
-                    .max(slot.inventory_clock.map_or(0, |pin| pin.authority_tick_floor));
+                    .max(
+                        slot.inventory_clock
+                            .map_or(0, |pin| pin.authority_tick_floor),
+                    );
             }
         }
         let mut recovery = self.recovery_json();
@@ -255,7 +258,10 @@ impl Runtime {
         // Scalar and clockless historical references keep their exact shape.
         if let Some(slots) = portfolio {
             reference["portfolio_clocks"] = serde_json::json!(
-                slots.into_iter().map(|slot| slot.to_json()).collect::<Vec<_>>()
+                slots
+                    .into_iter()
+                    .map(|slot| slot.to_json())
+                    .collect::<Vec<_>>()
             );
         }
         reference
@@ -296,6 +302,34 @@ impl Runtime {
         self.plan_stock_targets_recorded(request, c, Some(ProjectPublication { goal, acknowledge }))
     }
 
+    /// Continue the parent's exact unfinished watch through the same durable
+    /// first-publication ACK as an initially deficient stock request.
+    pub(crate) fn project_continue_stock_goal_recorded(
+        &mut self,
+        goal: &ProjectStockGoal,
+        request: super::StockGoalContinuationRequest,
+        c: &OperationContext,
+        acknowledge: &mut dyn FnMut(&ProjectProductionIntent, &OperationContext) -> Result<()>,
+    ) -> Result<View> {
+        self.project_workshop_origin(goal)?;
+        match (&self.stock_target_no_work, &self.stock_targets_no_work) {
+            (Some(watch), None) if !goal.is_portfolio() => goal.validate_request(&watch.request)?,
+            (None, Some(watch)) if goal.is_portfolio() => {
+                goal.validate_targets_request(&watch.request)?
+            }
+            _ => {
+                return Err(denied(
+                    "project continuation requires its exact retained stock watch",
+                ));
+            }
+        }
+        self.continue_stock_goal_recorded(
+            request,
+            c,
+            Some(ProjectPublication { goal, acknowledge }),
+        )
+    }
+
     /// Pin every future fixed clock header without publishing its file. The
     /// first slot already exists; later slots share its verified source binding
     /// and the native owner's exact path/session/request identity derivation.
@@ -307,7 +341,9 @@ impl Runtime {
         if self.clock.is_some() != self.config.clock.is_some()
             || self.inventory_clock.is_some() != self.config.inventory_clock.is_some()
         {
-            return Err(denied("project publication lost its configured clock owner"));
+            return Err(denied(
+                "project publication lost its configured clock owner",
+            ));
         }
         if self.clock.is_none() && self.inventory_clock.is_none() {
             return Ok(None);
@@ -332,14 +368,19 @@ impl Runtime {
         for (ordinal, step) in layout.order_steps().iter().enumerate() {
             let (clock, inventory_clock) = if ordinal == 0 {
                 (
-                    self.clock.as_ref().map(ProductionClock::project_recovery_checkpoint),
-                    self.inventory_clock.as_ref()
+                    self.clock
+                        .as_ref()
+                        .map(ProductionClock::project_recovery_checkpoint),
+                    self.inventory_clock
+                        .as_ref()
                         .map(ProductionInventoryClock::project_recovery_checkpoint),
                 )
             } else {
                 let slot = u32::try_from(ordinal + 1)
                     .map_err(|_| invalid("project portfolio clock slot exceeds its bound"))?;
-                let (clock_request, inventory_request) = self.config.orders
+                let (clock_request, inventory_request) = self
+                    .config
+                    .orders
                     .prospective_project_portfolio_clock_requests(slot, c)?;
                 let clock = match (&self.clock, clock_request) {
                     (Some(owner), Some(request)) => {
@@ -353,7 +394,11 @@ impl Runtime {
                         Some(owner.prospective_project_checkpoint(c, request))
                     }
                     (None, None) => None,
-                    _ => return Err(denied("project publication changed its inventory clock source")),
+                    _ => {
+                        return Err(denied(
+                            "project publication changed its inventory clock source",
+                        ));
+                    }
                 };
                 (clock, inventory)
             };
@@ -430,7 +475,10 @@ impl Runtime {
             );
             if let Some(clocks) = clocks {
                 reference["portfolio_clocks"] = serde_json::json!(
-                    clocks.into_iter().map(|slot| slot.to_json()).collect::<Vec<_>>()
+                    clocks
+                        .into_iter()
+                        .map(|slot| slot.to_json())
+                        .collect::<Vec<_>>()
                 );
             }
         }

@@ -152,6 +152,12 @@ impl StockTargetWatch {
         self.latest.as_ref()
     }
 
+    /// First timely achievement survives withdrawal of the current sample.
+    /// An already completed goal cannot become an uncompleted continuation.
+    pub const fn achieved_at(&self) -> Option<GameTick> {
+        self.achieved_at
+    }
+
     pub fn current_goal_proven(&self) -> bool {
         !self.fenced && self.latest.is_some_and(|sample| sample.current_goal_proven)
     }

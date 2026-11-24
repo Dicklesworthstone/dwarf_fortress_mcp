@@ -148,7 +148,9 @@ def run_case(executable, test_name, requested_case):
                 self.existing_labor_ready = not assignment
                 self.last_stage = None
                 self.injected_after_dispatch = False
-                self.inventory_stack = {"already": 6, "already_denied": 6, "above": 9}.get(case, 2)
+                self.inventory_stack = (6 if case.startswith("continue") else
+                    {"already": 6, "already_denied": 6, "above": 9}.get(case, 2))
+                self.citizen_tick = combined.TICK
                 if case == "fresh":
                     self.after_operations_read = lambda: setattr(self, "inventory_stack", 4)
                 if case == "generation":
@@ -173,7 +175,10 @@ def run_case(executable, test_name, requested_case):
                     capture["details"] = []
                     capture["labor_keys"] = ["MINE", "CARPENTRY"]
                     for unit in capture["units"]:
-                        unit["labors"] = [1, 0]
+                        unit["labors"] = [
+                            0 if case == "continue_disabled" and self.last_stage == "continue_fresh" else 1,
+                            0,
+                        ]
 
                 # Assignment cases use the original disabled MINE capture and
                 # its real manual detail; the existing-worker path has no setter.
@@ -196,6 +201,22 @@ def run_case(executable, test_name, requested_case):
                 if value == self.last_stage:
                     return
                 self.last_stage = value
+                if case.startswith("continue") and value.startswith("continue_"):
+                    citizen, inventory = {
+                        "continue_all_met": (5, 5), "continue_source_ahead": (10, 15),
+                        "continue_source_behind": (12, 15), "continue_deficit": (20, 20),
+                        "continue_fresh": (25, 25),
+                    }[value]
+                    self.citizen_tick = self.workforce_tick = combined.TICK + citizen
+                    self.order_tick = combined.TICK + inventory
+                    self.inventory_stack = (0 if value == "continue_deficit" else
+                                            2 if value == "continue_fresh" else 6)
+                    if value == "continue_fresh":
+                        if case == "continue_queue":
+                            self.external_queue()
+                        elif case == "continue_generation":
+                            self.operations_generation += 1
+                    return
                 if value == "before_prepare":
                     if case == "before_stock":
                         self.inventory_stack += 1
@@ -214,7 +235,8 @@ def run_case(executable, test_name, requested_case):
                 self.apply_stage()
                 if plugin == "dfmcp_bridge":
                     return combined.citizen_reply(
-                        operation, request, self.citizen_ids, tick=self.order_tick)
+                        operation, request, self.citizen_ids,
+                        tick=self.citizen_tick if case.startswith("continue") else self.order_tick)
                 if case in ("after_stock", "after_queue") and not self.injected_after_dispatch:
                     if 2 in creation_states(production):
                         self.injected_after_dispatch = True
@@ -256,7 +278,7 @@ def run_case(executable, test_name, requested_case):
                 retained = json.loads(retained_path.read_text())
                 assert peer.workforce_plan["key"] == retained["original_plan"]["steps"][0]["key"]
             assert not peer.clock_commits and not peer.inventory_clock_commits
-            if case in ("fresh", "workshop", "lost") or (assignment and case == "positive"):
+            if case in ("fresh", "workshop", "lost", "continue") or (assignment and case == "positive"):
                 assert calls.count("PrepareOrder") == calls.count("CommitOrder") == 1
                 assert peer.order_plan["amount"] == (2 if case == "fresh" else 4)
                 assert peer.order_created
@@ -270,7 +292,7 @@ def run_case(executable, test_name, requested_case):
                 if no_assignment:
                     assert not any(operation.startswith(("Prepare", "Commit", "Cancel"))
                                    for operation in calls), calls
-            if case == "lost":
+            if case in ("lost", "continue"):
                 retained = json.loads(retained_path.read_text())
                 reopened = combined.reopen_environment(
                     environment, retained["recovery"],
@@ -283,10 +305,14 @@ def run_case(executable, test_name, requested_case):
                 # Changed live stock must never rewrite the original deficit.
                 peer.inventory_stack = 9
                 before_calls, before_files = list(peer.calls), combined.custody_files(production)
-                run_child(executable, test_name, "offline", requested_case, offline, retained_path,
+                run_child(executable, test_name,
+                          "continuation_offline" if case == "continue" else "offline",
+                          requested_case, offline, retained_path,
                           directory / "offline.json")
                 assert before_calls == peer.calls, "Offline contacted a native source"
                 assert before_files == combined.custody_files(production), "Offline changed custody"
+                if case == "continue":
+                    return
                 run_child(executable, test_name, "reconcile", requested_case, reopened, retained_path,
                           directory / "reconciled.json")
                 after = [operation for _, operation in peer.calls]
@@ -324,6 +350,8 @@ def main():
         "assignment_recovery": ("assignment_before_stock", "assignment_before_queue",
                                 "assignment_after_stock", "assignment_after_queue",
                                 "assignment_lost"),
+        "continuation": ("continue", "assignment_continue", "continue_disabled",
+                         "continue_queue", "continue_generation", "continue_cap", "continue_partial"),
     }[campaign]
     for case in cases:
         run_case(executable, test_name, case)

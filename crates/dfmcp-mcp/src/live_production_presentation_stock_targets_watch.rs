@@ -1,6 +1,8 @@
 //! Complete-target validation for a no-work portfolio. One shared temporal
 //! certificate must cover every original minimum at the same current anchor.
-use super::{MAX_SPAN, counters, optional_u64, temporal_sample, valid_anchor};
+use super::{
+    MAX_SPAN, continuation_request, counters, optional_u64, temporal_sample, valid_anchor,
+};
 use crate::live_production_presentation::digest;
 use serde_json::{Value, json};
 
@@ -164,6 +166,7 @@ pub(super) fn summary(view: &Value, anchor: Option<&Value>, allow_current: bool)
     let proven = sample.as_ref().is_some_and(|sample| {
         sample["achieved_at_tick"].is_u64() && sample["current_truth"] == "true"
     });
+    let continuation = continuation_request(view, sample.as_ref());
     json!({
         "schema":"dfmcp.stock-targets-watch/1",
         "scope":"original_no_work_inventory_portfolio",
@@ -177,6 +180,7 @@ pub(super) fn summary(view: &Value, anchor: Option<&Value>, allow_current: bool)
         "source_fenced":goal["source_fenced"].as_bool(),
         "consumed_tick_floor":goal["consumed_tick_floor"].as_u64(),
         "original_goal_proven":proven,"current_inventory_proven":proven,
+        "continuation_request":continuation,
         "sample":sample,"fresh_for_current_call":false,
         "native_effect_dispatched":false,"worker_prerequisite_checked":false,
         "labor_assignment_planned":false,"continuous_maintenance":false,

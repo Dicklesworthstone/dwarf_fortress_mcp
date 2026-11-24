@@ -422,7 +422,14 @@
     "crates/dfmcp-mcp/src/live_production_presentation_clock_tests.rs",
     "crates/dfmcp-mcp/src/live_production_presentation_inventory_clock_tests.rs",
     "crates/dfmcp-mcp/src/live_production_presentation_portfolio_tests.rs",
-    "crates/dfmcp-mcp/src/live_production_presentation_clock_guidance_tests.rs"
+    "crates/dfmcp-mcp/src/live_production_presentation_clock_guidance_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/stock_goal_continuation.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/prerequisite_binding.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/stock_target_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_server.rs",
+    "tests/stdio/combined_stock_target_runtime_peer.py",
+    "tests/stdio/combined_stock_targets_runtime_peer.py"
   ],
   "qualification": {
     "pre_outage_ledger_component_cases_passed": 17,
@@ -506,7 +513,19 @@
     "portfolio_schema": "dfmcp.stock-targets-watch/1",
     "all_original_targets_bound": true,
     "joint_current_sample_required": true,
-    "initial_met_target_is_optional": false
+    "initial_met_target_is_optional": false,
+    "continuation": {
+      "request_kind": "continue_stock_goal",
+      "selector": "exact retained goal_witness",
+      "contract": "native_stock_target_v1.json#no_work_goal_continuation",
+      "current_production_stage_and_unfinished_child_required": true,
+      "immutable_root_targets_and_absolute_deadline": true,
+      "fresh_original_worker_selection_and_complete_stock_required": true,
+      "same_first_production_intent_ack_before_child_writes": true,
+      "generic_child_plan_bypass": false,
+      "retained_completed_watch_can_restart_maintenance": false,
+      "separate_effect_review_and_confirmation_required": true
+    }
   },
   "parent_tick_floor_validation": {
     "new_regressions": 5,

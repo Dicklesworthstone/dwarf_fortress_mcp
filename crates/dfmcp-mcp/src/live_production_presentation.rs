@@ -1288,6 +1288,13 @@ fn encode(
                 false,
                 json!({}),
             ))
+        } else if mode == Some("control") && no_work_stock_goal["continuation_request"].is_object() {
+            Some((
+                "fortress_plan",
+                "Continue this unfinished original stock goal. A fresh census and current workers must qualify its first finite production plan under the unchanged targets and deadline; every effect still requires its own review.",
+                false,
+                json!({"request":no_work_stock_goal["continuation_request"].to_string()}),
+            ))
         } else {
             Some((
                 "fortress_wait",

@@ -197,6 +197,27 @@ fn current_sample(view: &Value, anchor: &Value) -> Option<Value> {
     Some(sample)
 }
 
+/// Only current, unfinished False evidence can suggest an explicit first
+/// production call. The exact two-field request cannot replace original goals.
+fn continuation_request(view: &Value, sample: Option<&Value>) -> Option<Value> {
+    let sample = sample?;
+    let goal = &view["no_work_stock_goal"];
+    let request = &goal["continuation_request"];
+    let witness = digest(&goal["goal_witness"])?;
+    let valid = view["mode"] == "control"
+        && view["production_control_enabled"] == true
+        && sample["current_truth"] == "false"
+        && sample["achieved_at_tick"].is_null()
+        && sample["deadline_reached"] == false
+        && sample["expired"] == false
+        && goal["cancelled"] == false
+        && goal["source_fenced"] == false
+        && request.as_object().is_some_and(|fields| fields.len() == 2)
+        && request["kind"] == "continue_stock_goal"
+        && request["goal_witness"] == witness;
+    valid.then(|| json!({"kind":"continue_stock_goal", "goal_witness":witness}))
+}
+
 /// Current presentation requires an independently accepted runtime view at the
 /// exact supplied canonical anchor. Retention always drops the entire sample.
 pub(crate) fn summary(view: &Value, anchor: Option<&Value>, allow_current: bool) -> Value {
@@ -215,6 +236,7 @@ pub(crate) fn summary(view: &Value, anchor: Option<&Value>, allow_current: bool)
     let proven = sample.as_ref().is_some_and(|sample| {
         sample["achieved_at_tick"].is_u64() && sample["current_truth"] == "true"
     });
+    let continuation = continuation_request(view, sample.as_ref());
     json!({
         "schema":"dfmcp.stock-target-watch/1",
         "scope":"original_no_work_inventory_goal",
@@ -231,6 +253,7 @@ pub(crate) fn summary(view: &Value, anchor: Option<&Value>, allow_current: bool)
         "consumed_tick_floor":goal["consumed_tick_floor"].as_u64(),
         "original_goal_proven":proven,
         "current_inventory_proven":proven,
+        "continuation_request":continuation,
         "sample":sample,
         "fresh_for_current_call":false,
         "native_effect_dispatched":false,
@@ -333,6 +356,21 @@ pub(crate) mod tests {
         view["original_goal_proven"] = json!(false);
     }
 
+    pub(crate) fn unfinished_deficit(view: &mut Value) {
+        view["original_goal_proven"] = json!(false);
+        let goal = &mut view["no_work_stock_goal"];
+        goal["original_goal_proven"] = json!(false);
+        goal["current_inventory_proven"] = json!(false);
+        goal["sample"]["current_truth"] = json!("false");
+        goal["sample"]["observed_stack_units"] = json!(0);
+        goal["sample"]["stable_samples_observed"] = json!(0);
+        goal["sample"]["achieved_at_tick"] = Value::Null;
+        goal["sample"]["last_counted_tick"] = Value::Null;
+        goal["continuation_request"] = json!({
+            "kind":"continue_stock_goal", "goal_witness":goal["goal_witness"],
+        });
+    }
+
     fn render(
         anchor: StateAnchor,
         view: &Value,
@@ -430,6 +468,76 @@ pub(crate) mod tests {
             output["agent_turn"]["active_work"]["confirmations"],
             json!([])
         );
+        Ok(())
+    }
+
+    #[test]
+    fn unfinished_stock_loss_recommends_only_the_closed_original_continuation()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let (anchor, mut view) = fixture();
+        unfinished_deficit(&mut view);
+        let output = render(anchor, &view, true, "control", false)?;
+        let next = &output["agent_turn"]["recommendations"][0];
+        assert_eq!(next["tool"], "fortress_plan");
+        let request = next["arguments"]["request"]
+            .as_str()
+            .ok_or("continuation request missing")?;
+        assert_eq!(
+            serde_json::from_str::<Value>(request)?,
+            view["no_work_stock_goal"]["continuation_request"]
+        );
+        assert!(matches!(
+            crate::live_production_server::plan_action(request)?,
+            crate::live_production_server::Action::ContinueStockGoal(_)
+        ));
+        assert_eq!(
+            output["agent_turn"]["active_work"]["confirmations"],
+            json!([])
+        );
+        for (verified, mode, uncertain) in [
+            (false, "control", false),
+            (true, "offline", false),
+            (true, "reconcile", false),
+            (true, "control", true),
+        ] {
+            let refused = render(anchor, &view, verified, mode, uncertain)?;
+            assert_ne!(
+                refused["agent_turn"]["recommendations"][0]["tool"],
+                "fortress_plan"
+            );
+        }
+        for mutation in [
+            "closed",
+            "authority",
+            "achieved",
+            "replaced",
+            "extra",
+            "retained",
+        ] {
+            let mut changed = view.clone();
+            match mutation {
+                "closed" => changed["closed"] = json!(true),
+                "authority" => changed["production_control_enabled"] = json!(false),
+                "achieved" => {
+                    changed["no_work_stock_goal"]["sample"]["achieved_at_tick"] = json!(140)
+                }
+                "replaced" => {
+                    changed["no_work_stock_goal"]["continuation_request"]["goal_witness"] =
+                        json!("f".repeat(64))
+                }
+                "extra" => {
+                    changed["no_work_stock_goal"]["continuation_request"]["deadline_tick"] =
+                        json!(300)
+                }
+                "retained" => withdraw(&mut changed),
+                _ => unreachable!(),
+            }
+            let refused = render(anchor, &changed, true, "control", false)?;
+            assert_ne!(
+                refused["agent_turn"]["recommendations"][0]["tool"], "fortress_plan",
+                "{mutation}"
+            );
+        }
         Ok(())
     }
 

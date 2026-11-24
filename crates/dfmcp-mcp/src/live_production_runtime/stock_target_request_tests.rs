@@ -735,10 +735,12 @@ fn manager_and_workshop_stock_target_preserves_original_sizing_and_keys_on_recov
         };
         let legacy = compile(Origins::default())?;
         prerequisite_binding::assert_manager_variants(&legacy, compile)?;
+        prerequisite_binding::assert_stock_watch_variants(&legacy, compile)?;
         let origins = Origins {
             workshop: Some(Digest32::of_bytes(b"workshop")),
             manager: Some(Digest32::of_bytes(b"manager")),
             input_supply: None,
+            stock_watch: None,
         };
         let original = compile(origins)?;
         let bound =
@@ -752,6 +754,7 @@ fn manager_and_workshop_stock_target_preserves_original_sizing_and_keys_on_recov
                 workshop: None,
                 manager: origins.manager,
                 input_supply: None,
+                stock_watch: None,
             },
         ] {
             let mut stripped = original.clone();

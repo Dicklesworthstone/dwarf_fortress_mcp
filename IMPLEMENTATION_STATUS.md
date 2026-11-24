@@ -1,5 +1,62 @@
 # Implementation Status
 
+## Unreleased — Unfinished no-work stock goals can request production
+
+An initially satisfied scalar or one-to-four-target stock watch can now
+explicitly request its first production original if fresh stock falls before
+the watch has ever achieved its required stability. The existing Plan request
+`{"kind":"continue_stock_goal","goal_witness":"<original witness>"}` selects
+only that retained watch. It cannot replace targets, order caps, citizens,
+labor, assignment choice, deadline, cadence or sample requirement. Ordinary
+combined, staged Workshop production and fixed resource-project routes use
+the same current owner.
+
+The request checks current Plan/production and requested labor authority,
+reacquires the complete original citizen selection and stock census, and
+requires a fresh empty paused native order queue. Current worker and configured
+Workshop/Manager/input prerequisites still apply. A positive bounded deficit
+is necessary; a still all-met census or over-limit target refuses publication.
+Neither a displayed False sample nor a historical assessment supplies the new
+amount. A previous timely achievement remains terminal for this continuation
+even after current proof is withdrawn. Cancelled, expired, fenced or lost
+process-local watches cannot continue.
+
+A request-local, nonserializable token permits only this owner's first
+publication. A closed predecessor marker and identity domain bind the exact
+watch witness before all intent IDs, step keys and obligations are derived.
+Legacy plans without the marker retain their identity bytes. The full original
+preserves every portfolio minimum, including currently met members, and strict
+archive recovery validates its marked identity without recreating the watch
+or any current authority. Resource-project publication still requires the
+original parent's independent intent acknowledgement before child files.
+
+Prepublication failures keep the same watch/request/deadline while withdrawing
+current proof and unfinished stability. Decoded source and tick floors remain
+consumed; source regressions fence the watch. Partial durable publication
+fences the owner and cannot authorize another original. Plan performs no native
+preparation, commit or clock effect. Later labor/order effects and clock
+intervals retain separate current reviews and confirmations; old watch samples
+supply no production stability credit.
+
+Regression source adds seven scalar and four vector actual Runtime/TCP
+scenarios, plus six parent publication cases for scalar/vector ACK refusal,
+partial publication and success. These cover authority before reads, wrong
+witness, all-met refusal, newer/regressed floors, worker/queue/source/cap
+refusals, explicit assignment, independent step review/commit, unchanged
+targets, historical completion and Offline recovery. The identity/archive
+matrix covers 32 salted plans; closed request/marker and Agent Turn cases
+exercise ordinary and parent recommendations.
+
+All 27 changed Rust source files pass dated-nightly syntax parsing, all three
+Python peers pass AST parsing, contract JSON and whitespace checks pass, and
+two independent source reviews found no remaining blocker. The new Rust
+regressions remain unexecuted. Locked/offline Cargo metadata fails because the
+exact pinned `fastmcp-core` Git revision is not cached; no dependency
+substitution or fabricated native runtime was used. Full Rust/MCP, native,
+live-game and admission qualification remain open.
+
+Owner: `df-native-stock-target-3m9` (in progress).
+
 ## Unreleased — Candidate decisions account for owned competing work
 
 Laboratory `fortress_plan` comparison version 3 closes the gap between

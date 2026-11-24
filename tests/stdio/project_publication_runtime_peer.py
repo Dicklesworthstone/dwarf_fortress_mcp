@@ -111,6 +111,8 @@ def run_case(executable, test, requested_case, clocks=(), one_order=False,
 
             def reply(self, plugin, operation, request):
                 phase = stage.read_text() if stage.exists() else ""
+                if phase == "continue_deficit":
+                    self.inventory_stack, self.chair_stack = 2, 1
                 offset = {"first_sample": 5, "second_sample": 10, "at_parent_floor": 20}.get(phase)
                 if offset is not None:
                     assert not self.order_created and not self.workforce_applied
@@ -122,7 +124,7 @@ def run_case(executable, test, requested_case, clocks=(), one_order=False,
 
         peer = ProjectPeer(production)
         try:
-            met = case in ("no_work", "no_work_floor") or reopening
+            met = case in ("no_work", "no_work_floor") or case.startswith("continue_") or reopening
             peer.inventory_stack = 6 if met else 2
             peer.chair_stack = 2 if met or one_order else 1
             environment = combined.environment(production, peer.endpoint)
@@ -439,7 +441,8 @@ def run_ordinary_case(executable, test, clocks, count=2, assign_labor=True,
 
 def main():
     executable, test = sys.argv[1:]
-    cases = ("no_work", "no_work_floor", "ack_refusal", "published", "partial", "advanced", "prepared_floor")
+    cases = ("no_work", "no_work_floor", "ack_refusal", "published", "partial", "advanced", "prepared_floor",
+             "continue_ack_refusal", "continue_partial", "continue_published")
     for case in cases:
         run_case(executable, test, case)
     for case in (*cases, "reopened"):

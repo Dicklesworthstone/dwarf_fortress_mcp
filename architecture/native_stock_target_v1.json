@@ -410,8 +410,11 @@
     "clock_authority": false,
     "stock_loss_creates_replacement_order": false,
     "continuous_maintenance": false,
-    "parent_resource_project_consumes_portfolio_proof": false,
-    "root_resource_project_goal_cardinality": 1,
+    "parent_resource_project_consumes_portfolio_proof": true,
+    "root_resource_project_goal_cardinality": [
+      1,
+      4
+    ],
     "constructor_byte_work": 67108864,
     "sample_byte_work": 254803968,
     "prepaid_output_byte_work": 268435456,
@@ -428,6 +431,58 @@
       "tests/stdio/combined_stock_targets_runtime_peer.py",
       "docs/NATIVE_STOCK_TARGET.md",
       "docs/COMBINED_PRODUCTION_MCP.md"
+    ]
+  },
+  "no_work_goal_continuation": {
+    "owner_bead": "df-native-stock-target-3m9",
+    "request_kind": "continue_stock_goal",
+    "request_tool": "fortress_plan",
+    "request_fields": [
+      "kind",
+      "goal_witness"
+    ],
+    "request_bytes_max": 1024,
+    "original_watch": "exact retained scalar or complete one-to-four-target portfolio",
+    "unfinished_never_achieved_required": true,
+    "cancelled_fenced_expired_or_recovered_watch_refused": true,
+    "original_targets_workers_assignment_and_timing_immutable": true,
+    "fresh_complete_citizen_inventory_and_empty_paused_queue_required": true,
+    "current_production_and_requested_labor_authority_required": true,
+    "fresh_positive_deficit_required": true,
+    "all_met_or_over_limit_refuses_publication": true,
+    "previous_false_sample_sizes_new_work": false,
+    "identity_marker": "Continues original stock watch [dfmcp-stock-watch-continuation/1]",
+    "identity_domain": "dfmcp-native-stock-watch-continuation/1",
+    "predecessor_bound_before_intent_keys_and_obligations": true,
+    "legacy_identity_bytes_unchanged_when_absent": true,
+    "prepublication_refusal_retains_original_watch": true,
+    "failed_attempt_withdraws_current_proof_and_unfinished_stability": true,
+    "decoded_source_and_tick_floors_rolled_back": false,
+    "partial_durable_publication_fences_owner": true,
+    "parent_ack_precedes_first_child_publication": true,
+    "separate_effect_review_and_confirmation_required": true,
+    "plan_performs_native_prepare_commit_or_clock_advance": false,
+    "prior_watch_samples_count_toward_new_production_stability": false,
+    "recovery_marker_scope": "historical predecessor identity only",
+    "recovery_restores_watch_proof_or_authority": false,
+    "automatic_maintenance": false,
+    "new_protocol_or_public_tool": false,
+    "production_admission_added": false,
+    "source_status": "source reviewed and syntax checked; new Rust runtime regression execution remains unverified",
+    "source_paths": [
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_goal_continuation.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/prerequisite_binding.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_target.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_targets.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_target_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/project_publication_runtime_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_server.rs",
+      "crates/dfmcp-mcp/src/native_resource_project/runtime.rs",
+      "crates/dfmcp-mcp/src/native_resource_project/presentation.rs",
+      "tests/stdio/combined_stock_target_runtime_peer.py",
+      "tests/stdio/combined_stock_targets_runtime_peer.py",
+      "tests/stdio/project_publication_runtime_peer.py"
     ]
   }
 }

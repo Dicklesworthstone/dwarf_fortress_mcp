@@ -435,6 +435,14 @@ fn next_step(
                 "fortress_explain",
                 "Inspect the unchanged no-work goal and its exact current evidence. Historical counts and a missed deadline cannot supply a new stable proof.",
             )
+        } else if result["stage"] == "production" && result["mode"] == "control"
+            && watch["continuation_request"].is_object()
+        {
+            arguments["request"] = json!(watch["continuation_request"].to_string());
+            (
+                "fortress_plan",
+                "Continue the unfinished original stock goal through its acknowledged first production publication. Fresh sources must qualify current deficits and workers under every unchanged minimum and deadline; effects require separate reviews.",
+            )
         } else {
             arguments["scope"] = json!("goal");
             (
@@ -1328,6 +1336,35 @@ mod tests {
             Value::Null
         };
         result["original_goal_proven"] = json!(proven);
+    }
+
+    #[test]
+    fn project_stock_loss_offers_the_same_closed_continuation_only_while_active() {
+        let mut result = no_work_project_fixture();
+        stock_watch::tests::unfinished_deficit(&mut result["child"]);
+        refresh_no_work_child(&mut result);
+        let rendered = packet("fortress.wait", Some(SessionId::new(1)), None, result.clone(), Value::Null);
+        let next = &rendered["agent_turn"]["recommendations"][0];
+        assert_eq!(next["tool"], "fortress_plan");
+        let request: Value = serde_json::from_str(next["arguments"]["request"].as_str().expect("request"))
+            .expect("closed continuation JSON");
+        assert_eq!(request, result["child"]["no_work_stock_goal"]["continuation_request"]);
+        assert_eq!(rendered["agent_turn"]["active_work"]["confirmations"], json!([]));
+        for condition in ["failed", "offline", "reconcile", "cancelled", "closed", "complete", "parent_changed", "retained"] {
+            let mut blocked = result.clone();
+            match condition {
+                "failed" => blocked["ok"] = json!(false),
+                "offline" | "reconcile" => blocked["mode"] = json!(condition),
+                "cancelled" => blocked["project_cancelled"] = json!(true),
+                "closed" => blocked["session_closed"] = json!(true),
+                "complete" => blocked["stage"] = json!("complete"),
+                "parent_changed" => blocked["current_stock_goal"]["no_work_stock_goal"]["goal_witness"] = json!("f".repeat(64)),
+                "retained" => stock_watch::withdraw(&mut blocked["child"]),
+                _ => unreachable!(),
+            }
+            let rendered = packet("fortress.query", Some(SessionId::new(1)), None, blocked, Value::Null);
+            assert_ne!(rendered["agent_turn"]["recommendations"][0]["tool"], "fortress_plan", "{condition}");
+        }
     }
 
     #[test]
