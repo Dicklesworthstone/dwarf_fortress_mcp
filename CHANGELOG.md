@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — Forecast unfinished recovered original projects
+
+- Extend complete-project forecasts to an authenticated already-dispatched
+  recovered root or final committed stage. Clone its existing observation
+  monitor with the original deadline, cadence and post-recovery stability.
+- Progress all authenticated unfinished recovered peers under the actual
+  foreground observation schedule and shared source/action/predicate budgets.
+  Recheck carried work after each hypothetical commit, including at one tick.
+- Add response schema `dfmcp.lab-original-forecast/4` when selected recovered
+  work is unfinished at admission. Keep original proof anchors immutable and
+  expose private predicted proof separately, with no restored action handles.
+- Preserve verified quiet predecessors, exact independent reserve endpoints,
+  live-receipt precedence and complete custody refusal. Forecasts publish no
+  canonical time, monitor state, proof, history or durable progress.
+- Add eight actual-model regressions and two active durable-facade cases;
+  update root/continuation recovery coverage for active admission. Independent
+  source review completed; Rust execution and formatting remain unavailable.
+  No current GitHub workflow/check run supplies execution evidence.
+
 ## Unreleased — Publish clocked portfolios after a pre-plan restart
 
 - Allow a recovered pre-plan resource-project owner to publish its first

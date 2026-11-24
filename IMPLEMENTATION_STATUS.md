@@ -1,5 +1,53 @@
 # Implementation Status
 
+## Unreleased — Predict unfinished recovered work without restoring dispatch
+
+Complete-project laboratory forecasts now accept an ordinary recovered root
+without descendants, or the final recovered committed stage, while its already
+dispatched temporal work is unfinished. All preceding committed stages still
+require complete Verified, physically quiet original work. The existing exact
+recovery verifier authenticates every monitor; its original proof identity,
+normalized obligation, registration tick, recovery frontier and last observation
+must bind the sealed original. Missing, foreign, interrupted, never-dispatched,
+failed or indeterminate custody cannot become a replacement proof runtime.
+
+The model clones authentic carried monitors, preserving original absolute
+deadlines, eligible cadence and actual post-recovery stability. Every unfinished
+carried peer is independently admitted and progressed to match real foreground
+waiting; selected and competing steps share cumulative source, action, polling
+and predicate-work bounds. The same pure observation transition runs after live
+polls and hypothetical commits, including same-tick identity/failure changes.
+Observe expiry is checked at modeled frontiers. No old ActionId is restored,
+no original is recommitted and no existing job is recreated.
+
+Responses use `dfmcp.lab-original-forecast/4` when selected recovered work is
+unfinished at admission. Original census and proof anchors stay immutable;
+private predicted state and proof anchors are separately labeled and cannot
+be mutation evidence. Historical-only recovered responses retain `/3`, and
+existing `/1` and live `/2` selection behavior remains. Each root and retained
+stage keeps independent exact reserve custody. Current canonical world,
+monitors, pending review, receipts, source history and durable progress remain
+untouched by prediction.
+
+Eight new actual-model regression sources cover active roots and descendants,
+real observation schedule parity, retained recovery stability and duplicate
+ticks, original deadline failure, competing cadence and action bounds, exact
+monitor/predecessor refusal, immutable missing/negative reserves and modeled
+Observe expiry. Two new durable-facade cases cover actual reopened production,
+predicted-versus-real selected-wait completion, immutable proof/publication and
+missing/same-recovery-foreign/interrupted/undispatched monitors. Existing root
+and mixed-chain facade cases now cover successful active recovered admission.
+
+Independent implementation reviews and source/JSON integrity checks completed.
+The executor remains unavailable even for a trivial read, and GitHub returned
+no workflow or check runs for the preceding committed increment. These new
+Rust sources have not been compiled, formatted or executed. Earlier receipts
+do not qualify this increment; full model/facade/MCP execution and native/live
+acceptance remain open. Production admission and the eleven-tool surface
+are unchanged.
+
+Owner: `df-lab-joint-original-forecast-c2s` (in progress).
+
 ## Unreleased — Publish the first clocked portfolio after a pre-plan restart
 
 A fixed resource-project owner reopened before publishing its first original

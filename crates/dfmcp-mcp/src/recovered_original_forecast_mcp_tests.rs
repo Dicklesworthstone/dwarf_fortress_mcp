@@ -7,6 +7,9 @@ use dfmcp_core::Capability;
 #[path = "recovered_continuation_forecast_mcp_tests.rs"]
 mod chains;
 
+#[path = "recovered_active_forecast_mcp_tests.rs"]
+mod active;
+
 struct StateDir(std::path::PathBuf);
 impl StateDir {
     fn new(label: &str) -> Self {
@@ -179,7 +182,7 @@ fn durable_recovered_harvest_forecasts_production_without_hydrating_or_changing_
 }
 
 #[test]
-fn recovery_forecast_refuses_unfinished_work_and_charges_archived_sources_and_steps() -> TestResult
+fn recovery_forecast_observes_unfinished_work_and_charges_archived_sources_and_steps() -> TestResult
 {
     let _serial = crate::test_serial();
     let _durable = server::serialized_durable_tests();
@@ -190,8 +193,11 @@ fn recovery_forecast_refuses_unfinished_work_and_charges_archived_sources_and_st
     drop(first);
     let owner = open_durable("8161502")?;
     let before = state(&owner)?;
-    let refused = forecast(&owner, &digest, 4_000)?;
-    assert_eq!(refused["ok"], false, "{refused}");
+    let active = forecast(&owner, &digest, 4_000)?;
+    assert_eq!(active["ok"], true, "{active}");
+    assert_eq!(active["schema"], "dfmcp.lab-original-forecast/4");
+    assert_eq!(active["prediction"]["all_complete"], true, "{active}");
+    assert_eq!(active["prediction"]["forecast_work"]["actual_game_ticks_advanced"], 0);
     assert_eq!(state(&owner)?, before);
     settle(&owner, &digest)?;
     let zero = forecast(&owner, &digest, 0)?;

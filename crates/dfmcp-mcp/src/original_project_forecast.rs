@@ -64,6 +64,15 @@ impl Project {
         Ok(self)
     }
 
+    pub(super) fn recovered_originals(&self) -> impl Iterator<Item = &RecoveredOriginal> {
+        self.recovered.iter().chain(self.retained.iter().filter_map(|stage| stage.recovered.as_ref()))
+    }
+
+    pub(super) fn historical_recovered_retained_steps(&self) -> usize {
+        self.retained.iter().filter_map(|stage| stage.recovered.as_ref())
+            .map(RecoveredOriginal::historical_verified_steps).sum()
+    }
+
     pub(super) fn recovered_steps(&self) -> usize {
         self.recovered.as_ref().map_or(0, RecoveredOriginal::len)
             + self.recovered_retained_steps()
@@ -92,6 +101,9 @@ impl Project {
                 .filter_map(|stage| stage.recovered.as_ref()),
         ) {
             recovered.validate_live_source(plan.anchor)?;
+            if !recovered.initially_complete() {
+                return Err(error(ErrorCode::Conflict, "a committed successor cannot follow an unfinished recovered predecessor"));
+            }
         }
         self.validate_stage(&plan, parent, &original)?;
         if original.actions.is_empty() || original.actions.len() != plan.steps.len() {
@@ -130,12 +142,12 @@ impl Project {
             || self
                 .recovered
                 .as_ref()
-                .is_none_or(|root| !root.shares_recovery(&recovered))
+                .is_none_or(|root| !root.shares_recovery(&recovered) || !root.initially_complete())
             || self.retained.iter().any(|stage| {
                 stage
                     .recovered
                     .as_ref()
-                    .is_none_or(|prior| !prior.shares_recovery(&recovered))
+                    .is_none_or(|prior| !prior.shares_recovery(&recovered) || !prior.initially_complete())
             })
         {
             return Err(error(
@@ -144,7 +156,7 @@ impl Project {
             ));
         }
         self.ledger.validate_current(current)?;
-        recovered.rows(current)?;
+        recovered.validate_snapshot(current)?;
         let reserve_sample = original.reserve_observation;
         self.retained.push(RetainedStage {
             plan,
@@ -222,6 +234,7 @@ impl Project {
         reserve: Option<PredicateTruth>,
         goal: PredicateTruth,
         original_stage: PredicateTruth,
+        carried: &[CarriedStep],
     ) -> Result<Outcome> {
         if self.recovered.is_some() && !original.actions.is_empty() {
             return Err(error(
@@ -236,14 +249,19 @@ impl Project {
             goal,
             original_stage,
             self.recovered.as_ref(),
+            carried,
         )?;
         let mut actions = original.actions.clone();
         actions.extend(self.retained_actions());
-        let committed_verified = (self.recovered_steps() > 0 || !actions.is_empty())
+        let mut committed_verified = (self.recovered_steps() > 0 || !actions.is_empty())
             && actions.iter().all(|id| {
                 fork.action_receipt(*id)
                     .is_some_and(|receipt| receipt.state == CommitState::Verified)
             });
+        for recovered in self.recovered_originals() {
+            committed_verified &= recovered.rows(fork.snapshot(), carried)?.iter()
+                .all(|row| row.state == CommitState::Verified);
+        }
         for stage in &self.stages {
             actions.extend_from_slice(&stage.actions);
         }
@@ -266,8 +284,9 @@ impl Project {
                     .iter()
                     .filter_map(|stage| stage.recovered.as_ref()),
             ),
+            carried,
         )?;
-        let retained = self.retained_stage_views(fork, goal)?;
+        let retained = self.retained_stage_views(fork, goal, carried)?;
         // Action failures take precedence as in ordinary original inspection.
         // Otherwise every admitted pursuit's endpoint remains independently
         // required, including a missing sample at an already-passed horizon.
@@ -325,6 +344,7 @@ impl Project {
         &self,
         fork: &MemoryAdapter,
         goal: PredicateTruth,
+        carried: &[CarriedStep],
     ) -> Result<Vec<Value>> {
         let mut rows = Vec::with_capacity(self.retained.len());
         for (index, stage) in self.retained.iter().enumerate() {
@@ -336,16 +356,17 @@ impl Project {
                 goal,
                 truth,
                 stage.recovered.as_ref(),
+                carried,
             )?;
             status.value["index"] = json!(index + 2);
             status.value["stage"] = json!(self.source.stage_name(&stage.plan));
             status.value["root_plan_digest"] = json!(self.original.to_hex());
             status.value["parent_plan_digest"] = json!(stage.parent.to_hex());
             status.value["source_anchor"] = super::super::super::anchor_json(&stage.plan.anchor);
-            status.value["custody"] = json!(if stage.recovered.is_some() {
-                "recovered_verified_original"
-            } else {
-                "already_committed_original"
+            status.value["custody"] = json!(match &stage.recovered {
+                Some(recovered) if !recovered.initially_complete() => "recovered_observation_original",
+                Some(_) => "recovered_verified_original",
+                None => "already_committed_original",
             });
             status.value["recommitted_by_forecast"] = json!(false);
             status.value["obligation_deadlines"] = json!(

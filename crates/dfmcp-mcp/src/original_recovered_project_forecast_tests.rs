@@ -7,6 +7,9 @@ use server::selected_plan_wait::RecoveredStepCustody;
 #[path = "original_recovered_chain_forecast_tests.rs"]
 mod chains;
 
+#[path = "original_active_recovery_forecast_tests.rs"]
+mod active;
+
 fn recovered_fixture() -> Result<(MemoryAdapter, PreparedPlan, Original, Project)> {
     recover_project(fixture()?, 816_501, beds()?)
 }
@@ -74,6 +77,7 @@ fn recover_steps(
         census,
         json!({"digest":digest.to_hex()}),
         recovered.snapshot(),
+        &[],
     )
 }
 
@@ -325,7 +329,8 @@ fn recovered_forecast_refuses_a_second_reset_or_unverified_original_census() -> 
                 &plan,
                 rows,
                 json!({"digest":digest.to_hex()}),
-                adapter.snapshot()
+                adapter.snapshot(),
+                &[],
             )
             .is_err()
         );

@@ -104,6 +104,7 @@ pub(super) fn forecast_chain(
         ticks,
         Instant::now(),
         Some(vec![project]),
+        Vec::new(),
         |_, _, _| Ok(()),
         |_, snapshot| {
             let stage = crate::lab_world::plan_goal_truth(snapshot, root_plan)?;

@@ -208,6 +208,9 @@ pub(super) fn execute(
     let mut recovered_records = 0u64;
     let mut recovered_bytes = 0u64;
     let mut recovered_steps = 0usize;
+    let mut verified_recovered_steps = 0usize;
+    let mut unfinished_recovered_steps = 0usize;
+    let mut recovered_digests = BTreeSet::new();
     let mut recovered_shape = (0u64, 0u64);
     let mut reserve_snapshots = Vec::new();
     let mut next_wait_digests = Vec::new();
@@ -248,9 +251,16 @@ pub(super) fn execute(
             let plan = original
                 .resource_plan()
                 .ok_or_else(|| invalid("recovered project seal disappeared"))?;
-            let (source, census, evidence) = original.forecast_recovered_project(session)?;
-            let recovered =
-                model::RecoveredOriginal::new(plan, census, evidence, session.adapter.snapshot())?;
+            let predecessor = project_lineages.get(&member.actual_digest())
+                .is_some_and(|(_, descendants)| !descendants.is_empty());
+            let (source, census, evidence) = original.forecast_recovered_project(session, predecessor)?;
+            let verified = census.iter().filter(|row| row.state == "verified").count();
+            verified_recovered_steps = verified_recovered_steps.saturating_add(verified);
+            unfinished_recovered_steps = unfinished_recovered_steps.saturating_add(census.len() - verified);
+            recovered_digests.insert(member.actual_digest());
+            let recovered = model::RecoveredOriginal::new(
+                plan, census, evidence, session.adapter.snapshot(), &session.carried,
+            )?;
             recovered_steps = recovered_steps.saturating_add(plan.steps.len());
             recovered_goals.insert(member.actual_digest());
             Some((source, recovered))
@@ -374,12 +384,17 @@ pub(super) fn execute(
                 };
                 if !session.commit_receipts.contains_key(&digest.to_hex()) {
                     let (archived, census, evidence) =
-                        objective.forecast_recovered_project(session)?;
+                        objective.forecast_recovered_project(session, index + 1 < descendants.len())?;
+                    let verified = census.iter().filter(|row| row.state == "verified").count();
+                    verified_recovered_steps = verified_recovered_steps.saturating_add(verified);
+                    unfinished_recovered_steps = unfinished_recovered_steps.saturating_add(census.len() - verified);
+                    recovered_digests.insert(*digest);
                     let recovered = model::RecoveredOriginal::new(
                         plan,
                         census,
                         evidence,
                         session.adapter.snapshot(),
+                        &session.carried,
                     )?;
                     recovered_steps = recovered_steps.saturating_add(plan.steps.len());
                     recovered_goals.insert(*digest);
@@ -482,7 +497,41 @@ pub(super) fn execute(
             );
         }
     }
-    if action_union.len().saturating_add(recovered_steps) > context.budget.max_actions as usize {
+    let mut carried_progress = Vec::new();
+    let mut carried_custody_bytes = 0u64;
+    let mut carried_custody_records = 0u64;
+    let mut additional_carried_bytes = 0u64;
+    if request.forecast_scope == Scope::CompleteProject {
+        let carried_originals: BTreeSet<_> = session.carried.iter()
+            .filter(|row| !row.is_final()).map(|row| row.plan_digest).collect();
+        for digest in carried_originals {
+            remaining(context, started)?;
+            let owner = session.objectives.iter().find(|original| original.plan_digest == digest)
+                .ok_or_else(|| invalid("competing recovered work lost its exact original owner"))?;
+            let (rows, custody_bytes) = owner.forecast_carried_progress(session)?;
+            if !recovered_digests.contains(&digest) {
+                carried_custody_bytes = carried_custody_bytes.saturating_add(custody_bytes as u64);
+                carried_custody_records = carried_custody_records.saturating_add(
+                    owner.resource_plan().map_or(0, |plan| plan.steps.len()) as u64,
+                );
+            }
+            if recovered_goals.is_empty() {
+                for row in &rows {
+                    additional_carried_bytes = additional_carried_bytes.saturating_add(row.to_json().to_string().len() as u64);
+                }
+            }
+            carried_progress.extend(rows);
+            if carried_progress.len() > context.budget.max_actions as usize {
+                return Err(exhausted("competing recovered monitors exceed the shared action budget"));
+            }
+        }
+    }
+    let recovered_peer_steps = carried_progress.iter()
+        .filter(|row| !recovered_digests.contains(&row.plan_digest)).count();
+    let recovered_predicate_bound = model::recovered_predicate_node_bound(&carried_progress)?;
+    if action_union.len().saturating_add(recovered_steps).saturating_add(recovered_peer_steps)
+        > context.budget.max_actions as usize
+    {
         return Err(exhausted(
             "selected and competing original actions exceed the shared action budget",
         ));
@@ -529,12 +578,15 @@ pub(super) fn execute(
         .records
         .saturating_sub(current_records)
         .saturating_add(project_records)
+        .saturating_add(carried_custody_records)
         .saturating_add(session.open_actions.len() as u64);
     let fixed_bytes = source
         .bytes
         .saturating_sub(current_bytes)
         .saturating_add(receipt_bytes)
-        .saturating_add(project_bytes);
+        .saturating_add(project_bytes)
+        .saturating_add(carried_custody_bytes)
+        .saturating_add(additional_carried_bytes);
     let mut inspections = 0u64;
     let mut inspected_records = 0u64;
     let mut inspected_bytes = 0u64;
@@ -554,6 +606,7 @@ pub(super) fn execute(
         request.horizon_ticks,
         started,
         (request.forecast_scope == Scope::CompleteProject).then_some(projects),
+        carried_progress,
         |snapshot, modeled_actions, modeled_plan_bytes| {
             if !recovered_goals.is_empty() {
                 let shape = super::query_budget::source_shape(
@@ -604,7 +657,10 @@ pub(super) fn execute(
             // each original evaluation, including short-circuited clauses.
             predicate_node_visits_bound = predicate_node_visits_bound
                 .saturating_add(source.predicate_node_bound)
-                .saturating_add(project_goal_node_bound);
+                .saturating_add(project_goal_node_bound)
+                // At most one carried observation follows each modeled loop;
+                // precharge the entire admitted monitor domain before it runs.
+                .saturating_add(recovered_predicate_bound);
             if predicate_node_visits_bound > 4_000_000 {
                 return Err(exhausted(
                     "joint forecast exceeds its aggregate predicate-work bound",
@@ -635,6 +691,9 @@ pub(super) fn execute(
         "source_work":{"retained_source_records":source.records,"retained_source_bytes":source.bytes,
             "retained_source_snapshots":source.snapshots,"predicate_node_bound":source.predicate_node_bound,
             "aggregate_predicate_node_bound":predicate_node_visits_bound,
+            "recovered_predicate_nodes_per_evaluation":recovered_predicate_bound,
+            "competing_recovered_custody_records":carried_custody_records,
+            "competing_recovered_custody_bytes":carried_custody_bytes,
             "source_inspections":inspections,"inspected_records":inspected_records,
             "inspected_canonical_and_custody_bytes":inspected_bytes},
         "changes":[],"observation_only":true,
@@ -658,10 +717,16 @@ pub(super) fn execute(
             "each pursuit retains its own exact endpoint; a tip wait does not retain predecessor samples; use explicit zero-tick selected waits in groups of at most eight at that absolute tick before advancing again"
         );
         if !recovered_goals.is_empty() {
-            response["schema"] = json!("dfmcp.lab-original-forecast/3");
+            response["schema"] = json!(if unfinished_recovered_steps > 0 {
+                "dfmcp.lab-original-forecast/4"
+            } else {
+                "dfmcp.lab-original-forecast/3"
+            });
             response["source_work"]["recovered_original_source_witnesses"] =
                 json!(recovered_sources);
-            response["source_work"]["verified_recovered_original_steps"] = json!(recovered_steps);
+            response["source_work"]["recovered_original_steps"] = json!(recovered_steps);
+            response["source_work"]["verified_recovered_original_steps"] = json!(verified_recovered_steps);
+            response["source_work"]["recovered_observation_steps"] = json!(unfinished_recovered_steps);
             response["source_work"]["fixed_structural_bytes"] = json!(fixed_shape.0);
             response["source_work"]["fixed_structural_work"] = json!(fixed_shape.1);
         }

@@ -61,11 +61,12 @@ impl RecoveredProjectSource {
 
 impl Objective {
     /// The exact recovery verifier checks every historical receipt and current
-    /// effect identity. Only already-verified quiet work enters this slice;
-    /// unfinished monitors and never-dispatched steps are not simulated.
+    /// effect identity. An unfinished tip uses only an already-retained
+    /// temporal monitor; predecessors remain Verified and physically quiet.
     pub(in super::super) fn forecast_recovered_project(
         &self,
         session: &LabSession,
+        predecessor: bool,
     ) -> Result<(
         RecoveredProjectSource,
         Vec<super::super::selected_plan_wait::RecoveredStepCustody>,
@@ -97,19 +98,33 @@ impl Objective {
         }
         source.ledger.validate_plan(plan)?;
         source.ledger.validate_current(session.adapter.snapshot())?;
-        let steps = custody.drain_census(session, plan)?;
-        if steps.len() != plan.steps.len()
-            || steps.is_empty()
-            || steps
-                .iter()
-                .any(|step| step.state != "verified" || !step.work.is_quiescent())
-        {
+        let steps = custody.forecast_census(session, plan, predecessor)?;
+        if steps.len() != plan.steps.len() || steps.is_empty() {
             return Err(DfmcpError::new(
                 ErrorCode::Conflict,
-                "recovered complete-project forecast requires every original step already Verified and physically quiet; observe or reconcile unfinished work first",
+                "recovered complete-project forecast requires its complete original step census",
             ));
         }
         Ok((*source, steps, custody.evidence_json()?))
+    }
+
+    /// Admit the complete retained proof owner before cloning any unfinished
+    /// row. Competing recovered originals constrain the same observation loop;
+    /// they receive neither new plans nor restored dispatch authority.
+    pub(in super::super) fn forecast_carried_progress(
+        &self,
+        session: &LabSession,
+    ) -> Result<(Vec<super::super::CarriedStep>, usize)> {
+        let custody = self.selected_wait_recovery(session)?;
+        let plan = self.resource_plan().ok_or_else(|| {
+            DfmcpError::new(ErrorCode::CorruptLedger, "recovered progression seal is missing")
+        })?;
+        custody.forecast_census(session, plan, false)?;
+        let rows = session.carried.iter()
+            .filter(|row| row.plan_digest == plan.digest && !row.is_final())
+            .cloned()
+            .collect();
+        Ok((rows, custody.bytes()?))
     }
 
     /// Admission above is repeated against the private descendant's accepted

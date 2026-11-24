@@ -92,7 +92,7 @@ fn recovered_continuation_chain_survives_reopen_compaction_and_queries_without_o
 }
 
 #[test]
-fn recovered_root_forecasts_live_tip_then_requires_its_real_recovered_verification() -> TestResult {
+fn recovered_root_forecasts_live_and_recovered_tips_without_restoring_dispatch() -> TestResult {
     let _serial = crate::test_serial();
     let _durable = server::serialized_durable_tests();
     let directory = StateDir::new("continued-mixed");
@@ -122,9 +122,34 @@ fn recovered_root_forecasts_live_tip_then_requires_its_real_recovered_verificati
     drop(owner);
     let owner = open_durable("8161506")?;
     let before = state(&owner)?;
-    assert_eq!(forecast(&owner, &root, 4_000)?["ok"], false);
-    assert_eq!(state(&owner)?, before);
+    let mut predicted_completion = None;
+    for horizon in [0, 4_000] {
+        let result = forecast(&owner, &root, horizon)?;
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["schema"], "dfmcp.lab-original-forecast/4");
+        assert_eq!(result["prediction"]["all_complete"], horizon > 0, "{result}");
+        assert_eq!(result["prediction"]["forecast_work"]["hypothetical_stages"], 0);
+        let retained = &result["prediction"]["originals"][0]["retained_stages"][0];
+        assert_eq!(retained["actual_plan_digest"], child);
+        assert_eq!(retained["custody"], "recovered_observation_original");
+        assert_eq!(retained["dispatch_handles_restored"], false);
+        assert_eq!(retained["recommitted_by_forecast"], false);
+        assert!(retained["steps"].as_array().is_some_and(|steps| {
+            !steps.is_empty() && steps.iter().all(|step| {
+                step["action_id"].is_null()
+                    && step["dispatch_handle_restored"] == false
+            })
+        }));
+        if horizon > 0 {
+            predicted_completion = result["prediction"]["predicted_frontier_tick"].as_u64();
+        }
+        assert_eq!(state(&owner)?, before);
+    }
     settle_output(&owner, &child)?;
+    assert_eq!(
+        Some(view(&owner, |session| Ok(session.adapter.snapshot().tick.0))?),
+        predicted_completion,
+    );
     let before = state(&owner)?;
     let result = forecast(&owner, &root, 0)?;
     assert_eq!(result["ok"], true, "{result}");

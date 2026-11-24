@@ -6,7 +6,8 @@
     "new_top_level_tools": 0,
     "output_schema": "dfmcp.lab-original-forecast/1",
     "complete_project_output_schema": "dfmcp.lab-original-forecast/2",
-    "recovered_complete_project_output_schema": "dfmcp.lab-original-forecast/3"
+    "recovered_complete_project_output_schema": "dfmcp.lab-original-forecast/3",
+    "active_recovered_complete_project_output_schema": "dfmcp.lab-original-forecast/4"
   },
   "request": {
     "required": [
@@ -19,7 +20,7 @@
     "max_bytes": 2048,
     "min_originals": 1,
     "max_originals": 8,
-    "digest": "64 lowercase hexadecimal characters; exact current-session live original, or an admitted recovered quiet root in complete_project",
+    "digest": "64 lowercase hexadecimal characters; exact current-session live original, or an admitted recovered original root in complete_project",
     "aliases": "retain requested and actual identities; reject duplicate actual originals",
     "historical_source": false,
     "optional": [
@@ -36,12 +37,12 @@
         "ordinary provisioned_room root",
         "ordinary connected_room root"
       ],
-      "retained_continuation_custody": "select the ordinary root; expand its exact linear continuation chain with an optional verified recovered prefix followed by current owned live stages, at most eight committed stages including root; wrappers cannot be selected separately"
+      "retained_continuation_custody": "select the ordinary root; expand its exact linear continuation chain with a recovered prefix followed by optional current owned live stages, at most eight committed stages including root; predecessors Verified and physically quiet; final recovered stage may contain authenticated already-dispatched temporal monitors; wrappers cannot be selected separately"
     }
   },
   "source": {
     "current_anchor": "exact owned current snapshot",
-    "model": "one discarded MemoryAdapter clone with existing original obligation runtimes",
+    "model": "one discarded MemoryAdapter clone with existing live obligation runtimes and cloned authenticated recovered observation monitors",
     "admission": "current world plus complete retained original source union, reserve snapshots and owned competing receipts before clone; repeat derived-source admission",
     "source_heap_bytes_measured": false,
     "complete_project_originals": "every root and retained descendant requires its exact retained sealed source; root stock-ledger identity/generation stays stable while each child ledger validates its own source-bound plan; sources, archives, receipts, reserve snapshots and predicates join the complete union before cloning",
@@ -49,7 +50,7 @@
     "recovered_reserve_endpoint": "existing exact retained endpoint snapshot must already be present in bounded session history; otherwise refuse without hydration or replacing its first truth; an explicit selected wait may load previously published endpoint evidence"
   },
   "progression": {
-    "tracked": "all current-session open actions in original commit order",
+    "tracked": "all current-session open actions in original commit order; complete_project also observes all independently authenticated unfinished carried peers",
     "other_owners": "already-dispatched physical work evolves; their deferred actions are not polled",
     "first_round": "zero modeled ticks when horizon positive",
     "zero_horizon": "no polls or dispatch",
@@ -58,7 +59,8 @@
       "remaining simulated horizon",
       "active original cadence",
       "active original deadline",
-      "each selected absolute reserve endpoint"
+      "each selected absolute reserve endpoint",
+      "all unfinished carried peer cadences and original deadlines"
     ],
     "prune": "terminal and physically quiet actions; retain original receipts",
     "automatic_unpause": false,
@@ -69,8 +71,10 @@
     "hypothetical_stage_order": "ready actual original digests ascending; defer qualified tracked active-output conflicts while other ready originals proceed; existing and modeled action polls retain commit order",
     "active_output_conflicts": "only the exact compiler-qualified canonical producer with matching tracked Active physical work may defer; bounded ordinary polling and recompile from observed stock; no future-output credit or new stage/action charge; untracked, unknown and other errors refuse",
     "new_stage_deadlines": "own separately reviewed compiler-derived obligations; no original obligation is renewed",
-    "retained_stages": "reuse original live action receipts and obligation runtimes or verified recovered historical steps without preparing or recommitting; predecessors already Verified and physically quiet; final live stage may have prepared or active work",
-    "recovered_originals": "immutable verified historical steps; no ActionIds, restored handles, original polls, stability resets or deadline renewal; current quiet physical identities checked on every private frontier"
+    "retained_stages": "reuse exact live receipts/runtimes or recovered original custody without preparing or recommitting; predecessors already Verified and physically quiet; final live stage may be prepared/active, final recovered stage must have authenticated already-dispatched temporal monitors",
+    "recovered_originals": "immutable historical census and original proofs; active monitor clones use the shared real observation transition, original deadline and retained post-recovery stability; no ActionIds, restored dispatch or reconstructed monitors",
+    "recovered_observation_after_hypothetical_commit": true,
+    "same_tick_reads_add_stability": false
   },
   "outcome": {
     "group_completion": "all selected original goals true, required exact reserve samples true, original actions Verified and physical work quiet at one same modeled frontier",
@@ -87,10 +91,10 @@
     ],
     "complete_project": "all selected semantic goals and each root/retained pursuit exact reserve true; root, retained and hypothetical actions Verified and physically quiet at the same frontier",
     "initial_actions_distinct_from_future_stages": true,
-    "retained_stages": "parent-ordered real plan identities with exact source anchors, unchanged obligations, independent reserve samples and predicted outcomes; live action identities use custody already_committed_original; historical steps have no handles and use custody recovered_verified_original; recommitted_by_forecast false",
+    "retained_stages": "parent-ordered real identities, exact sources, unchanged obligations and independent reserves; custody already_committed_original for live, recovered_verified_original for historical, recovered_observation_original for unfinished recovered tip at admission; recommitted_by_forecast false",
     "committed_actions_distinct_from_future_stages": true,
     "reserve_samples_shared_between_pursuits": false,
-    "recovered_originals": "complete exact original step rows, action_id null, verified_recovered_history state origin, original source/receipt/proof anchors and deadlines; historical steps count toward completion and action limits; hypothetical successors remain separate"
+    "recovered_originals": "complete original step rows with action_id null and immutable proof_anchor; historical origin verified_recovered_history; unfinished origin cloned_recovered_observation_monitor with distinct predicted_proof_anchor and predicted_proof_is_canonical false"
   },
   "authority": {
     "current": [
@@ -102,7 +106,7 @@
     "modeled_Observe_expiry_checked": true,
     "complete_project_modeled_Query_expiry_checked": true,
     "deferred_effects": "original current grants and scope checked at modeled dispatch; no new grants",
-    "recovery_only": "complete_project only: exact recovered prefix, every historical step already Verified and physically quiet; each stage retains complete archived source and the same accepted recovery frontier; optional current-session live descendants must be sealed at or after that frontier; current_stage still refuses",
+    "recovery_only": "complete_project only: exact recovered prefix with shared accepted frontier; predecessors Verified and physically quiet; final recovered stage permits authenticated already-dispatched temporal monitors; optional owned live descendants must follow the accepted frontier; current_stage still refuses recovered custody",
     "withdrawn_or_abandoned": "refuse before fork",
     "future_stages": "modeled Observe, Query, Plan, every effect scope/risk and checkpoint checked before charging or preparing the model stage",
     "continued_project_refusals": [
@@ -114,7 +118,15 @@
       "unverified or nonquiescent predecessor",
       "cross-fortress, unaccepted cross-epoch or backward source lineage",
       "recovered stages with different accepted recovery frontiers or malformed present live receipts"
-    ]
+    ],
+    "recovered_monitor_identity": [
+      "deterministic original proof ActionId",
+      "complete normalized sealed obligation and combined postconditions",
+      "original registration tick",
+      "accepted recovery frontier",
+      "last observation within accepted recovery and current source"
+    ],
+    "recovered_peer_admission": "every unfinished carried peer passes full original custody and must have an authentic active temporal monitor; missing, interrupted, unknown, failed or never-dispatched work refuses the optional forecast"
   },
   "bounds": {
     "max_rounds": 4096,
@@ -134,9 +146,10 @@
     "hypothetical_costs": "root, retained, competing and model actions share negotiated action/entity ceiling; all original archives and modeled plan archives share complete source byte allowance",
     "additional_semantic_nodes_per_project_evaluation": 130,
     "max_committed_stages_per_project_including_root": 8,
-    "recovered_original_steps": "root and descendant historical steps share original/competing/hypothetical action ceilings even without live ActionIds; descendant counts also appear in retained_continuation_actions and verified_recovered_continuation_steps",
+    "recovered_original_steps": "all selected recovered root/descendant steps and unselected unfinished carried peers share live/competing/hypothetical action ceilings; verified_recovered counts only historical steps at admission",
     "recovered_complete_source_structural_bytes": 16777216,
-    "recovered_complete_source_structural_work": 4000000
+    "recovered_complete_source_structural_work": 4000000,
+    "recovered_observation_work": "live and recovered polls share max_action_polls; recovered terminal/failure predicate visits share max_goal_predicate_node_bound"
   },
   "publication": {
     "current_anchor_preserved": true,
@@ -154,7 +167,9 @@
     "request_and_replay_metadata": "ordinary query metadata remains",
     "continuity": "partial",
     "eligible_as_mutation_evidence": false,
-    "complete_project_next_step": "explicit selected wait targets the latest admitted committed tip per root; reserve_endpoint_pursuits lists each independent exact sample obligation; capture remaining samples by zero-tick selected waits of at most eight pursuits at the original endpoint before advancing again"
+    "complete_project_next_step": "explicit selected wait targets the latest admitted committed tip per root; reserve_endpoint_pursuits lists each independent exact sample obligation; capture remaining samples by zero-tick selected waits of at most eight pursuits at the original endpoint before advancing again",
+    "recovered_monitor_state_changed": false,
+    "predicted_recovered_proof_published": false
   },
   "qualification": {
     "laboratory_only": true,
@@ -171,6 +186,21 @@
     "crates/dfmcp-mcp/src/original_recovered_project_forecast_tests.rs",
     "crates/dfmcp-mcp/src/recovered_original_forecast_mcp_tests.rs",
     "crates/dfmcp-mcp/src/original_recovered_chain_forecast_tests.rs",
-    "crates/dfmcp-mcp/src/recovered_continuation_forecast_mcp_tests.rs"
-  ]
+    "crates/dfmcp-mcp/src/recovered_continuation_forecast_mcp_tests.rs",
+    "crates/dfmcp-mcp/src/original_active_recovery_forecast_tests.rs",
+    "crates/dfmcp-mcp/src/recovered_active_forecast_mcp_tests.rs"
+  ],
+  "active_recovered_forecast": {
+    "response_schema_when_selected_unfinished_at_admission": "dfmcp.lab-original-forecast/4",
+    "historical_schema_preserved": "dfmcp.lab-original-forecast/3",
+    "tracked_recovered_steps": true,
+    "competing_recovered_steps": true,
+    "recovered_observation_polls": true,
+    "recovered_predicate_node_visits_bound": true,
+    "immutable_historical_census": true,
+    "authentic_monitor_clone_required": true,
+    "synthesized_monitor": false,
+    "canonical_proof_from_prediction": false,
+    "current_source_validation": "independent_source_review_and_authored_regressions; compilation_and_execution_unavailable"
+  }
 }

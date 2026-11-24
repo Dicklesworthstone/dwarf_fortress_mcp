@@ -149,6 +149,7 @@ fn run(
         ticks,
         Instant::now(),
         projects,
+        Vec::new(),
         |snapshot, extra_records, extra_bytes| {
             let work = server::query_budget::admit_sources(&[snapshot], ctx)?;
             if work["records"]
@@ -192,6 +193,7 @@ fn harvested_input_becomes_a_complete_original_project_only_in_explicit_scope() 
         4_000,
         Instant::now(),
         None,
+        Vec::new(),
         |_, _, _| Ok(()),
         |_, snapshot| {
             Ok((
@@ -314,6 +316,7 @@ fn current_true_stock_still_funds_the_original_future_reserve_after_harvesting()
         4_000,
         Instant::now(),
         Some(vec![project.clone()]),
+        Vec::new(),
         |_, _, _| Ok(()),
         |_, snapshot| {
             let goal = project.goal_truth(snapshot)?;
@@ -611,6 +614,7 @@ fn blocked_lower_digest_does_not_starve_an_independent_ready_project() -> Result
         10,
         Instant::now(),
         Some(vec![blocked_project, independent_project]),
+        Vec::new(),
         |_, _, _| Ok(()),
         |digest, snapshot| {
             let plan = plans
@@ -666,6 +670,7 @@ fn active_output_blocker_without_tracked_custody_is_not_adopted() -> Result<()> 
         10,
         Instant::now(),
         Some(vec![project]),
+        Vec::new(),
         |_, _, _| Ok(()),
         |_, snapshot| {
             let truth = crate::lab_world::plan_goal_truth(snapshot, &plan)?;

@@ -391,6 +391,41 @@ impl RecoveredPlanCustody {
             .collect()
     }
 
+    /// Forecast only the exact retained monitors of already-dispatched work.
+    /// Earlier committed stages must be complete before a later stage exists.
+    pub(crate) fn forecast_census(
+        &self,
+        session: &LabSession,
+        plan: &PreparedPlan,
+        predecessor: bool,
+    ) -> Result<Vec<RecoveredStepCustody>> {
+        let census = self.drain_census(session, plan)?;
+        for receipt in &census {
+            if receipt.state == "verified" && receipt.work.is_quiescent() {
+                continue;
+            }
+            let carried = session.carried.iter().find(|row| {
+                row.plan_digest == plan.digest && row.step == Some(receipt.step)
+            });
+            if predecessor
+                || receipt.recorded_state != "dispatched"
+                || receipt.state != "dispatched"
+                || !matches!(receipt.work, EffectWorkState::Active { .. } | EffectWorkState::Quiescent { .. })
+                || carried.is_none_or(|row| {
+                    row.observation_error.is_some()
+                        || row.monitor.as_ref().is_none_or(|monitor| {
+                            !matches!(monitor.status(), Some(ObligationStatus::Active { .. }))
+                        })
+                })
+            {
+                return Err(unavailable(
+                    "recovered forecast requires Verified quiet predecessors and an exact already-dispatched temporal monitor for unfinished tip work",
+                ));
+            }
+        }
+        Ok(census)
+    }
+
     pub(super) fn inspect(&self, session: &LabSession, plan: &PreparedPlan) -> Result<Actions> {
         let custody = self.checked()?;
         let snapshot = session.adapter.snapshot();
@@ -552,6 +587,11 @@ fn inspect_carried(
             }
         } else if let Some(monitor) = &row.monitor {
             if monitor.recovery_anchor() != recovery
+                || monitor.last_observation_anchor().is_none_or(|anchor| {
+                    anchor.cursor.epoch != recovery.cursor.epoch
+                        || !precedes(recovery, anchor)
+                        || !precedes(anchor, current)
+                })
                 || !super::super::recovered_step_progress::monitor_matches(
                     row, custody.plan_digest, registered_tick, step,
                 )

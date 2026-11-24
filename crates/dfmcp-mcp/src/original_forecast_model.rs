@@ -14,6 +14,8 @@ use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::{PredicateTruth, WorldSnapshot};
 use serde_json::{Value, json};
 
+use super::super::{CarriedStep, recovered_step_progress};
+
 const MAX_SLICES: u64 = 4_096;
 const MAX_POLLS: u64 = 65_536;
 const MAX_TRACKED: usize = 1_024;
@@ -86,6 +88,7 @@ struct Outcome {
 fn tracked_active_producer(
     fork: &MemoryAdapter,
     tracked: &[ActionId],
+    carried: &[CarriedStep],
     producer: EntityId,
 ) -> Result<bool> {
     for action in tracked {
@@ -95,7 +98,62 @@ fn tracked_active_producer(
             return Ok(true);
         }
     }
+    for row in carried {
+        if let Some(step) = &row.work_step
+            && matches!(dfmcp_intent::inspect_effect_work(
+                fork.snapshot(), &step.action, &step.idempotency_key, true,
+            )?, EffectWorkState::Active { entity_id } if entity_id == producer)
+        {
+            return Ok(true);
+        }
+    }
     Ok(false)
+}
+
+/// A conservative per-frontier bound, also charged by facade goal inspection.
+/// Shape validation precedes complexity traversal and cloning monitor state.
+pub(super) fn recovered_predicate_node_bound(carried: &[CarriedStep]) -> Result<u64> {
+    let mut nodes = 0u64;
+    for row in carried.iter().filter(|row| !row.is_final() && row.state == "dispatched") {
+        row.proof.validate_shape()?;
+        nodes = nodes.saturating_add(row.proof.complexity() as u64);
+        if let Some(failure) = &row.failure {
+            failure.validate_shape()?;
+            nodes = nodes.saturating_add(failure.complexity() as u64);
+        }
+        if nodes > 4_000_000 {
+            return Err(error(ErrorCode::BudgetExceeded, "recovered forecast exceeds its predicate-work bound"));
+        }
+    }
+    Ok(nodes)
+}
+
+fn observe_recovered(
+    fork: &MemoryAdapter,
+    carried: &mut Vec<CarriedStep>,
+    context: &OperationContext,
+    started: Instant,
+    action_polls: u64,
+    recovered_polls: &mut u64,
+    predicate_nodes: &mut u64,
+) -> Result<()> {
+    let count = carried.iter().filter(|row| !row.is_final()).count() as u64;
+    if count == 0 {
+        return Ok(());
+    }
+    check(context, started)?;
+    let next_polls = recovered_polls.saturating_add(count);
+    let next_nodes = predicate_nodes.saturating_add(recovered_predicate_node_bound(carried)?);
+    if action_polls.saturating_add(next_polls) > MAX_POLLS || next_nodes > 4_000_000 {
+        return Err(error(ErrorCode::BudgetExceeded, "recovered forecast exceeds its shared observation-work bound"));
+    }
+    let observation_context = OperationContext { anchor: fork.snapshot().anchor(), ..context.clone() };
+    observation_context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+    let next = recovered_step_progress::observe(fork.snapshot(), carried)?;
+    *carried = next;
+    *recovered_polls = next_polls;
+    *predicate_nodes = next_nodes;
+    Ok(())
 }
 
 fn observe(
@@ -105,7 +163,7 @@ fn observe(
     goal: PredicateTruth,
     stage: PredicateTruth,
 ) -> Result<Outcome> {
-    observe_with_recovery(fork, original, reserve, goal, stage, None)
+    observe_with_recovery(fork, original, reserve, goal, stage, None, &[])
 }
 
 fn observe_with_recovery<'a>(
@@ -115,22 +173,29 @@ fn observe_with_recovery<'a>(
     goal: PredicateTruth,
     stage: PredicateTruth,
     recovered: impl IntoIterator<Item = &'a RecoveredOriginal>,
+    carried: &[CarriedStep],
 ) -> Result<Outcome> {
     let mut steps = Vec::new();
     let mut original_recovery = None;
+    let mut verified = 0;
+    let mut terminal = 0;
+    let mut active = 0;
+    let mut unknown = 0;
+    let mut failed = false;
     for recovered in recovered {
-        steps.extend(recovered.rows(fork.snapshot())?);
+        for row in recovered.rows(fork.snapshot(), carried)? {
+            verified += usize::from(row.state == CommitState::Verified);
+            terminal += usize::from(row.state.is_terminal());
+            active += usize::from(matches!(row.work, EffectWorkState::Active { .. }));
+            unknown += usize::from(matches!(row.work, EffectWorkState::Unknown { .. }));
+            failed |= row.state == CommitState::Failed;
+            steps.push(row.value);
+        }
         if recovered.original() == original.actual {
             original_recovery = Some(recovered);
         }
     }
-    let recovered_count = steps.len();
-    let total = original.actions.len().saturating_add(recovered_count);
-    let mut verified = recovered_count;
-    let mut terminal = recovered_count;
-    let mut active = 0;
-    let mut unknown = 0;
-    let mut failed = false;
+    let total = original.actions.len().saturating_add(steps.len());
     let mut cancelled = false;
     let mut cancelling = false;
     let mut indeterminate = false;
@@ -240,6 +305,7 @@ pub(super) fn forecast(
     horizon_ticks: u64,
     started: Instant,
     mut projects: Option<Vec<Project>>,
+    mut carried: Vec<CarriedStep>,
     mut inspect: impl FnMut(&WorldSnapshot, u64, u64) -> Result<()>,
     mut evaluate: impl FnMut(Digest32, &WorldSnapshot) -> Result<(PredicateTruth, PredicateTruth)>,
 ) -> Result<Value> {
@@ -259,6 +325,8 @@ pub(super) fn forecast(
     if horizon_ticks > context.budget.max_game_ticks
         || tracked.len() > MAX_TRACKED
         || tracked.len() > context.budget.max_entities as usize
+        || carried.len() > MAX_TRACKED
+        || carried.len() > context.budget.max_entities as usize
     {
         return Err(error(
             ErrorCode::BudgetExceeded,
@@ -322,6 +390,36 @@ pub(super) fn forecast(
             "joint project sources differ from selected original identities",
         ));
     }
+    let tracked_recovered_steps = carried.len();
+    if !carried.is_empty() && projects.is_none() {
+        return Err(error(ErrorCode::InvalidRequest, "recovered observation prediction requires complete_project"));
+    }
+    let mut recovered_keys = BTreeSet::new();
+    for row in &carried {
+        let step = row.work_step.as_ref().ok_or_else(|| {
+            error(ErrorCode::Conflict, "recovered progression lost its sealed step")
+        })?;
+        if row.step != Some(step.id)
+            || !recovered_keys.insert((row.plan_digest, step.id))
+            || row.state != "dispatched"
+            || row.recorded_state != "dispatched"
+            || row.observation_error.is_some()
+            || row.monitor.as_ref().is_none_or(|monitor| {
+                !matches!(monitor.status(), Some(dfmcp_intent::ObligationStatus::Active { .. }))
+            })
+            || !matches!(dfmcp_intent::inspect_effect_work(
+                adapter.snapshot(), &step.action, &step.idempotency_key, true,
+            )?, EffectWorkState::Active { .. } | EffectWorkState::Quiescent { .. })
+        {
+            return Err(error(ErrorCode::Conflict, "recovered forecast requires unique admitted already-dispatched monitors"));
+        }
+    }
+    recovered_predicate_node_bound(&carried)?;
+    let selected_recovered: BTreeSet<_> = projects.as_ref().into_iter()
+        .flatten().flat_map(Project::recovered_originals)
+        .map(RecoveredOriginal::original).collect();
+    let recovered_peer_steps = carried.iter()
+        .filter(|row| !selected_recovered.contains(&row.plan_digest)).count();
     let mut all_actions = selected.clone();
     for original in originals {
         all_actions.extend(&original.actions);
@@ -333,7 +431,7 @@ pub(super) fn forecast(
         for project in projects {
             all_actions.extend(project.retained_actions());
         }
-        let complete_steps = all_actions.len().saturating_add(recovered_steps);
+        let complete_steps = all_actions.len().saturating_add(recovered_steps).saturating_add(recovered_peer_steps);
         if complete_steps > MAX_TRACKED
             || complete_steps > context.budget.max_actions as usize
             || complete_steps > context.budget.max_entities as usize
@@ -358,6 +456,8 @@ pub(super) fn forecast(
         .collect();
     let mut slices = 0u64;
     let mut polls = 0u64;
+    let mut recovered_polls = 0u64;
+    let mut recovered_predicate_nodes = 0u64;
     let mut dispatches = 0u32;
     let mut first_poll = true;
     let mut pending = tracked.to_vec();
@@ -383,7 +483,7 @@ pub(super) fn forecast(
             }
             outcomes.push(match &projects {
                 Some(projects) => {
-                    projects[index].outcome(&fork, original, samples[index], goal, stage)?
+                    projects[index].outcome(&fork, original, samples[index], goal, stage, &carried)?
                 }
                 None => observe(&fork, original, samples[index], goal, stage)?,
             });
@@ -416,7 +516,7 @@ pub(super) fn forecast(
                         else {
                             return Err(failure);
                         };
-                        if !tracked_active_producer(&fork, &pending, producer)? {
+                        if !tracked_active_producer(&fork, &pending, &carried, producer)? {
                             return Err(failure);
                         }
                         // The compiler proved an exact active output conflict,
@@ -440,10 +540,12 @@ pub(super) fn forecast(
             let next_actions = modeled_actions.saturating_add(added_actions);
             if (all_actions.len() as u64)
                 .saturating_add(recovered_steps as u64)
+                .saturating_add(recovered_peer_steps as u64)
                 .saturating_add(added_actions)
                 > u64::from(context.budget.max_actions).min(MAX_TRACKED as u64)
                 || (all_actions.len() as u64)
                     .saturating_add(recovered_steps as u64)
+                .saturating_add(recovered_peer_steps as u64)
                     .saturating_add(added_actions)
                     > u64::from(context.budget.max_entities)
             {
@@ -492,6 +594,10 @@ pub(super) fn forecast(
             modeled_plan_bytes = next_bytes;
             modeled_stages += 1;
             inspect(fork.snapshot(), modeled_actions, modeled_plan_bytes)?;
+            // Real commit publication observes carried work at this same tick.
+            // Failure and identity evidence cannot wait for a later poll slice.
+            observe_recovered(&fork, &mut carried, context, started, polls,
+                &mut recovered_polls, &mut recovered_predicate_nodes)?;
             first_poll = true;
             continue;
         }
@@ -507,7 +613,12 @@ pub(super) fn forecast(
         if !first_poll && fork.snapshot().paused {
             break (outcomes, "paused");
         }
-        if slices >= MAX_SLICES || polls.saturating_add(pending.len() as u64) > MAX_POLLS {
+        let recovered_pending = carried.iter().filter(|row| !row.is_final()).count() as u64;
+        if slices >= MAX_SLICES
+            || polls.saturating_add(recovered_polls)
+                .saturating_add(pending.len() as u64)
+                .saturating_add(recovered_pending) > MAX_POLLS
+        {
             return Err(error(
                 ErrorCode::BudgetExceeded,
                 "joint forecast exceeds its complete simulation-work bound",
@@ -515,6 +626,9 @@ pub(super) fn forecast(
         }
         let now = fork.snapshot().tick.0;
         let mut interval = 100.min(horizon - now);
+        if let Some(ceiling) = recovered_step_progress::ceiling(fork.snapshot().tick, &carried) {
+            interval = interval.min(ceiling);
+        }
         for original in originals {
             if let Some(until) = original.reserve_until
                 && until > now
@@ -592,9 +706,11 @@ pub(super) fn forecast(
                 inspect(fork.snapshot(), modeled_actions, modeled_plan_bytes)?;
             }
         }
+        inspect(fork.snapshot(), modeled_actions, modeled_plan_bytes)?;
+        observe_recovered(&fork, &mut carried, context, started, polls,
+            &mut recovered_polls, &mut recovered_predicate_nodes)?;
         slices += 1;
         first_poll = false;
-        inspect(fork.snapshot(), modeled_actions, modeled_plan_bytes)?;
         // Match the foreground owner's pruning of fully drained originals.
         // Their immutable receipts remain available to goal inspection, while
         // a late reserve horizon does not repeatedly poll already quiet work.
@@ -625,6 +741,10 @@ pub(super) fn forecast(
         "completion_rule":"all selected original goals true, exact reserve endpoints satisfied, original action proofs Verified and original physical work quiet at the same predicted frontier",
         "forecast_work":{"source_forks":1,"tracked_actions":tracked.len(),
             "simulation_slices":slices,"action_polls":polls,"deferred_dispatches":dispatches,
+            "tracked_recovered_steps":tracked_recovered_steps,
+            "competing_recovered_steps":recovered_peer_steps,
+            "recovered_observation_polls":recovered_polls,
+            "recovered_predicate_node_visits_bound":recovered_predicate_nodes,
             "simulated_game_ticks":fork.snapshot().tick.0-context.anchor.tick.0,
             "actual_game_ticks_advanced":0,"maximum_slices":MAX_SLICES,"maximum_polls":MAX_POLLS},
         "effect_evidence":false,"changes_action_deadlines":false,
@@ -671,14 +791,18 @@ pub(super) fn forecast(
             "already committed continuations retain their actual receipts and deadlines; each eligible selected root receives a separately reviewed hypothetical continuation only after its admitted chain is Verified and quiet; unselected roots receive no new stages"
         );
         if recovered_steps > 0 {
-            report["forecast_work"]["verified_recovered_original_steps"] = json!(recovered_steps);
+            report["forecast_work"]["recovered_original_steps"] = json!(recovered_steps);
+            report["forecast_work"]["verified_recovered_original_steps"] = json!(
+                projects.iter().flat_map(Project::recovered_originals)
+                    .map(RecoveredOriginal::historical_verified_steps).sum::<usize>()
+            );
             report["forecast_work"]["verified_recovered_continuation_steps"] = json!(
-                projects.iter().map(Project::recovered_retained_steps).sum::<usize>()
+                projects.iter().map(Project::historical_recovered_retained_steps).sum::<usize>()
             );
             report["assumptions"].as_array_mut().ok_or_else(|| {
                 error(ErrorCode::InternalInvariantViolation, "forecast assumptions disappeared")
             })?.push(json!(
-                "recovered original steps were already Verified and physically quiet before the forecast; immutable historical proof is retained without restoring handles or sampling old obligations"
+                "historical recovered proof stays immutable; unfinished tips use only cloned authenticated observation monitors with original deadlines and actual recovery stability; all carried peers share the real wait cadence; no dispatch handles or canonical proofs are restored"
             ));
         }
     }
