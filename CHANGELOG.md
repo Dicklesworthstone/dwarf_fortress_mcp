@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Reopen acknowledged clocked stock portfolios
+
+- Remove the remaining configuration gate that rejected an explicitly retained
+  original portfolio whenever order or inventory clocks were configured.
+  Existing native identity, family, source-byte and authority checks still apply.
+- Require every original clock floor to fit the retained observation floor,
+  and require that observation to fit the bounded execution frontier, before
+  the parent accepts a checkpoint.
+- Add thirteen actual configuration-entry subprocess scenarios and an inactive
+  clock/global-floor regression. Configuration scenarios remain unexecuted.
+- All seventeen exact-source continuity unit tests pass in a narrow latest-nightly
+  component harness; all fourteen Rust files in this and the recovered-forecast
+  increment pass syntax parsing. This is not full MCP or native qualification.
+- The exact forecast commit passes repository integrity and 6,002 static checks.
+  Its larger component build stopped at the memory guard before forecast tests
+  executed; no forecast test pass is claimed.
+
 ## Unreleased — Forecast recovered project continuation chains
 
 - Extend `forecast_scope: "complete_project"` to bounded committed chains with

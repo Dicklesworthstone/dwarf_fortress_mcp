@@ -1,5 +1,53 @@
 # Implementation Status
 
+## Unreleased — Complete the acknowledged clocked-portfolio reopen path
+
+An obsolete configuration rejection still prevented an explicitly retained
+production portfolio from reopening whenever either clock family was configured,
+despite the complete per-order recovery implementation. That gate is removed.
+The normal checks for environment opt-ins, exact source configuration bytes,
+parent/runtime authority, first-order aliases, complete configured families and
+native clock identities remain. Reopening configuration does not grant labor,
+production or clock effect authority.
+
+The parent now rejects clocked-portfolio checkpoints unless every slot's clock
+authority floor is no greater than the shared observation floor, the observation
+floor is no greater than the retained execution frontier, and both shared floors
+fit the native tick range. This matches child recovery validation and prevents
+retaining a checkpoint the child could not later reopen. Scalar and clockless
+custody retain their existing behavior.
+
+One actual configuration-entry subprocess regression contains six accepted
+four-slot clock/layout combinations and seven rejected identity, family, opt-in
+or authority cases. These configuration scenarios are authored and syntax-checked
+but have not executed. The added continuity regression checks every slot and
+clock family, missing or invalid shared floors, reversed bounds and coherent
+joint advancement.
+
+Validation is deliberately scoped:
+
+- All 17 tests in the complete staged continuity module, including the new
+  floor regression, pass with nightly 2026-11-23 in a small component harness.
+  The tested source blob is `41269d635839617c835ced54bd2174998059bd39`.
+  The harness uses actual `dfmcp-core`, exact locked dependency identities,
+  the production error helper and the exact native maximum-tick declaration;
+  it does not compile the full native adapter or configuration facade.
+- All 11 Rust files in forecast commit `16fce791fca2c8619753d12a67864bb50bd48a6e`
+  and all three files in this increment pass latest-nightly rustfmt syntax
+  parsing with output discarded. No source formatting or typecheck is implied.
+- That exact forecast commit passes repository integrity and 6,002 static
+  repository checks across 3,263 files.
+- The one serial forecast component build stopped safely while compiling the
+  adapter when available memory fell below 2 GiB. No forecast tests executed.
+  Full MCP, native dispatch, live campaigns and production admission remain
+  unqualified by this work.
+
+Independent implementation reviews found no remaining source-level blocker.
+The pre-plan multi-order clock-initialization restriction remains unchanged.
+
+Owners: `df-native-stock-target-3m9` and `dfmcp-reality-wiring-proof-4bf.14`
+(both in progress).
+
 ## Unreleased — Forecast complete recovered continuation chains
 
 Complete-project laboratory forecasts now accept ordinary production,

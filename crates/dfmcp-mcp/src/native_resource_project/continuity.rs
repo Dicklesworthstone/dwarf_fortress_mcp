@@ -281,6 +281,22 @@ fn portfolio_slots(reference: &Value) -> Result<Option<PortfolioReference>> {
     {
         return Err(portfolio_conflict());
     }
+    // Keep the parent checkpoint reopenable by the child: every original
+    // clock floor is covered by the shared observation and execution floors.
+    let observation_floor = reference
+        .get("observation_tick_floor")
+        .and_then(Value::as_u64)
+        .filter(|floor| *floor <= dfmcp_adapter::bounded_run::MAX_NATIVE_TICK)
+        .ok_or_else(portfolio_conflict)?;
+    if reference
+        .pointer("/recovery/frontier/authority_tick_floor")
+        .and_then(Value::as_u64)
+        .is_none_or(|floor| {
+            floor < observation_floor || floor > dfmcp_adapter::bounded_run::MAX_NATIVE_TICK
+        })
+    {
+        return Err(portfolio_conflict());
+    }
     let clocks: Vec<PortfolioClockSlot> =
         serde_json::from_value(raw_clocks.clone()).map_err(|_| portfolio_conflict())?;
     let first_clock = clocks.first().ok_or_else(portfolio_conflict)?;
@@ -305,8 +321,7 @@ fn portfolio_slots(reference: &Value) -> Result<Option<PortfolioReference>> {
                     if id == &pin.journal_id
                         && canonical_digest(&pin.journal_id)
                         && canonical_digest(&pin.head)
-                        && pin.authority_tick_floor
-                            <= dfmcp_adapter::bounded_run::MAX_NATIVE_TICK
+                        && pin.authority_tick_floor <= observation_floor
                         && identities.insert(pin.journal_id.clone()) => {}
                 _ => return Err(portfolio_conflict()),
             }
@@ -763,6 +778,60 @@ mod tests {
                 }
             }
         }
+        Ok(())
+    }
+
+
+    #[test]
+    fn portfolio_clock_floors_must_fit_the_retained_observation_and_execution_frontier() -> Result<()> {
+        let before = portfolio_with_clocks(1, 4, true, true);
+        same_original(&before, &before)?;
+        for index in 0..4 {
+            for family in ["clock", "inventory_clock"] {
+                let mut invalid = before.clone();
+                invalid["portfolio_clocks"][index][family]["authority_tick_floor"] = json!(151);
+                mirror_first_pin(&mut invalid, index, family);
+                assert!(
+                    same_original(&invalid, &invalid).is_err(),
+                    "clock exceeds retained observation: {index}/{family}"
+                );
+            }
+        }
+        let edits: [fn(&mut Value); 6] = [
+            |v| v["observation_tick_floor"] = Value::Null,
+            |v| v["observation_tick_floor"] = json!(151),
+            |v| v["observation_tick_floor"] =
+                json!(dfmcp_adapter::bounded_run::MAX_NATIVE_TICK + 1),
+            |v| v["recovery"]["frontier"]["authority_tick_floor"] = Value::Null,
+            |v| v["recovery"]["frontier"]["authority_tick_floor"] = json!(149),
+            |v| v["recovery"]["frontier"]["authority_tick_floor"] =
+                json!(dfmcp_adapter::bounded_run::MAX_NATIVE_TICK + 1),
+        ];
+        for (index, edit) in edits.into_iter().enumerate() {
+            let mut invalid = before.clone();
+            edit(&mut invalid);
+            assert!(same_original(&invalid, &invalid).is_err(), "global floor {index}");
+        }
+        for field in ["observation_tick_floor", "frontier"] {
+            let mut invalid = before.clone();
+            if field == "frontier" {
+                invalid["recovery"]
+                    .as_object_mut()
+                    .ok_or_else(portfolio_conflict)?
+                    .remove(field);
+            } else {
+                invalid
+                    .as_object_mut()
+                    .ok_or_else(portfolio_conflict)?
+                    .remove(field);
+            }
+            assert!(same_original(&invalid, &invalid).is_err(), "missing {field}");
+        }
+        let mut descendant = before.clone();
+        descendant["portfolio_clocks"][3]["inventory_clock"]["authority_tick_floor"] = json!(200);
+        descendant["observation_tick_floor"] = json!(200);
+        descendant["recovery"]["frontier"]["authority_tick_floor"] = json!(200);
+        same_original(&before, &descendant)?;
         Ok(())
     }
 

@@ -1081,15 +1081,6 @@ impl Config {
         let raw = family_environment()?;
         let parsed =
             parse_with_project_sources(&raw[0], handoff, manager_handoff, owns_manager, true)?;
-        if parsed
-            .2
-            .is_some_and(|recovery| recovery.portfolio.is_some())
-            && (parsed.3.is_some() || parsed.4.is_some())
-        {
-            return Err(denied(
-                "project portfolio recovery cannot adopt production clock custody",
-            ));
-        }
         let conditional = (
             parsed.3.is_some(),
             parsed.4.is_some(),

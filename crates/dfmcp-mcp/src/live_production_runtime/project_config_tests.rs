@@ -218,3 +218,195 @@ fn workshop_preflight_joins_common_fortress_without_equating_family_generations(
     }
     Ok(())
 }
+
+fn acknowledged_portfolio_policies(
+    first: u32,
+    clock: bool,
+    inventory_clock: bool,
+) -> Result<[Value; 3]> {
+    let mut values = policies();
+    for value in &mut values {
+        value["initialize"] = json!(false);
+    }
+    values[0]
+        .as_object_mut()
+        .ok_or_else(|| invalid("test production policy is not an object"))?
+        .remove("input_supply");
+    values[1]["journal_id"] = json!(Digest32::of_bytes(b"retained workforce journal").to_hex());
+    let id = |family: &str, step: u32| {
+        Digest32::of_bytes(format!("retained project {family} {step}").as_bytes()).to_hex()
+    };
+    for (family, enabled, generation) in [
+        ("clock", clock, 71),
+        ("inventory_clock", inventory_clock, 81),
+    ] {
+        for index in [0, 2] {
+            values[index][family] = if enabled {
+                json!({"generation":generation, "journal_id":id(family, first)})
+            } else {
+                Value::Null
+            };
+        }
+    }
+    let workforce =
+        serde_json::from_value::<workforce::policy::SourceAcceptance>(values[1]["sources"].clone())
+            .map_err(|_| invalid("test workforce source decoding failed"))?;
+    let seal = Digest32::of_bytes(b"externally acknowledged project original").to_hex();
+    let slots: Vec<_> = (0..4)
+        .map(|index| {
+            let step = first + index;
+            json!({
+                "step_id":step, "goal_history_present":index % 2 == 1,
+                "clock_journal_id":clock.then(|| id("clock", step)),
+                "inventory_clock_journal_id":inventory_clock.then(|| id("inventory_clock", step)),
+            })
+        })
+        .collect();
+    values[0]["recovery"] = json!({
+        "plan_digest":seal, "object_digest":seal, "identity_digest":seal,
+        "anchor":{"fortress_id":workforce.fortress().get().to_string(),
+            "epoch":0, "sequence":2, "tick":100, "state_hash":seal},
+        "frontier":{"journal_id":seal, "head":seal, "authority_tick_floor":150},
+        "goal_history_present":false,
+        "clock_journal_id":slots[0]["clock_journal_id"],
+        "inventory_clock_journal_id":slots[0]["inventory_clock_journal_id"],
+        "portfolio":slots,
+    });
+    Ok(values)
+}
+
+#[test]
+fn project_configuration_reopens_acknowledged_clocked_portfolios_without_effect_authority() -> Result<()>
+{
+    const CHILD: &str = "PROJECT_CONFIG_PORTFOLIO_REOPEN_CASE";
+    const CHECKED: &str = "project-config-portfolio-reopen-checked";
+    if let Ok(case) = std::env::var(CHILD) {
+        let refuse_parent = case == "parent-refusal";
+        let parent_guard: Arc<dyn Fn() -> Result<()> + Send + Sync> = Arc::new(move || {
+            if refuse_parent {
+                Err(denied("test parent authority withdrawn"))
+            } else {
+                Ok(())
+            }
+        });
+        let runtime_check: fn() -> Result<()> = if case == "runtime-refusal" {
+            || Err(denied("test runtime cancelled"))
+        } else {
+            || Ok(())
+        };
+        // Exercise the configuration entry point itself: parsing the recovery
+        // alone previously passed while this later seam refused every clocked
+        // portfolio. No live owner, journal or native source is opened here.
+        let configured =
+            Config::project_configuration(parent_guard, runtime_check, None, None, false);
+        if case == "accepted" {
+            let (config, _) = configured?;
+            config.current()?;
+            assert!(!config.initialize);
+            let recovery = config
+                .recovery
+                .ok_or_else(|| invalid("test acknowledged recovery missing"))?;
+            let slots = recovery
+                .portfolio
+                .ok_or_else(|| invalid("test acknowledged portfolio missing"))?;
+            assert_eq!(slots.into_iter().flatten().count(), 4);
+            assert_eq!(
+                recovery.clock_journal_id,
+                config.clock.and_then(|clock| clock.journal_id)
+            );
+            assert_eq!(
+                recovery.inventory_clock_journal_id,
+                config.inventory_clock.and_then(|clock| clock.journal_id)
+            );
+            assert!(!workforce::Shell::labor_enabled(&config.workforce));
+            assert!(!orders::Shell::production_enabled(&config.orders));
+            assert!(!orders::Shell::clock_enabled(&config.orders));
+            assert!(!orders::Shell::inventory_clock_enabled(&config.orders));
+        } else {
+            assert!(configured.is_err(), "invalid reopen accepted: {case}");
+        }
+        println!("{CHECKED}");
+        return Ok(());
+    }
+
+    let full_name = format!(
+        "{}::project_configuration_reopens_acknowledged_clocked_portfolios_without_effect_authority",
+        module_path!()
+    );
+    let (_, test_name) = full_name
+        .split_once("::")
+        .ok_or_else(|| invalid("test project configuration name missing"))?;
+    let executable =
+        std::env::current_exe().map_err(|_| invalid("test executable path unavailable"))?;
+    let run = |case: &str, values: [Value; 3]| -> Result<()> {
+        let raw = raw(&values);
+        let mut command = std::process::Command::new(&executable);
+        command.args(["--exact", test_name, "--nocapture"]);
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("DFMCP_") {
+                command.env_remove(key);
+            }
+        }
+        command
+            .env(OPT_IN, "1")
+            .env("DFMCP_ALLOW_UNADMITTED_SEMANTIC_WORKFORCE", "1")
+            .env("DFMCP_ALLOW_UNADMITTED_SEMANTIC_WORK_ORDERS", "1")
+            .env(CONFIG, &raw[0])
+            .env(WORKFORCE_CONFIG, &raw[1])
+            .env(ORDER_CONFIG, &raw[2])
+            .env(CHILD, case);
+        if case == "missing-opt-in" {
+            command.env_remove(OPT_IN);
+        }
+        if case == "invalid-effect" {
+            command.env("DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK", "yes");
+        }
+        let output = command
+            .output()
+            .map_err(|_| invalid("test project configuration subprocess failed"))?;
+        assert!(
+            output.status.success(),
+            "project configuration {case}: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains(CHECKED));
+        Ok(())
+    };
+    for first in [0, 1] {
+        for (clock, inventory_clock) in [(true, false), (false, true), (true, true)] {
+            run(
+                "accepted",
+                acknowledged_portfolio_policies(first, clock, inventory_clock)?,
+            )?;
+        }
+    }
+    let retained = acknowledged_portfolio_policies(1, true, true)?;
+    for case in [
+        "first-alias",
+        "native-identity",
+        "inactive-family",
+        "missing-opt-in",
+        "invalid-effect",
+        "parent-refusal",
+        "runtime-refusal",
+    ] {
+        let mut invalid = retained.clone();
+        match case {
+            "first-alias" => {
+                invalid[0]["recovery"]["clock_journal_id"] =
+                    json!(Digest32::of_bytes(b"foreign first-slot alias").to_hex());
+            }
+            "native-identity" => {
+                invalid[2]["clock"]["journal_id"] =
+                    json!(Digest32::of_bytes(b"foreign native clock").to_hex());
+            }
+            "inactive-family" => {
+                invalid[0]["recovery"]["portfolio"][3]["inventory_clock_journal_id"] = Value::Null;
+            }
+            _ => {}
+        }
+        run(case, invalid)?;
+    }
+    Ok(())
+}
