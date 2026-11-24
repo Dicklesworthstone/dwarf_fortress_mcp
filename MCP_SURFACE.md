@@ -420,17 +420,33 @@ and retains current authority and Agent Turn anchors separately from historical
 evidence. It creates no watch or game effect and cannot prove continuous truth
 between observations. See [retained condition replay](docs/LAB_CONDITION_REPLAY.md).
 
-Laboratory `forecast_originals` predicts one to eight selected live committed
+Laboratory `forecast_originals` predicts one to eight selected committed
 originals together on one discarded current world. Its `plan_digests` and
 `horizon_ticks` request shares finite workers, materials and consumption while
-preserving real action identities, deadlines, stability, pause and exact reserve
-endpoints. The default `current_stage` scope prepares no successor stages.
+preserving original identities, deadlines, stability, pause and exact reserve
+endpoints. The default `current_stage` scope accepts current-session live
+original receipts and prepares no successor stages.
 
 Optional `forecast_scope: "complete_project"` selects ordinary production,
-provisioned-room or connected-room roots and includes each exact live committed
+provisioned-room or connected-room roots and includes each exact committed
 continuation chain, up to eight committed stages including its root. Verified,
 physically quiet predecessors retain their receipts; the latest stage may still
 be active. Up to three further hypothetical stages can follow on the same world.
+An authenticated durable recovered prefix can precede current-session live
+continuations. Its predecessors must be Verified and quiet; a final recovered
+stage can instead retain exact already-dispatched work and its original active
+temporal monitor. Never-dispatched, unknown, failed or cancelled recovered work
+refuses. An unfinished recovered predecessor cannot be skipped.
+
+Both forecast scopes clone authenticated unfinished recovered monitors,
+including competing recovered peers, and follow the real wait cadence, original
+absolute deadlines and retained post-recovery stability. They restore no
+ActionIds or dispatch authority. Historical proof and predicted proof have
+distinct anchors; predicted proof remains noncanonical. A zero-tick horizon does
+not poll work. Responses use `dfmcp.lab-original-forecast/1` for current-stage
+results, `/2` for live complete projects, `/3` for historical recovered projects,
+and `/4` when selected recovered work is unfinished at admission.
+
 Root, retained and future actions remain distinct, every real deadline stays
 unchanged, and each pursuit keeps its own exact reserve sample. Complete source,
 custody, current authority and cumulative work/output bounds apply before the

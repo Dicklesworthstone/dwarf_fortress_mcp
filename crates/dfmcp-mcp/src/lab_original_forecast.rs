@@ -501,29 +501,31 @@ pub(super) fn execute(
     let mut carried_custody_bytes = 0u64;
     let mut carried_custody_records = 0u64;
     let mut additional_carried_bytes = 0u64;
-    if request.forecast_scope == Scope::CompleteProject {
-        let carried_originals: BTreeSet<_> = session.carried.iter()
-            .filter(|row| !row.is_final()).map(|row| row.plan_digest).collect();
-        for digest in carried_originals {
-            remaining(context, started)?;
-            let owner = session.objectives.iter().find(|original| original.plan_digest == digest)
-                .ok_or_else(|| invalid("competing recovered work lost its exact original owner"))?;
-            let (rows, custody_bytes) = owner.forecast_carried_progress(session)?;
-            if !recovered_digests.contains(&digest) {
-                carried_custody_bytes = carried_custody_bytes.saturating_add(custody_bytes as u64);
-                carried_custody_records = carried_custody_records.saturating_add(
-                    owner.resource_plan().map_or(0, |plan| plan.steps.len()) as u64,
-                );
+    // Every real foreground wait includes recovered peer cadence, including
+    // when the selected original still owns live action handles. Admit the
+    // same passive monitors for both scopes; selection remains live-only for
+    // current_stage and never gains recovered dispatch authority.
+    let carried_originals: BTreeSet<_> = session.carried.iter()
+        .filter(|row| !row.is_final()).map(|row| row.plan_digest).collect();
+    for digest in carried_originals {
+        remaining(context, started)?;
+        let owner = session.objectives.iter().find(|original| original.plan_digest == digest)
+            .ok_or_else(|| invalid("competing recovered work lost its exact original owner"))?;
+        let (rows, custody_bytes) = owner.forecast_carried_progress(session)?;
+        if !recovered_digests.contains(&digest) {
+            carried_custody_bytes = carried_custody_bytes.saturating_add(custody_bytes as u64);
+            carried_custody_records = carried_custody_records.saturating_add(
+                owner.resource_plan().map_or(0, |plan| plan.steps.len()) as u64,
+            );
+        }
+        if recovered_goals.is_empty() {
+            for row in &rows {
+                additional_carried_bytes = additional_carried_bytes.saturating_add(row.to_json().to_string().len() as u64);
             }
-            if recovered_goals.is_empty() {
-                for row in &rows {
-                    additional_carried_bytes = additional_carried_bytes.saturating_add(row.to_json().to_string().len() as u64);
-                }
-            }
-            carried_progress.extend(rows);
-            if carried_progress.len() > context.budget.max_actions as usize {
-                return Err(exhausted("competing recovered monitors exceed the shared action budget"));
-            }
+        }
+        carried_progress.extend(rows);
+        if carried_progress.len() > context.budget.max_actions as usize {
+            return Err(exhausted("competing recovered monitors exceed the shared action budget"));
         }
     }
     let recovered_peer_steps = carried_progress.iter()

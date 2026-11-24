@@ -50,7 +50,7 @@
     "recovered_reserve_endpoint": "existing exact retained endpoint snapshot must already be present in bounded session history; otherwise refuse without hydration or replacing its first truth; an explicit selected wait may load previously published endpoint evidence"
   },
   "progression": {
-    "tracked": "all current-session open actions in original commit order; complete_project also observes all independently authenticated unfinished carried peers",
+    "tracked": "all current-session open actions in original commit order; both scopes also observe all independently authenticated unfinished carried peers",
     "other_owners": "already-dispatched physical work evolves; their deferred actions are not polled",
     "first_round": "zero modeled ticks when horizon positive",
     "zero_horizon": "no polls or dispatch",
@@ -74,7 +74,11 @@
     "retained_stages": "reuse exact live receipts/runtimes or recovered original custody without preparing or recommitting; predecessors already Verified and physically quiet; final live stage may be prepared/active, final recovered stage must have authenticated already-dispatched temporal monitors",
     "recovered_originals": "immutable historical census and original proofs; active monitor clones use the shared real observation transition, original deadline and retained post-recovery stability; no ActionIds, restored dispatch or reconstructed monitors",
     "recovered_observation_after_hypothetical_commit": true,
-    "same_tick_reads_add_stability": false
+    "same_tick_reads_add_stability": false,
+    "recovered_peer_scopes": [
+      "current_stage",
+      "complete_project"
+    ]
   },
   "outcome": {
     "group_completion": "all selected original goals true, required exact reserve samples true, original actions Verified and physical work quiet at one same modeled frontier",
@@ -126,7 +130,7 @@
       "accepted recovery frontier",
       "last observation within accepted recovery and current source"
     ],
-    "recovered_peer_admission": "every unfinished carried peer passes full original custody and must have an authentic active temporal monitor; missing, interrupted, unknown, failed or never-dispatched work refuses the optional forecast"
+    "recovered_peer_admission": "both scopes: every unfinished carried peer passes full original custody and must have an authentic active temporal monitor; missing, interrupted, unknown, failed or never-dispatched work refuses the optional forecast"
   },
   "bounds": {
     "max_rounds": 4096,

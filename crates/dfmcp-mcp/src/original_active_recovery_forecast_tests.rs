@@ -360,3 +360,118 @@ fn active_recovered_forecast_rechecks_observe_expiry_before_private_proof() -> R
     assert!(matches!(refused, Err(failure) if failure.code == ErrorCode::CapabilityDenied));
     assert_eq!(format!("{adapter:?}|{carried:?}"), before);
     Ok(())
+}
+
+#[test]
+fn current_stage_forecast_preserves_recovered_peer_cadence_and_shared_admission() -> Result<()> {
+    let mut previous = fixture()?;
+    let (peer_plan, peer, _) =
+        custom_original(&mut previous, 816_610, "CHAIR", 10_000, 45, 100)?;
+    previous.advance_ticks(2_000)?;
+    let mut adapter = MemoryAdapter::recovered(previous.snapshot().clone())?;
+    let (_, mut carried) = recovered_census(&previous, &adapter, &peer_plan, &peer)?;
+    let (plan, original, _) =
+        custom_original(&mut adapter, 816_611, "BED", 9_000, 70, 3)?;
+    adapter.advance_ticks(2_000)?;
+    carried = recovered_step_progress::observe(adapter.snapshot(), &carried)?;
+    assert!(carried.iter().all(|row| row.state == "dispatched" && row.work_state.is_quiescent()));
+    for action in &original.actions {
+        assert!(adapter.action_work_state(*action)?.is_quiescent());
+        assert!(adapter.action_receipt(*action).is_some_and(|receipt| {
+            matches!(receipt.state, CommitState::Verified | CommitState::AppliedAwaitingVerification)
+        }));
+    }
+    assert!(original.actions.iter().any(|action| adapter.action_receipt(*action)
+        .is_some_and(|receipt| receipt.state == CommitState::AppliedAwaitingVerification)));
+    let source_tick = adapter.snapshot().tick.0;
+    let before = format!("{adapter:?}|{carried:?}");
+    let ctx = context(&adapter);
+    let predict_stage = |ctx: &OperationContext, peers: Vec<CarriedStep>| {
+        forecast(
+            &adapter,
+            std::slice::from_ref(&original),
+            &original.actions,
+            ctx,
+            4_000,
+            Instant::now(),
+            None,
+            peers,
+            |snapshot, _, _| server::query_budget::admit_sources(&[snapshot], ctx).map(|_| ()),
+            |_, snapshot| {
+                let goal = crate::lab_world::plan_goal_truth(snapshot, &plan)?;
+                Ok((goal, goal))
+            },
+        )
+    };
+    let predicted = predict_stage(&ctx, carried.clone())?;
+    assert_eq!(predicted["all_complete"], true, "{predicted}");
+    assert_eq!(predicted["predicted_frontier_tick"], source_tick + 180);
+    assert_eq!(predicted["forecast_work"]["competing_recovered_steps"], carried.len());
+    assert!(predicted["forecast_work"]["recovered_observation_polls"]
+        .as_u64().is_some_and(|count| count > 0));
+    // Omitting the passive peer used to predict an earlier completion: the
+    // selected obligation samples at 70/140 instead of 90/180 after its first
+    // eligible source-frontier observation. The peer's own proof stays active.
+    let omitted = predict_stage(&ctx, Vec::new())?;
+    assert_eq!(omitted["predicted_frontier_tick"], source_tick + 140);
+    let mut narrow = ctx.clone();
+    narrow.budget.max_actions = u32::try_from(original.actions.len()).map_err(|_| {
+        error(ErrorCode::InternalInvariantViolation, "fixture action count overflow")
+    })?;
+    assert!(matches!(predict_stage(&narrow, carried.clone()),
+        Err(failure) if failure.code == ErrorCode::BudgetExceeded));
+    let mut expires = ctx.clone();
+    expires.grants.iter_mut().find(|grant| grant.capability == Capability::Observe)
+        .ok_or_else(|| error(ErrorCode::InvalidPlan, "fixture Observe grant missing"))?
+        .expires_at_tick = Some(GameTick(source_tick + 150));
+    assert_eq!(predict_stage(&expires, Vec::new())?["all_complete"], true);
+    assert!(matches!(predict_stage(&expires, carried.clone()),
+        Err(failure) if failure.code == ErrorCode::CapabilityDenied));
+    assert_eq!(format!("{adapter:?}|{carried:?}"), before);
+
+    // Compare against the actual foreground owner and shared recovered helper,
+    // not a second implementation of cadence or obligation stability.
+    let mut actual = adapter.clone();
+    let mut observed = carried.clone();
+    let mut actual_context = context(&actual);
+    actual_context.grants.push(CapabilityGrant {
+        capability: Capability::ControlClock,
+        max_risk: RiskTier::Reversible,
+        scope: CapabilityScope {
+            fortress_id: Some(actual.snapshot().fortress_id),
+            ..CapabilityScope::default()
+        },
+        expires_at_tick: None,
+        remaining_uses: None,
+    });
+    let mut progress = server::lab_progress::ForegroundProgress::new(&actual, 4_000, &actual_context)?;
+    let mut pending = original.actions.clone();
+    for _ in 0..20 {
+        let ceiling = recovered_step_progress::ceiling(actual.snapshot().tick, &observed);
+        let Some(slice) = progress.step(&mut actual, &pending, &actual_context, ceiling)? else {
+            break;
+        };
+        observed = recovered_step_progress::observe(actual.snapshot(), &observed)?;
+        let mut unfinished = Vec::new();
+        for action in pending {
+            let receipt = actual.action_receipt(action).ok_or_else(|| {
+                error(ErrorCode::InvalidPlan, "actual original receipt disappeared")
+            })?;
+            if !receipt.state.is_terminal() || !actual.action_work_state(action)?.is_quiescent() {
+                unfinished.push(action);
+            }
+        }
+        pending = unfinished;
+        actual_context.anchor = actual.snapshot().anchor();
+        if pending.is_empty() || slice.finished {
+            break;
+        }
+    }
+    assert!(pending.is_empty());
+    assert!(original.actions.iter().all(|action| actual.action_receipt(*action)
+        .is_some_and(|receipt| receipt.state == CommitState::Verified)));
+    assert!(observed.iter().all(|row| row.state == "dispatched"));
+    assert_eq!(predicted["predicted_frontier_tick"], actual.snapshot().tick.0);
+    assert_eq!(format!("{adapter:?}|{carried:?}"), before);
+    Ok(())
+}

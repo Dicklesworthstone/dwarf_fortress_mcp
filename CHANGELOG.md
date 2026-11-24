@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Preserve recovered-peer cadence in default forecasts
+
+- Make default current-stage forecasts include authenticated unfinished
+  recovered peers in the same private observation schedule as real foreground
+  waiting. A newly committed live original can no longer predict completion
+  early by omitting a recovered peer's cadence.
+- Charge live and recovered work together against source, action, entity and
+  predicate budgets; retain current Observe expiry, original deadlines and
+  exact monitor custody without restoring dispatch handles.
+- Add actual-model scheduling/authority comparisons and a durable public-route
+  regression covering accounting, malformed custody and canonical immutability.
+  Repair the missing closing delimiter in the active-recovery test module.
+- Update the public query description, MCP surface and forecast contract for
+  current-stage peers and authenticated complete-project recovery.
+- Independent source review and Rust syntax parsing pass. The new model/facade
+  tests remain unexecuted; full MCP, native/live and admission evidence is open.
+
 ## Unreleased — Forecast unfinished recovered original projects
 
 - Extend complete-project forecasts to an authenticated already-dispatched

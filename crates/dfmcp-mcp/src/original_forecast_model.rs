@@ -391,9 +391,6 @@ pub(super) fn forecast(
         ));
     }
     let tracked_recovered_steps = carried.len();
-    if !carried.is_empty() && projects.is_none() {
-        return Err(error(ErrorCode::InvalidRequest, "recovered observation prediction requires complete_project"));
-    }
     let mut recovered_keys = BTreeSet::new();
     for row in &carried {
         let step = row.work_step.as_ref().ok_or_else(|| {
@@ -431,16 +428,18 @@ pub(super) fn forecast(
         for project in projects {
             all_actions.extend(project.retained_actions());
         }
-        let complete_steps = all_actions.len().saturating_add(recovered_steps).saturating_add(recovered_peer_steps);
-        if complete_steps > MAX_TRACKED
-            || complete_steps > context.budget.max_actions as usize
-            || complete_steps > context.budget.max_entities as usize
-        {
-            return Err(error(
-                ErrorCode::BudgetExceeded,
-                "joint project exceeds its complete already-committed action budget",
-            ));
-        }
+    }
+    // Recovered peers constrain ordinary current-stage waits as well as full
+    // projects, so their observations share the same complete action domain.
+    let complete_steps = all_actions.len().saturating_add(recovered_steps).saturating_add(recovered_peer_steps);
+    if complete_steps > MAX_TRACKED
+        || complete_steps > context.budget.max_actions as usize
+        || complete_steps > context.budget.max_entities as usize
+    {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "joint forecast exceeds its complete selected and competing action budget",
+        ));
     }
     let mut modeled_actions = 0u64;
     let mut modeled_plan_bytes = 0u64;
@@ -757,6 +756,13 @@ pub(super) fn forecast(
             "predicted anchors, receipts and reserve samples are discarded and confer no evidence or authority"
         ],
     });
+    if tracked_recovered_steps > 0 {
+        report["assumptions"].as_array_mut().ok_or_else(|| {
+            error(ErrorCode::InternalInvariantViolation, "forecast assumptions disappeared")
+        })?.push(json!(
+            "all authenticated unfinished recovered peers constrain the real foreground observation cadence in both scopes; their copied monitors are passive and confer no dispatch authority"
+        ));
+    }
     if let Some(projects) = &projects {
         report["method"] =
             json!("joint_complete_original_projects_on_one_discarded_laboratory_fork");

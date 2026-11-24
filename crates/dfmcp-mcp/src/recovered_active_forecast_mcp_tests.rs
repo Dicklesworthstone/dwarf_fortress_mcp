@@ -154,3 +154,94 @@ fn active_recovered_forecast_refuses_missing_foreign_interrupted_or_undispatched
     assert_eq!(state(&owner)?, before);
     Ok(())
 }
+
+#[test]
+fn current_stage_forecast_admits_recovered_peers_without_recovering_selected_handles()
+-> TestResult {
+    let _serial = crate::test_serial();
+    let _durable = server::serialized_durable_tests();
+    let directory = StateDir::new("current-stage-peer");
+    let first = open_durable("8161509")?;
+    let recovered = production(&first, "CHAIR")?;
+    advance_one(&first)?;
+    directory.restart();
+    drop(first);
+
+    let owner = open_durable("8161509")?;
+    let live = production(&owner, "BED")?;
+    let live_digest = server::selected_plan_wait::parse_digest(&live)?;
+    let (budget, baseline, live_steps) = view(&owner, |session| {
+        assert!(session.commit_receipts.contains_key(&live));
+        let plan = session.objectives.iter()
+            .find(|original| original.plan_digest == live_digest)
+            .and_then(|original| original.resource_plan())
+            .ok_or("live selected plan missing")?;
+        assert!(!session.carried.is_empty());
+        Ok((session.budget, session.carried.clone(), plan.steps.len()))
+    })?;
+    let before = state(&owner)?;
+    let zero = query(&owner, std::slice::from_ref(&live), 0)?;
+    assert_eq!(zero["ok"], true, "{zero}");
+    assert_eq!(zero["schema"], "dfmcp.lab-original-forecast/1");
+    assert!(zero["source_work"]["competing_recovered_custody_records"]
+        .as_u64().is_some_and(|count| count > 0));
+    assert!(zero["source_work"]["competing_recovered_custody_bytes"]
+        .as_u64().is_some_and(|count| count > 0));
+    assert!(zero["source_work"]["recovered_predicate_nodes_per_evaluation"]
+        .as_u64().is_some_and(|count| count > 0));
+    let complete = query(&owner, std::slice::from_ref(&live), 4_000)?;
+    assert_eq!(complete["ok"], true, "{complete}");
+    assert_eq!(complete["prediction"]["all_complete"], true, "{complete}");
+    assert!(complete["prediction"]["forecast_work"]["competing_recovered_steps"]
+        .as_u64().is_some_and(|count| count > 0));
+    assert!(complete["prediction"]["forecast_work"]["recovered_observation_polls"]
+        .as_u64().is_some_and(|count| count > 0));
+    assert_eq!(complete["prediction"]["forecast_work"]["actual_game_ticks_advanced"], 0);
+    assert_eq!(state(&owner)?, before);
+
+    // Peer admission must not expand current_stage selection to originals
+    // whose process-local action handles were lost at the real restart.
+    let refused = query(&owner, std::slice::from_ref(&recovered), 0)?;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(state(&owner)?, before);
+    let inspected_bytes = zero["source_work"]["inspected_canonical_and_custody_bytes"]
+        .as_u64().ok_or("complete current-stage source accounting missing")?;
+    assert_eq!(zero["source_work"]["source_inspections"], 1);
+    assert!(inspected_bytes > 0);
+    for constraint in ["actions", "source_bytes"] {
+        edit(&owner, |session| {
+            session.budget = budget;
+            if constraint == "actions" {
+                session.budget.max_actions = u32::try_from(live_steps)?;
+            } else {
+                session.budget.max_bytes = inspected_bytes - 1;
+            }
+            Ok(())
+        })?;
+        let before = state(&owner)?;
+        let refused = query(&owner, std::slice::from_ref(&live), 0)?;
+        assert_eq!(refused["error"]["code"], "budget_exceeded", "{constraint}: {refused}");
+        assert_eq!(state(&owner)?, before, "{constraint}");
+    }
+    edit(&owner, |session| {
+        session.budget = budget;
+        Ok(())
+    })?;
+
+    // A passive peer still needs the exact admitted recovered monitor. A
+    // forecast may not drop the peer or reconstruct a fresh stability runtime.
+    let mut missing = baseline.clone();
+    let peer = missing.iter_mut().find(|row| row.state == "dispatched" && row.monitor.is_some())
+        .ok_or("active recovered peer missing")?;
+    peer.monitor = None;
+    replace_carried(&owner, missing)?;
+    let before = state(&owner)?;
+    let refused = query(&owner, std::slice::from_ref(&live), 4_000)?;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(state(&owner)?, before);
+    replace_carried(&owner, baseline)?;
+    let before = state(&owner)?;
+    assert_eq!(query(&owner, std::slice::from_ref(&live), 4_000)?["ok"], true);
+    assert_eq!(state(&owner)?, before);
+    Ok(())
+}

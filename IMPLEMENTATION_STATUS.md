@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Default forecasts retain recovered peers' real schedule
+
+A default `current_stage` forecast for a newly committed live original now
+authenticates and clones every unfinished recovered peer in the session.
+Previously, only `complete_project` admitted these monitors even though the
+real foreground owner always clips progression to their cadence and deadlines.
+Both forecast scopes now use that shared observation schedule and charge the
+combined live/recovered action domain before predicting. Recovered selections
+still require `complete_project`; passive peers confer no ActionIds or dispatch
+authority, and prediction changes no canonical world, monitors or proof.
+
+The new actual-model regression compares a live obligation at cadence 70 with
+a recovered peer at cadence 45 against the real ForegroundProgress owner.
+It expects completion after 180 ticks instead of the peerless 140-tick result,
+checks the consequence when Observe expires at 150 ticks, verifies aggregate
+action admission and preserves the original adapter/monitor bytes. A durable
+public-route regression reopens a peer, commits a new live original and checks
+the default /1 response, peer source/predicate accounting, source/action budget
+refusals, missing-monitor refusal and continued live-only selection. The missing
+final delimiter in the preceding active-recovery test module is also repaired.
+
+The public query description, MCP surface and machine/human forecast contracts
+now distinguish both-scope passive peers from recovered complete-project
+selection and its /3-/4 historical/predicted evidence. Independent source review,
+whitespace checks and matching dated-nightly Rust syntax parsing pass for the
+four model/facade implementation and test modules. These are parser/source
+checks, not type checking or execution of the new regressions. A bounded
+`verify.sh` attempt stalled after its initial integrity heading; local
+qualification refused the edited worktree before building. Full model/facade/MCP
+execution, clean qualification and native/live admission remain open.
+
+Owner: `df-lab-joint-original-forecast-c2s` (in progress).
+
 ## Unreleased — Predict unfinished recovered work without restoring dispatch
 
 Complete-project laboratory forecasts now accept an ordinary recovered root

@@ -181,11 +181,18 @@ unselected originals. Their deferred successors can compete for workers and
 stock, change labor or pause the predicted world. Already-dispatched work from
 other owners also evolves in the shared snapshot. Their deferred actions are not
 polled because this session does not own their progression; the response states
-this assumption explicitly. Complete-project forecasts also clone every
-authenticated unfinished recovered monitor held by this session, including
-unselected peers. Those peers constrain the same cadence and consume shared
-observation, action, source and predicate-work budgets. They receive no invented
-successors or restored dispatch handles.
+this assumption explicitly. Both forecast scopes also clone every authenticated
+unfinished recovered monitor held by this session, including unselected peers.
+Those peers constrain the same cadence and consume shared observation, action,
+source and predicate-work budgets. They receive no invented successors or
+restored dispatch handles.
+
+This also applies when a new live original is selected with the default
+`current_stage` scope after durable reopening. Its verification schedule shares
+the recovered peers' cadence and deadlines, just as real foreground waiting
+does. Omitting those peers could predict an eligible stability sample too early.
+The selected original still requires live receipts; this shared progression
+does not admit recovered selections into `current_stage`.
 
 An initial zero-time polling round can release already-ready original
 dependencies. Subsequent slices follow the laboratory foreground wait policy:
