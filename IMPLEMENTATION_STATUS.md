@@ -1,5 +1,30 @@
 # Implementation Status
 
+## Unreleased — Preserve durable store ownership through compaction
+
+Durable laboratory stores now acquire a persistent `store.lock` before
+opening or recovering the journal and retain it for the complete store
+lifetime. A concurrent opener can no longer acquire an obsolete journal inode
+after compaction and recover stale state alongside the current owner.
+Compaction retains its existing journal lock and publication barriers; the
+journal format, record hashes, snapshot encoding and recovery rules are unchanged.
+
+Four deterministic regressions cover the stale-descriptor interleaving,
+ownership before content inspection, existing journal-only lock holders,
+repeated compaction/reopen and refusal of invalid lock paths. Older consumers
+must stop before upgrading because they do not participate in the persistent
+store lock.
+
+The new regressions are source-reviewed but unexecuted: the executor became
+unavailable during dependency compilation. The unchanged core, world and intent
+production libraries compiled on nightly 2026-11-25 before that loss; the
+adapter compilation was killed. Those baseline builds do not validate this
+change. No workspace, MCP transport, release or native/live qualification is
+claimed. The owned FrankenSQLite/FrankenFS integrations remain open.
+
+Owners: `df-franken-storage-mvcc-54h.1` and
+`df-franken-storage-mvcc-54h.2` (partial laboratory storage progress).
+
 ## Unreleased — Preserve dependency time through immediate steps
 
 `StaticPlanner` now carries each prerequisite's complete completion bound

@@ -6,9 +6,15 @@
 //! Layout (directory `0700`, files `0600`, no symbolic links):
 //!
 //! ```text
+//! <root>/store.lock   persistent store-wide exclusive lock (never replaced)
 //! <root>/journal      append-only, hash-chained record log (exclusively locked)
 //! <root>/objects/<sha256>.snap   canonical snapshot bytes, content addressed
 //! ```
+//!
+//! Store ownership is acquired before opening the journal and retained through
+//! compaction. Locking only the journal would let an opener keep its old inode
+//! across a compaction rename and acquire that obsolete lock after replacement.
+//! Journal locks are retained for compatibility with older store consumers.
 //!
 //! Every object is written to a temporary file, synced, renamed into place and
 //! the directory synced **before** the journal record naming it is appended
@@ -396,6 +402,9 @@ pub struct DurableStoreReport {
 pub struct DurableLabStore {
     root: PathBuf,
     journal: File,
+    /// Never renamed or removed. Keep this after `journal` so field drop order
+    /// releases the journal before releasing ownership of the whole store.
+    _store_lock: File,
     chain: Digest32,
     records: usize,
     index: Index,
@@ -1380,6 +1389,23 @@ impl DurableLabStore {
             ));
         }
         private_dir(root)?;
+        let lock_path = root.join("store.lock");
+        regular_file(&lock_path)?;
+        let store_lock = private_options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|e| io("cannot open durable laboratory store lock", &e))?;
+        store_lock.try_lock().map_err(|_| {
+            DfmcpError::new(
+                ErrorCode::Conflict,
+                "another process holds the durable laboratory store",
+            )
+        })?;
+        // Do not inspect, repair, or open a journal before taking this stable
+        // lock: compaction replaces the journal inode while the store is live.
         let objects = root.join("objects");
         private_dir(&objects)?;
         let journal_path = root.join("journal");
@@ -1416,6 +1442,7 @@ impl DurableLabStore {
         let mut store = Self {
             root: root.to_path_buf(),
             journal,
+            _store_lock: store_lock,
             chain: Digest32::ZERO,
             records: 0,
             index: Index::default(),
@@ -3089,6 +3116,10 @@ impl Index {
 #[cfg(test)]
 #[path = "durable_objective_tests.rs"]
 mod objective_tests;
+
+#[cfg(test)]
+#[path = "durable_lock_tests.rs"]
+mod lock_tests;
 
 #[cfg(test)]
 #[path = "durable_custody_tests.rs"]

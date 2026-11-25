@@ -71,6 +71,23 @@ source admission, and selected waits count both the current snapshot and a
 different archived endpoint against their negotiated source budget. Canonical
 state resources can read that retained version under current read authority.
 
+## Exclusive ownership during recovery and compaction
+
+The store takes an exclusive lock on the persistent `store.lock` file before
+opening the journal, inspecting objects or repairing a torn tail. That lock
+stays held until the store closes, including every journal replacement and
+object collection during compaction. The empty lock file is created
+automatically for existing stores and is never removed or replaced by the
+store. Removing or rotating it while any store owner is running would break
+exclusive ownership.
+
+The journal remains exclusively locked as well, including its replacement
+before compaction publishes it. Existing journal-only consumers therefore still
+conflict with the current journal owner. Stop older consumers before upgrading:
+they do not participate in the persistent store lock and cannot receive this
+fix for their already-open journal descriptors. Journal hashes, record tags,
+snapshot encodings and recovery semantics are unchanged.
+
 ## Durable records and retention
 
 The existing journal domain and original source record encodings are preserved.

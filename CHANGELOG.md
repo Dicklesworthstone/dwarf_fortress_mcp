@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Keep durable stores exclusive while compacting
+
+- Acquire a persistent store-wide file lock before journal recovery and retain
+  it across every compaction, preventing stale-inode concurrent ownership.
+- Preserve existing journal locks, on-disk encodings and publication barriers;
+  existing stores create the lock automatically. Older consumers must stop
+  before upgrading.
+- Add four deterministic ownership/compaction/custody regression tests.
+  Execution was blocked by loss of the build environment; validation limits
+  are recorded in `IMPLEMENTATION_STATUS.md`.
+
 ## Unreleased — Keep deferred work behind its full prerequisite horizon
 
 - Carry transitive completion bounds through immediate setters when deriving
