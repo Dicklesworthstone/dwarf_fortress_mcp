@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Keep deferred work behind its full prerequisite horizon
+
+- Carry transitive completion bounds through immediate setters when deriving
+  default temporal deadlines; combine joins without delaying independent work.
+- Include final workforce-adjusted deadlines, preserve explicit caller
+  obligations, and refuse arithmetic overflow without inventing obligations
+  for immediate actions.
+- Recover all three published planner generations only by an exact complete
+  archived digest, preserving original deadlines and compensation while using
+  current semantics for fresh work.
+- Add six passing planner regressions and two new passing recovery cases
+  alongside two existing recovery cases. The added laboratory lifecycle case
+  could not execute because its dependency build was killed by host resource
+  limits; full qualification remains separate.
+
 ## Unreleased — Query field availability and observation freshness
 
 - Select ten explicit field-availability states through the shared typed

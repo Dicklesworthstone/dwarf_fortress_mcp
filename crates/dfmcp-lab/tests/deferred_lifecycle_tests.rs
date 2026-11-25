@@ -469,3 +469,72 @@ fn completion_proven_at_exact_deadline_is_still_eligible() -> Result<()> {
     assert_eq!(exact.state, CommitState::Verified);
     assert_terminal_stays_exact(&mut adapter, &exact)
 }
+
+#[test]
+fn default_deadlines_preserve_temporal_ancestors_through_immediate_steps() -> Result<()> {
+    let mut adapter = MemoryAdapter::new(world(false));
+    let first_area = MapCuboid::new(MapCoord::new(0, 0, 10), MapCoord::new(15, 14, 10))?;
+    let final_area = MapCuboid::new(MapCoord::new(0, 15, 10), MapCoord::new(15, 15, 10))?;
+    let complete_area = MapCuboid::new(MapCoord::new(0, 0, 10), MapCoord::new(15, 15, 10))?;
+    let dig = |area, depends_on| RequestedAction {
+        action: Action::DesignateDig {
+            area,
+            mode: DigMode::Mine,
+        },
+        preconditions: Vec::new(),
+        postconditions: Vec::new(),
+        compensation: None,
+        obligation: None,
+        depends_on,
+    };
+    let intent = Intent {
+        id: IntentId::new(507),
+        anchor: adapter.snapshot().anchor(),
+        summary: "excavate a complete room through a deferred labor change".to_owned(),
+        terminal_condition: Predicate::RegionTerrain {
+            area: complete_area,
+            tile_code: tile_codes::FLOOR,
+        },
+        constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
+        requested_actions: vec![
+            dig(first_area, Vec::new()),
+            labor_request("MINE", vec![0]),
+            dig(final_area, vec![1]),
+        ],
+    };
+    let plan = StaticPlanner::default().prepare_laboratory(
+        adapter.snapshot(),
+        &intent,
+        &context(&adapter),
+    )?;
+    assert!(plan.steps[1].obligation.is_none());
+    let prepared = adapter.prepare(&plan, &context(&adapter))?;
+    let committed = adapter.commit(&plan, &prepared, &context(&adapter))?;
+    let actions: Vec<_> = committed.actions.iter().map(|row| row.action_id).collect();
+    assert_eq!(committed.actions[1].state, CommitState::Prepared);
+    assert_eq!(committed.actions[2].state, CommitState::Prepared);
+
+    // The first real excavation needs 2,400 ticks. The later sixteen-tile
+    // excavation must not receive the old source-relative 420-tick deadline
+    // merely because an immediate setter separates the two temporal steps.
+    adapter.advance_ticks(2_400)?;
+    let first_proof = poll(&mut adapter, actions[0])?;
+    assert_eq!(first_proof.state, CommitState::Verified);
+    assert_eq!(poll(&mut adapter, actions[1])?.state, CommitState::Verified);
+    assert_eq!(
+        poll(&mut adapter, actions[2])?.state,
+        CommitState::AppliedAwaitingVerification
+    );
+    assert!(!dfmcp_world::evaluate(
+        adapter.snapshot(),
+        &plan.terminal_condition
+    ));
+    adapter.advance_ticks(160)?;
+    assert_eq!(poll(&mut adapter, actions[2])?.state, CommitState::Verified);
+    assert!(dfmcp_world::evaluate(
+        adapter.snapshot(),
+        &plan.terminal_condition
+    ));
+    assert_eq!(adapter.action_receipt(actions[0]), Some(&first_proof));
+    Ok(())
+}

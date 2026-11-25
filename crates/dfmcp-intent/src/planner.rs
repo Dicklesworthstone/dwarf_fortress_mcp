@@ -15,6 +15,16 @@ const MAX_INTENT_CONSTRAINTS: usize = 256;
 const MAX_PREDICATES_PER_ACTION: usize = 64;
 const MAX_ACTION_AUXILIARY_ITEMS: usize = 512;
 
+/// Retained sources predate explicit compiler version fields. The two legacy
+/// generations are available only for callers matching an exact archived seal;
+/// ordinary preparation always uses the complete dependency frontier.
+#[derive(Clone, Copy)]
+enum ReferenceCompiler {
+    Current,
+    LegacyDeadlines,
+    LegacyCompensation,
+}
+
 #[path = "planner_resource_reserve.rs"]
 mod resource_reserve;
 
@@ -73,13 +83,33 @@ impl StaticPlanner {
             intent,
             context,
             true,
-            false,
+            ReferenceCompiler::Current,
+        )
+    }
+
+    /// Reconstruct source-bound compensation with the historical immediate-only
+    /// dependency deadline calculation solely for an archived digest comparison.
+    /// Accept the result only when its complete digest equals the retained seal;
+    /// never select this compiler for fresh planning, rebase or continuation.
+    pub fn prepare_laboratory_legacy_deadlines(
+        &self,
+        snapshot: &WorldSnapshot,
+        intent: &Intent,
+        context: &OperationContext,
+    ) -> Result<PreparedPlan> {
+        self.prepare_scoped(
+            &PredicateEvidence::laboratory(snapshot)?,
+            intent,
+            context,
+            true,
+            ReferenceCompiler::LegacyDeadlines,
         )
     }
 
     /// Reconstruct the old target-negation defaults solely for an archived
     /// digest comparison. Callers must accept the result only when its complete
     /// digest equals the retained historical seal; never use it for fresh work.
+    /// The original immediate-only dependency deadlines are preserved too.
     pub fn prepare_laboratory_legacy_compensation(
         &self,
         snapshot: &WorldSnapshot,
@@ -91,7 +121,7 @@ impl StaticPlanner {
             intent,
             context,
             true,
-            true,
+            ReferenceCompiler::LegacyCompensation,
         )
     }
 
@@ -102,7 +132,7 @@ impl StaticPlanner {
         intent: &Intent,
         context: &OperationContext,
     ) -> Result<PreparedPlan> {
-        self.prepare_scoped(evidence, intent, context, false, false)
+        self.prepare_scoped(evidence, intent, context, false, ReferenceCompiler::Current)
     }
 
     fn prepare_scoped(
@@ -111,7 +141,7 @@ impl StaticPlanner {
         intent: &Intent,
         context: &OperationContext,
         laboratory: bool,
-        legacy_compensation: bool,
+        compiler: ReferenceCompiler,
     ) -> Result<PreparedPlan> {
         let snapshot = evidence.snapshot();
         validate_policy(&self.policy)?;
@@ -227,6 +257,10 @@ impl StaticPlanner {
             .map(|workforce| workforce.deadline_floor(&intent.requested_actions))
             .transpose()?;
         let mut steps = Vec::with_capacity(intent.requested_actions.len());
+        // One bounded frontier per topologically ordered step. Immediate steps
+        // carry their prerequisite bound without receiving a fabricated
+        // obligation. This avoids rescanning every transitive dependency.
+        let mut completion_frontiers = Vec::with_capacity(intent.requested_actions.len());
         let mut required_capabilities = BTreeSet::new();
         for (index, requested) in intent.requested_actions.iter().enumerate() {
             let step_number = u32::try_from(index).map_err(|_| {
@@ -240,15 +274,25 @@ impl StaticPlanner {
             let explicit_obligation = normalized.obligation.is_some();
             let idempotency_key =
                 derive_step_idempotency_key(intent.id, intent.anchor, step_id, &normalized.action);
-            // A synthesized deadline starts after every prerequisite's
-            // deadline: dependent work cannot begin before its inputs exist.
-            let earliest_start = normalized
-                .depends_on
-                .iter()
-                .filter_map(|dependency| steps.get(*dependency as usize))
-                .filter_map(|step: &PlanStep| step.obligation.as_ref())
-                .map(|obligation| obligation.deadline_tick)
-                .fold(snapshot.tick, GameTick::max);
+            // A synthesized deadline includes every prerequisite's completion
+            // bound, including temporal ancestors connected by immediate steps.
+            // Historical reconstruction retains exactly the old calculation.
+            let earliest_start = if matches!(compiler, ReferenceCompiler::Current) {
+                normalized
+                    .depends_on
+                    .iter()
+                    .filter_map(|dependency| completion_frontiers.get(*dependency as usize))
+                    .copied()
+                    .fold(snapshot.tick, GameTick::max)
+            } else {
+                normalized
+                    .depends_on
+                    .iter()
+                    .filter_map(|dependency| steps.get(*dependency as usize))
+                    .filter_map(|step: &PlanStep| step.obligation.as_ref())
+                    .map(|obligation| obligation.deadline_tick)
+                    .fold(snapshot.tick, GameTick::max)
+            };
             complete_reference_semantics(
                 &mut normalized,
                 &idempotency_key,
@@ -256,7 +300,7 @@ impl StaticPlanner {
                 earliest_start,
             )?;
             if normalized.compensation.is_none() {
-                if legacy_compensation {
+                if matches!(compiler, ReferenceCompiler::LegacyCompensation) {
                     normalized.compensation =
                         crate::effects::default_compensation(&normalized.action);
                 } else if !steps.iter().any(|step: &PlanStep| {
@@ -346,6 +390,17 @@ impl StaticPlanner {
             }
             validate_requested(index, &normalized, snapshot.tick)?;
             let dependencies = validate_dependencies(index, &normalized.depends_on)?;
+            // Include the final model-adjusted default or explicit deadline.
+            // A caller's shorter explicit obligation is never extended; its
+            // ancestors still remain part of later default scheduling bounds.
+            completion_frontiers.push(
+                normalized
+                    .obligation
+                    .as_ref()
+                    .map_or(earliest_start, |obligation| {
+                        earliest_start.max(obligation.deadline_tick)
+                    }),
+            );
             let capability = normalized.action.capability();
             required_capabilities.insert(capability);
             steps.push(PlanStep {

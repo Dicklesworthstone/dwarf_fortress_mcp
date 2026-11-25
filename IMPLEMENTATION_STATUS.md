@@ -1,5 +1,37 @@
 # Implementation Status
 
+## Unreleased — Preserve dependency time through immediate steps
+
+`StaticPlanner` now carries each prerequisite's complete completion bound
+through immediate actions when synthesizing a later temporal obligation. A
+long excavation or production action followed by a labor setter no longer
+loses its scheduling horizon before dependent work. Joins use the latest bound,
+independent branches remain independent, and final workforce-adjusted deadlines
+participate in the same calculation. Immediate steps gain no artificial
+obligation. Explicit caller deadlines, cadence, stability and preparation
+expiry remain unchanged; checked deadline overflow refuses preparation.
+
+Retained-source recovery recognizes exactly the three published compiler
+generations: current semantics, historical deadlines with source-qualified
+compensation, and historical deadlines with target-negation compensation.
+Only an exact match of the complete archived plan digest accepts a generation.
+Fresh planning, rebase and continuation use current semantics; recovery does
+not upgrade an old seal or manufacture live action custody.
+
+Six planner integration tests pass on current nightly. The immediate-chain
+regression was first demonstrated against the old planner (tick 210 instead of
+the required 10310), then passed after the correction. All four exact-source
+recovery tests also pass, including both retained generations and rejection of
+a changed dependency borrowing an old seal. The real laboratory
+dig → labor setter → dig workflow regression is included but did not execute:
+the host killed compilation of the unchanged `dfmcp-adapter` production library
+with SIGKILL under resource pressure. These ten focused passing cases do not
+qualify the full MCP transport, laboratory lifecycle, workspace or native/live
+path. Repository verification still stops at missing `br`; no release
+qualification receipt was produced.
+
+Owner: `df-lab-shared-workforce-8n4` (in progress).
+
 ## Unreleased — Select unavailable facts and observation age
 
 The shared structured row filter now supports explicit `presence` and inclusive

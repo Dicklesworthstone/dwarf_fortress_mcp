@@ -135,6 +135,16 @@ not yet verified stay `Prepared` and are dispatched by a later `fortress_wait`,
 which polls every open action of every committed plan in commit order (so a
 later plan never strands an earlier plan's deferred steps) and reports them in
 `polled_actions` with `open_actions_remaining`.
+
+When a temporal obligation is omitted, its default deadline includes the
+latest completion bound of all prerequisites, including temporal ancestors
+connected through immediate actions such as labor setters. Joins combine those
+bounds; independent branches retain their own horizons. An immediate step
+forwards its prerequisite bound without gaining an artificial obligation.
+Explicit caller deadlines, polling cadence and stability requirements remain
+unchanged, even when a caller's deadline is shorter than a prerequisite's.
+Deadline arithmetic overflow refuses preparation.
+
 Before that first deferred effect, the laboratory rechecks the current action
 grant (including entity/region scope and expiry), action budget and sealed
 preconditions. Observe-only polling can verify an already dispatched action,

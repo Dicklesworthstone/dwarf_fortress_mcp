@@ -136,10 +136,14 @@ instead of overwriting later work. Explicit registered civilian protection
 remedies retain their distinct protective policy. Terminal receipts still do
 not reopen for compensation.
 
-Recovery can reproduce the historical target-negation compiler only when the
-entire reconstructed plan digest matches the archived seal. This preserves old
+Recovery checks exactly three published compiler generations: current
+semantics, historical dependency deadlines with source-qualified compensation,
+and historical dependency deadlines with target-negation compensation. A
+generation is accepted only when the entire reconstructed plan digest matches
+the archived seal. This preserves the original deadlines, compensation and
 evidence; it does not create a live action handle or authorize an unsafe inverse.
-Fresh plans, rebases and continuations use source-qualified compensation.
+Fresh plans, rebases and continuations use complete transitive dependency
+horizons and source-qualified compensation.
 
 A witness-rebased commit can retain both the originally requested digest and
 the actual newly sealed digest. Either retained alias selects the same complete

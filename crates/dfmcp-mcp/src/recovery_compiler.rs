@@ -1,7 +1,8 @@
 //! Reconstruct retained plan identities without granting legacy dispatch authority.
 //!
-//! Old sources did not record a compensation compiler revision. Only an exact
-//! match to their complete sealed digest selects that historical interpretation.
+//! Old sources did not record a compensation or dependency-deadline compiler
+//! revision. Only an exact match to their complete sealed digest selects that
+//! historical interpretation.
 //! Fresh intake, rebase and continuation always use the current planner.
 
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, OperationContext, Result};
@@ -21,8 +22,14 @@ pub(super) fn prepare_exact(
     {
         return current;
     }
-    // This is a closed, two-version reconstruction, not a best-effort replan.
-    // Neither candidate is accepted merely because it can be compiled.
+    // These are the three published compiler generations, not freely combined
+    // switches or a best-effort replan. No candidate is accepted merely because
+    // it compiles; recovery preserves the exact historical deadlines and keys.
+    if let Ok(plan) = planner.prepare_laboratory_legacy_deadlines(snapshot, intent, context)
+        && plan.digest == expected
+    {
+        return Ok(plan);
+    }
     if let Ok(plan) = planner.prepare_laboratory_legacy_compensation(snapshot, intent, context)
         && plan.digest == expected
     {
@@ -132,6 +139,63 @@ mod tests {
             )
             .err()
             .map(|error| error.code),
+            Some(ErrorCode::CorruptLedger)
+        );
+        Ok(())
+    }
+
+    fn dependency_fixture() -> (WorldSnapshot, Intent, OperationContext) {
+        let (snapshot, mut intent, context) = fixture();
+        let order = |amount, depends_on| RequestedAction {
+            action: Action::CreateWorkOrder {
+                name: "retained dependency program".to_owned(),
+                job_token: "SMELT_IRON".to_owned(),
+                amount,
+                conditions: Vec::new(),
+            },
+            preconditions: Vec::new(),
+            postconditions: Vec::new(),
+            compensation: None,
+            obligation: None,
+            depends_on,
+        };
+        let mut immediate = intent.requested_actions.remove(0);
+        immediate.depends_on = vec![0];
+        intent.requested_actions = vec![order(100, Vec::new()), immediate, order(1, vec![1])];
+        (snapshot, intent, context)
+    }
+
+    #[test]
+    fn exact_recovery_preserves_all_published_dependency_deadline_generations() -> Result<()> {
+        let (snapshot, intent, context) = dependency_fixture();
+        let planner = StaticPlanner::default();
+        let current = planner.prepare_laboratory(&snapshot, &intent, &context)?;
+        let old_deadlines =
+            planner.prepare_laboratory_legacy_deadlines(&snapshot, &intent, &context)?;
+        let oldest =
+            planner.prepare_laboratory_legacy_compensation(&snapshot, &intent, &context)?;
+        assert_ne!(current.digest, old_deadlines.digest);
+        assert_ne!(old_deadlines.digest, oldest.digest);
+        assert_ne!(current.digest, oldest.digest);
+        for plan in [current, old_deadlines, oldest] {
+            assert_eq!(
+                prepare_exact(&snapshot, &intent, &context, plan.digest)?,
+                plan
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn changed_dependency_cannot_borrow_an_older_deadline_seal() -> Result<()> {
+        let (snapshot, mut intent, context) = dependency_fixture();
+        let original = StaticPlanner::default()
+            .prepare_laboratory_legacy_deadlines(&snapshot, &intent, &context)?;
+        intent.requested_actions[2].depends_on = vec![0];
+        assert_eq!(
+            prepare_exact(&snapshot, &intent, &context, original.digest)
+                .err()
+                .map(|error| error.code),
             Some(ErrorCode::CorruptLedger)
         );
         Ok(())
