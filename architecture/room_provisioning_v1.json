@@ -28,6 +28,8 @@
       1,
       4
     ],
+    "dormitory_beds_per_area": 32,
+    "dormitory_columns": [1, 8],
     "furniture_slots_total": 32,
     "excavation_parts_total": 32,
     "excavation_tiles_total": 512,

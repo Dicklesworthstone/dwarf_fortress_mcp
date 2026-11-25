@@ -21,7 +21,7 @@ from furniture_handoff import Handoff
 from furniture_plan import canonical
 from room_provisioning import RoomPlan
 from room_inventory_peer import Peer, capture, TOKEN
-from test_room_provisioning import intent, bedroom, dining
+from test_room_provisioning import intent, bedroom, dining, dormitory
 
 
 def clean_env(extra=None):
@@ -58,6 +58,21 @@ class PlanRoomsTests(unittest.TestCase):
         self.assertEqual(RoomPlan.decode(invoke('compile','--request-file',str(self.request_file)).stdout),self.plan)
         self.assertEqual(Request.decode(invoke('compile','--request-file',str(self.request_file),
                                                '--emit','furniture-request').stdout),self.plan.request())
+
+    def test_shared_dormitory_handoff_uses_only_selected_beds(self):
+        from room_furniture_handoff import RoomFurnitureHandoff
+        self.request_file.write_bytes(canonical(intent(dormitory())))
+        compiled = invoke('compile', '--request-file', str(self.request_file))
+        self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+        room = RoomPlan.decode(compiled.stdout)
+        with Peer(capture(room.request())) as peer:
+            result = invoke('allocate', '--request-file', str(self.request_file),
+                            '--emit', 'room-handoff', env=peer.environment())
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            handoff = RoomFurnitureHandoff.decode(result.stdout)
+            self.assertEqual(handoff.room_plan, room)
+            self.assertEqual([s.kind for s in handoff.allocation.plan().steps], ['bed'] * 7)
+            self.assertEqual(peer.methods, ['Handshake', 'ReadObservation'])
 
     def test_actual_cli_request_and_imported_plan_handoffs_match(self):
         plan_file=Path(self.temp.name)/'plan.json'

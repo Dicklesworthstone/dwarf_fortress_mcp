@@ -89,6 +89,15 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(len(plan.request().slots), 12)
         self.assertTrue(plan.json()['project_connections']['all_areas_connected'])
 
+    def test_rotated_dormitory_reaches_the_original_access_point(self):
+        area = {'name': 'sleep', 'template': {'kind': 'dormitory', 'bed_count': 7},
+                'rotation': 90}
+        plan = self.check_plan(solve(request(area, size=(8, 8, 1), access_point=[10, 10, 2])))
+        body = plan.json()
+        self.assertTrue(body['project_connections']['access']['all_areas_connected_to_point'])
+        self.assertEqual([slot.kind for slot in plan.request().slots], ['bed'] * 7)
+        self.assertEqual(body['intent']['areas'][0]['rotation'], 90)
+
     def test_global_layout_backtracks_instead_of_keeping_a_greedy_prefix(self):
         excluded = [[10,14,2], [11,19,2], [12,15,2], [17,10,2], [13,17,2]]
         result = solve(request(dining('0',1,2), dining('1',2,1), dining('2',3,2), size=(13,10,1),

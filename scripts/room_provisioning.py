@@ -127,7 +127,7 @@ def _area(value: object, guard: Guard) -> tuple[dict, list[_Rect], list[dict], l
     name = label(value['name'])
     require(len(name) <= 24, 'area name exceeds room-slot namespace allowance')
     x, y, z = origin = _vector(value['origin'], 1, 32766)
-    template = _object(value['template'], {'kind'}, {'rooms_count', 'room_size', 'table_count', 'columns'})
+    template = _object(value['template'], {'kind'}, {'rooms_count', 'room_size', 'table_count', 'columns', 'bed_count'})
     kind = template['kind']
     parts, units, selections = [], [], []
 
@@ -173,6 +173,20 @@ def _area(value: object, guard: Guard) -> tuple[dict, list[_Rect], list[dict], l
         entrance = (x - 2, y + height + 1, z)
         rectangle(entrance[0], entrance[1], 1, (rows - 1) * (height + 3) + 1, 'corridor')
         normalized_template = {'kind': kind, 'rooms_count': count, 'room_size': [width, height]}
+    elif kind == 'dormitory':
+        _object(template, {'kind', 'bed_count'}, {'columns'})
+        count = integer(template['bed_count'], 1, 32)
+        columns = integer(template.get('columns', 4), 1, 8)
+        rows = (count + columns - 1) // columns
+        constraints = _constraints(value.get('item_constraints', {}), ('bed',))
+        # Keep the west aisle and every second row open even after all beds
+        # are installed. The unfilled tail of a partial row stays walkable.
+        rectangle(x, y, min(count, columns) + 1, rows * 2, 'room')
+        entrance = origin
+        for index in range(count):
+            px, py = x + index % columns + 1, y + 2 * (index // columns) + 1
+            unit(index + 1, px, py, 1, 1, None, (('bed', (px, py, z)),))
+        normalized_template = {'kind': kind, 'bed_count': count, 'columns': columns}
     elif kind == 'dining_hall':
         _object(template, {'kind', 'table_count'}, {'columns'})
         count = integer(template['table_count'], 1, 16)

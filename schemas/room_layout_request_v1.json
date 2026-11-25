@@ -296,6 +296,9 @@
             },
             {
               "$ref": "#/$defs/dining"
+            },
+            {
+              "$ref": "#/$defs/dormitory"
             }
           ]
         },
@@ -346,6 +349,28 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "properties": {
+                  "kind": {
+                    "const": "dormitory"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "item_constraints": {
+                "propertyNames": {
+                  "const": "bed"
+                }
+              }
+            }
+          }
         }
       ]
     },
@@ -371,6 +396,29 @@
         }
       },
       "$comment": "Complete x-fastest mask must match the exact layout region and its cell count. Dot permits floor/wall, F floor only, W wall only, X neither. Constraint, not source authority."
+    },
+    "dormitory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "bed_count"
+      ],
+      "properties": {
+        "kind": {
+          "const": "dormitory"
+        },
+        "bed_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        }
+      }
     }
   }
 }

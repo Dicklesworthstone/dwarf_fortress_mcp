@@ -24,6 +24,11 @@ def dining(count=1, columns=4, origin=(10, 20, 2), name='eat'):
         'kind': 'dining_hall', 'table_count': count, 'columns': columns}}
 
 
+def dormitory(count=7, columns=4):
+    return {'name': 'sleep', 'origin': [10, 10, 2],
+            'template': {'kind': 'dormitory', 'bed_count': count, 'columns': columns}}
+
+
 def intent(*areas):
     return {'schema': INTENT_SCHEMA, 'world_folder': 'region1', 'site': 2,
             'areas': list(areas) or [bedroom()]}
@@ -111,6 +116,29 @@ class RoomProvisioningTests(unittest.TestCase):
             for unit in p.json()['areas'][0]['units']:
                 slots = [s for s in p.request().slots if s.name in unit['slots']]
                 self.assertEqual(sum(abs(a-b) for a,b in zip(slots[0].target,slots[1].target)),1)
+
+    def test_dormitory_capacity_and_cardinal_aisles(self):
+        for count, columns in itertools.product((1, 7, 16, 31, 32), (1, 4, 8)):
+            with self.subTest(count=count, columns=columns):
+                area = dormitory(count, columns)
+                area['item_constraints'] = {'bed': {'material': [12, 2]}}
+                plan = RoomPlan.compile(intent(area))
+                slots = plan.request().slots
+                self.assertEqual(len(slots), count)
+                self.assertTrue(all(s.kind == 'bed' and s.material == (12, 2) for s in slots))
+                self.assertEqual(len({s.target for s in slots}), count)
+                self.assertEqual(len(plan.json()['excavation_blueprint']['parts']), 1)
+                check_access(self, plan)
+                self.assertEqual(RoomPlan.decode(plan.encode()), plan)
+
+    def test_dormitory_refuses_invalid_or_partial_intent(self):
+        for count, columns in ((0, 1), (33, 1), (True, 1), (1, 0), (1, 9)):
+            with self.subTest(count=count, columns=columns), self.assertRaises(ValueError):
+                RoomPlan.compile(intent(dormitory(count, columns)))
+        with self.assertRaises(ValueError):
+            RoomPlan.compile(intent(dormitory(32), dining(1)))
+        with self.assertRaises(ValueError):
+            RoomPlan.compile(intent({**dormitory(), 'item_constraints': {'chair': {}}}))
 
     def test_multi_area_order_and_allocation_are_deterministic(self):
         a,b=bedroom(2),dining(3)

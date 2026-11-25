@@ -36,7 +36,12 @@ Bedrooms use the existing geometry policy's four-room rows, separating walls,
 south doorways, row corridors and west connecting spine. Each room requests one
 bed, chair and table. Interiors are 3..7 tiles in each horizontal dimension.
 Dining areas request chair/table pairs in rows of 1..4 pairs with clear aisles.
-These templates do not create native bedroom zones, dining assignments or doors.
+For shared sleeping space, use `{"kind":"dormitory","bed_count":7,"columns":4}`.
+This requests seven beds in a single excavation and leaves a walking aisle beside
+every row. Dormitories accept 1..32 beds and 1..8 columns (default 4). Only bed
+constraints apply. Both the fixed-origin compiler and automatic site layout
+accept the template. It plans the physical room and beds. Native zone creation
+and assignment remain separate operations.
 
 Per-area `item_constraints` accepts only furniture kinds used by that template.
 Each kind can constrain exact `material: [type,index]`, `subtype` and
@@ -81,7 +86,7 @@ Returned JSON objects do not alias retained plan bytes.
 
 Whole-request limits are 8 areas, 32 furniture slots, 32 excavation parts,
 512 excavation tiles and one bounding capture of at most 1,024 cells (each axis
-at most 128). An area allows up to 10 bedrooms or 16 dining pairs, but global
+at most 128). An area allows up to 10 bedrooms, 16 dining pairs or 32 dormitory beds, but global
 limits still apply. Larger dimensions/counts cannot silently drop rooms or use a
 bounding-box excavation. Input and normalized intent are at most 16 KiB; the
 complete plan is at most 48 KiB. All target coordinates leave the existing native
