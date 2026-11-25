@@ -121,7 +121,7 @@ def decode_record(raw: bytes) -> dict:
     elif phase == 1:
         require(reason == 0 and known and tick >= before['tick'], 'invalid running record')
     elif phase in (2, 3):
-        require(reason in ((1, 2, 3, 5, 6, 8) if phase == 2 else (1, 2, 3, 4, 5, 6, 8)), 'invalid stop reason')
+        require(reason in (1, 2, 3, 4, 5, 6, 8), 'invalid stop reason')
     elif phase == 4:
         require(reason in (3, 7, 9) and not known, 'invalid refused record')
     else:

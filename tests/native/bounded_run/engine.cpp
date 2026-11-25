@@ -118,6 +118,8 @@ void ambiguous_effects_and_retrying_only_safety_pauses() {
     c.commit(); c.step(); check(c.world.unpauses == 1 && c.world.pauses == 2);
     refused(8, [&] { c.prepare("other"); });
     c.world.ignore_pause = false; c.world.fail_after_pause = true; c.step();
+    check(r.phase == Phase::Stopping && !r.pause_verified && c.engine.active());
+    c.world.fail_after_pause = false; c.step();
     check(r.phase == Phase::Stopped && r.pause_verified && !c.engine.active());
     Case d; const auto &s = d.prepare(); d.commit(); d.world.read_failures = 2; d.step();
     check(s.phase == Phase::Stopping && !s.pause_verified && d.world.value.paused);
@@ -140,8 +142,22 @@ void source_loss_and_clock_failures() {
         check(u.reason == (mode == 2 ? Reason::NativeFailure : Reason::ClockRegression));
         if (mode == 2) check(!u.tick_known);
     }
-    Case f; const auto &u = f.prepare(); f.commit(); f.world.value.paused = true; f.step();
-    check(u.reason == Reason::ExternalPause && u.pause_verified && f.world.pauses == 0);
+    for (bool replace : {false, true}) {
+        Case f; const auto &u = f.prepare(); f.commit();
+        f.world.value.paused = true; f.world.fail_pause = true; f.step();
+        check(u.reason == Reason::ExternalPause && u.phase == Phase::Stopping && !u.pause_verified);
+        check(f.engine.active() && f.world.pauses == 1);
+        f.world.fail_pause = false;
+        if (replace) ++f.world.value.generation;
+        f.step();
+        if (replace) {
+            check(u.phase == Phase::SourceLost && !u.pause_verified && f.world.pauses == 1);
+        } else {
+            check(u.phase == Phase::Stopped && u.reason == Reason::ExternalPause
+                && u.pause_verified && f.world.pauses == 2);
+        }
+        check(!f.engine.active() && f.world.unpauses == 1);
+    }
 }
 void validation_and_capacity() {
     Case c;

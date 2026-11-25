@@ -171,7 +171,7 @@ def record(data):
     elif phase == 1:
         require(reason == 0 and trigger == 0 and known and observed >= before['tick'] and count < goal['samples'], 'invalid running state')
     elif phase in (2, 3):
-        allowed = (1, 2, 3, 5, 6, 8) if phase == 2 else (1, 2, 3, 4, 5, 6, 8)
+        allowed = (1, 2, 3, 4, 5, 6, 8)
         require(reason in allowed and trigger != 6, 'invalid stopping reason')
     else:
         require(reason == 7 and not known, 'source loss cannot prove current clock')

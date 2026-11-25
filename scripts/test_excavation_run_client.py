@@ -268,7 +268,7 @@ class WireTests(unittest.TestCase):
                 w.Spec(*spec)
 
     def test_all_phase_reason_combinations(self):
-        allowed = ({0}, {0}, {1, 2, 3, 5, 6, 8}, {1, 2, 3, 4, 5, 6, 8}, {3, 7, 9}, {7})
+        allowed = ({0}, {0}, {1, 2, 3, 4, 5, 6, 8}, {1, 2, 3, 4, 5, 6, 8}, {3, 7, 9}, {7})
         for phase, reason in itertools.product(range(6), range(10)):
             raw = record(phase=phase, reason=reason)
             if reason in allowed[phase]:

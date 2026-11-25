@@ -106,8 +106,7 @@ fn all_phase_reason_flags_preserve_uncertainty() -> Result<()> {
                 let state_ok = match phase {
                     0 => reason == 0 && !known,
                     1 => reason == 0 && known,
-                    2 => [1, 2, 3, 5, 6, 8].contains(&reason),
-                    3 => [1, 2, 3, 4, 5, 6, 8].contains(&reason),
+                    2 | 3 => [1, 2, 3, 4, 5, 6, 8].contains(&reason),
                     4 => [3, 7, 9].contains(&reason) && !known,
                     _ => reason == 7 && !known,
                 };

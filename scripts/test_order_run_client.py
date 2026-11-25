@@ -231,6 +231,13 @@ class WireTests(unittest.TestCase):
         lost = w.record(bytes.fromhex(self.vectors['14']))
         self.assertTrue(lost['predicate_observed']); self.assertFalse(lost['pause_verified'])
 
+    def test_external_pause_pending_raw_verification(self):
+        pending = w.record(reference_record(phase=2, reason=4, observed=101))
+        stopped = w.record(reference_record(phase=3, reason=4, observed=101))
+        self.assertEqual(pending['reason'], 'external_pause')
+        self.assertFalse(pending['pause_verified'] or pending['predicate_observed'])
+        self.assertTrue(stopped['pause_verified'])
+
     def test_every_byte_corruption_and_incomplete_prefix(self):
         raw = bytes.fromhex(self.vectors['1'])
         for i in range(len(raw)):

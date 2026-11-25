@@ -415,7 +415,8 @@ impl RunRecord {
                         | RunReason::NativeFailure
                         | RunReason::ClockRegression
                         | RunReason::Shutdown
-                ) || (phase == RunPhase::Stopped && reason == RunReason::ExternalPause)
+                        | RunReason::ExternalPause
+                )
             }
             RunPhase::Refused => {
                 matches!(

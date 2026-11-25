@@ -257,7 +257,7 @@ class Record:
                 'effect integrity mismatch')
         r.finish()
         require(attempted == (phase in (1, 2, 3, 5)) and verified == (phase == 3), 'impossible effect flags')
-        allowed = ((0,), (0,), (1, 2, 3, 5, 6, 8), (1, 2, 3, 4, 5, 6, 8), (3, 7, 9), (7,))
+        allowed = ((0,), (0,), (1, 2, 3, 4, 5, 6, 8), (1, 2, 3, 4, 5, 6, 8), (3, 7, 9), (7,))
         require(reason in allowed[phase], 'impossible phase/reason')
         require(phase not in (0, 4, 5) or not known, 'terminal/prepared tick must be unknown')
         require(phase != 1 or (known and tick >= plan.before.tick), 'invalid running clock')

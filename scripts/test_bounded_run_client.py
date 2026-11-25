@@ -235,7 +235,7 @@ class ClientTests(unittest.TestCase):
     def test_all_phase_reason_flag_combinations(self):
         valid = {(0, 0, 0, 0, 0), (1, 0, 1, 0, 1), (5, 7, 1, 0, 0)}
         valid |= {(4, reason, 0, 0, 0) for reason in (3, 7, 9)}
-        valid |= {(2, reason, 1, 0, known) for reason in (1, 2, 3, 5, 6, 8) for known in (0, 1)}
+        valid |= {(2, reason, 1, 0, known) for reason in (1, 2, 3, 4, 5, 6, 8) for known in (0, 1)}
         valid |= {(3, reason, 1, 1, known) for reason in (1, 2, 3, 4, 5, 6, 8) for known in (0, 1)}
         for phase in range(6):
             for reason in range(10):

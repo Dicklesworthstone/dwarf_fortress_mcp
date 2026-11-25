@@ -570,7 +570,7 @@ impl OrderRunRecord {
             }
             RunPhase::Stopping | RunPhase::Stopped => {
                 trigger != OrderTrigger::SourceChanged
-                    && (matches!(
+                    && matches!(
                         reason,
                         RunReason::TickLimit
                             | RunReason::WallLimit
@@ -578,7 +578,8 @@ impl OrderRunRecord {
                             | RunReason::NativeFailure
                             | RunReason::ClockRegression
                             | RunReason::Shutdown
-                    ) || (phase == RunPhase::Stopped && reason == RunReason::ExternalPause))
+                            | RunReason::ExternalPause
+                    )
             }
             RunPhase::SourceLost => reason == RunReason::SourceChanged && !known,
         };

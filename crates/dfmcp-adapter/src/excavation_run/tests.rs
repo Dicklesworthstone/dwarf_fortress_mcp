@@ -227,8 +227,7 @@ fn all_predispatch_phase_reason_flag_combinations() -> Result<()> {
                     && match phase {
                         0 => reason == 0 && known == 0,
                         1 => false, // This fixture has tick zero, older than the source capture.
-                        2 => [1, 2, 3, 5, 6, 8].contains(&reason),
-                        3 => [1, 2, 3, 4, 5, 6, 8].contains(&reason),
+                        2 | 3 => [1, 2, 3, 4, 5, 6, 8].contains(&reason),
                         4 => [3, 7, 9].contains(&reason) && known == 0,
                         5 => reason == 7 && known == 0,
                         _ => false,
