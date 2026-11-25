@@ -41,6 +41,13 @@ requested smaller limit is accepted only if the complete acknowledgement fits.
 Repeated negotiation to the current value is allowed and reports `changed:
 false`.
 
+Every accepted negotiation wakes the current Task monitors and the service's
+recovery owner, including an accepted `changed: false` retry. A retained
+terminal result that exceeded the prior response allowance can therefore be
+retried without another foreground game operation. The wake follows complete
+budget publication and changes neither the original work contract nor game
+time.
+
 ## Authority and limits
 
 Current whole-fortress `Observe` and `Query` grants at read-only risk are

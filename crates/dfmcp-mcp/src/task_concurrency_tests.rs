@@ -374,3 +374,324 @@ fn execution_expiry_preserves_original_work_and_retained_terminal_evidence() -> 
     }
     Ok(())
 }
+
+fn request_original_cancellation(
+    store: &LabTaskStore,
+    id: &FinalTaskId,
+    entry: usize,
+) -> TestResult {
+    match entry {
+        0 => store.request_cancellation(id)?,
+        1 => {
+            let current = store.get_task_snapshot(id)?.ok_or("Task missing")?;
+            assert!(store.request_cancellation_if_current(&current)?);
+        }
+        2 => cancel_transport_monitor(store, id)?,
+        _ => return Err("unknown cancellation entry".into()),
+    }
+    Ok(())
+}
+
+#[test]
+fn cancellation_after_a_supervisor_check_fences_late_original_dispatch() -> TestResult {
+    let _serial = crate::test_serial();
+    for entry in 0..3 {
+        let session = open(&(7_872_460 + entry).to_string(), false, true)?;
+        let digest = plan(&session)?;
+        let store = LabTaskStore::new()?;
+        let id = create(
+            &store,
+            &format!("cancel-before-dispatch-{entry}"),
+            &session,
+            &digest,
+            COMMIT_SCHEMA,
+        )?;
+        let before = engine_footprint(&session)?;
+        // Deterministic ordering: the supervisor passed its original check,
+        // then cancellation completed before its dispatch admission.
+        assert!(!store.is_cancellation_requested(&id)?);
+        request_original_cancellation(&store, &id, entry)?;
+        let finalized = store.task_detail(&session, &id)?["progress"].clone();
+        assert_eq!(finalized["stage"], "finalized");
+        assert_eq!(
+            finalized["finalization"]["finalize_certificate"]["effects_dispatched"],
+            false
+        );
+        let mut invoked = false;
+        assert!(
+            store
+                .with_original_dispatch(&id, |_| {
+                    invoked = true;
+                    Ok(())
+                })?
+                .is_none()
+        );
+        assert!(!invoked, "accepted cancellation must fence the effect callback");
+        assert!(store.mark_dispatch_started(&id).is_err());
+
+        // A stale supervisor observation must not replace its cancellation
+        // certificate after the transport intent has already been consumed.
+        store.record_progress(&id, json!({"stage":"observed","obligation":null}))?;
+        assert_eq!(store.task_detail(&session, &id)?["progress"], finalized);
+        assert_eq!(engine_footprint(&session)?, before);
+    }
+    Ok(())
+}
+
+#[test]
+fn dispatch_reservation_without_a_receipt_cannot_certify_queued_cancellation() -> TestResult {
+    let _serial = crate::test_serial();
+    for entry in 0..3 {
+        let session = open(&(7_872_470 + entry).to_string(), false, true)?;
+        let digest = plan(&session)?;
+        let store = LabTaskStore::new()?;
+        let id = create(
+            &store,
+            &format!("reserved-before-cancel-{entry}"),
+            &session,
+            &digest,
+            COMMIT_SCHEMA,
+        )?;
+        let before = engine_footprint(&session)?;
+        // Reproduce the old gap between reserving dispatch and publishing
+        // dispatch_started progress, including recovery before a receipt exists.
+        assert!(!store.mark_dispatch_started(&id)?);
+        assert_eq!(store.task_detail(&session, &id)?["progress"]["stage"], "queued");
+        let refusal = request_original_cancellation(&store, &id, entry)
+            .expect_err("a reserved dispatch cannot receive a no-effect certificate");
+        assert!(
+            refusal.to_string().contains("without a retained receipt"),
+            "{refusal}"
+        );
+        assert!(!store.is_cancellation_requested(&id)?);
+        let unresolved = store.task_detail(&session, &id)?;
+        assert!(unresolved["progress"]["finalization"]["finalize_certificate"].is_null());
+        assert_eq!(engine_footprint(&session)?, before);
+
+        // Once the actual original receipt arrives, cancellation drains those
+        // exact actions instead of fabricating the zero-action queued proof.
+        let committed = parsed(&crate::agent_facade::fortress_commit(
+            Some(session.clone()),
+            digest.clone(),
+        ))?;
+        assert_eq!(committed["ok"], true, "{committed}");
+        request_original_cancellation(&store, &id, entry)?;
+        let cancelled = store.task_detail(&session, &id)?;
+        assert_eq!(cancelled["progress"]["stage"], "finalized");
+        assert!(
+            cancelled["progress"]["finalization"]["drain_progress"]["actions_total"]
+                .as_u64()
+                .is_some_and(|count| count > 0)
+        );
+        assert_eq!(
+            cancelled["progress"]["finalization"]["drain_progress"]["quiescent"],
+            true
+        );
+        assert!(
+            cancelled["progress"]["finalization"]["finalize_certificate"]["effects_dispatched"]
+                .is_null(),
+            "a real original drain must retain its action proof"
+        );
+        assert!(store.mark_dispatch_started(&id).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn execution_expiry_before_dispatch_refuses_the_late_effect_callback() -> TestResult {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    let _serial = crate::test_serial();
+    let session = open("7872480", false, true)?;
+    let digest = plan(&session)?;
+    let elapsed = Arc::new(AtomicU64::new(0));
+    let origin = Instant::now();
+    let clock_elapsed = elapsed.clone();
+    let store = LabTaskStore::with_test_clock(Arc::new(move || {
+        origin + Duration::from_secs(clock_elapsed.load(Ordering::Acquire))
+    }))?;
+    let id = create(
+        &store,
+        "expiry-before-dispatch",
+        &session,
+        &digest,
+        COMMIT_SCHEMA,
+    )?;
+    let expected = store.get_task_snapshot(&id)?.ok_or("Task missing")?;
+    let handoff = store
+        .take_initial_work_handoff_for_owner_if_current(&expected, "expiry-before-dispatch-owner")?
+        .ok_or("initial original handoff missing")?;
+    assert!(
+        store
+            .begin_handoff_dispatch_for_owner_if_current(
+                &id,
+                expected.generation(),
+                "expiry-before-dispatch-owner",
+            )?
+            .is_some()
+    );
+    let scope = store.monitor_scope(&id)?;
+    let before = engine_footprint(&session)?;
+    assert!(!store.is_cancellation_requested(&id)?);
+    elapsed.store(3_601, Ordering::Release);
+    assert!(store.expire_task_execution_if_current(&expected)?.is_some());
+
+    let mut invoked = false;
+    assert!(
+        store
+            .with_original_dispatch(&id, |_| {
+                invoked = true;
+                Ok(())
+            })
+            .is_err()
+    );
+    assert!(!invoked, "execution expiry must close original dispatch admission");
+    assert!(store.mark_dispatch_started(&id).is_err());
+    assert!(matches!(store.get_task(&id)?, Some(FinalTask::Failed { .. })));
+    let failure = store.task_detail(&session, &id)?["execution_failure"].clone();
+    assert_eq!(failure["dispatch_started"], false);
+    assert_eq!(failure["effect_cancellation_requested"], false);
+    assert_eq!(failure["physical_quiescence_certified"], false);
+    assert_eq!(engine_footprint(&session)?, before);
+    drop(handoff);
+    drop(scope);
+    Ok(())
+}
+
+#[test]
+fn failed_cancellation_publication_rechecks_a_later_foreground_commit() -> TestResult {
+    let _serial = crate::test_serial();
+    let session = open("7872481", false, true)?;
+    let digest = plan(&session)?;
+    let store = LabTaskStore::new()?;
+    let id = create(
+        &store,
+        "unpublished-cancellation",
+        &session,
+        &digest,
+        COMMIT_SCHEMA,
+    )?;
+    let before = engine_footprint(&session)?;
+    let current = store.get_task_snapshot(&id)?.ok_or("Task missing")?;
+    let cancelled = task_wire(id.as_str(), "cancelled");
+    // The engine can finish its queued proof before the upstream handoff CAS
+    // discovers a missing owner. Use that real rejection, without a test hook.
+    assert!(
+        store
+            .replace_task_and_clear_input_for_handoff_if_current(
+                &current,
+                "missing-cancellation-owner",
+                1,
+                true,
+                serde_json::from_value(cancelled.clone())?,
+                notification(&cancelled)?,
+            )?
+            .is_none()
+    );
+    assert!(matches!(store.get_task(&id)?, Some(FinalTask::Working(_))));
+    assert!(!store.is_cancellation_requested(&id)?);
+    assert!(store.mark_dispatch_started(&id).is_err());
+    let refused = store.task_detail(&session, &id)?["progress"].clone();
+    assert_eq!(refused["stage"], "cancellation_reconciliation_required");
+    assert_eq!(refused["physical_quiescence_certified"], false);
+    assert!(refused["physical_quiescent"].is_null());
+    let historical = refused["historical_finalization"].clone();
+    assert_eq!(
+        historical["finalization"]["finalize_certificate"]["effects_dispatched"],
+        false
+    );
+    assert_eq!(engine_footprint(&session)?, before);
+
+    // A separate explicit foreground request may still commit the pending plan.
+    // The old failed Task cancellation must never certify that new work as quiet.
+    let committed = parsed(&crate::agent_facade::fortress_commit(
+        Some(session.clone()),
+        digest.clone(),
+    ))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    let grants = with_task_session(&session, |owner| {
+        let grants = owner.grants.clone();
+        owner
+            .grants
+            .retain(|grant| grant.capability != Capability::Query);
+        Ok(grants)
+    })?;
+    assert!(cancel_transport_monitor(&store, &id).is_err());
+    let denied = store.task_detail(&session, &id)?["progress"].clone();
+    assert_eq!(denied["stage"], "cancellation_reconciliation_required");
+    assert_eq!(denied["physical_quiescence_certified"], false);
+    assert!(denied["physical_quiescent"].is_null());
+    assert_eq!(denied["historical_finalization"], historical);
+    assert!(!store.is_cancellation_requested(&id)?);
+    with_task_session(&session, |owner| {
+        owner.grants = grants;
+        Ok(())
+    })?;
+
+    cancel_transport_monitor(&store, &id)?;
+    let finalized = store.task_detail(&session, &id)?["progress"].clone();
+    assert_eq!(finalized["stage"], "finalized");
+    assert_eq!(finalized["finalization"]["plan_digest"], digest);
+    assert!(
+        finalized["finalization"]["drain_progress"]["actions_total"]
+            .as_u64()
+            .is_some_and(|count| count > 0)
+    );
+    assert_eq!(finalized["finalization"]["drain_progress"]["quiescent"], true);
+    assert_ne!(
+        finalized["finalization"]["finalize_certificate"]["digest"],
+        historical["finalization"]["finalize_certificate"]["digest"]
+    );
+    assert!(
+        finalized["finalization"]["finalize_certificate"]["effects_dispatched"].is_null()
+    );
+    store.record_progress(&id, json!({"stage":"observed","obligation":null}))?;
+    assert_eq!(store.task_detail(&session, &id)?["progress"], finalized);
+    Ok(())
+}
+
+#[test]
+fn task_gate_preserves_missing_record_compare_and_swap_results() -> TestResult {
+    let _serial = crate::test_serial();
+    let session = open("7872482", false, true)?;
+    let digest = plan(&session)?;
+    let donor = LabTaskStore::new()?;
+    let id = create(
+        &donor,
+        "missing-gated-task",
+        &session,
+        &digest,
+        COMMIT_SCHEMA,
+    )?;
+    let expected = donor.get_task_snapshot(&id)?.ok_or("Task missing")?;
+    let store = LabTaskStore::new()?;
+    let before = engine_footprint(&session)?;
+    assert!(!store.request_cancellation_if_current(&expected)?);
+    let cancelled = task_wire(id.as_str(), "cancelled");
+    assert!(
+        store
+            .request_cancellation_and_clear_input_if_current(
+                &expected,
+                serde_json::from_value(cancelled.clone())?,
+                notification(&cancelled)?,
+            )?
+            .is_none()
+    );
+    assert!(
+        store
+            .replace_task_and_clear_input_for_handoff_if_current(
+                &expected,
+                "missing-task-owner",
+                1,
+                true,
+                serde_json::from_value(cancelled.clone())?,
+                notification(&cancelled)?,
+            )?
+            .is_none()
+    );
+    assert!(store.expire_task_execution_if_current(&expected)?.is_none());
+    assert_eq!(engine_footprint(&session)?, before);
+    Ok(())
+}

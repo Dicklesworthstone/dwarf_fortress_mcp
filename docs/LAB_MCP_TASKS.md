@@ -350,6 +350,27 @@ It continues to target that plan after the session prepares or commits other
 work. Ordinary `fortress_cancel(scope="plan")` continues to refer to the last
 committed plan.
 
+Initial dispatch, cancellation admission and monitor expiry share a per-Task
+ownership gate. A cancellation accepted before dispatch prevents that
+supervisor from starting the original later. Its no-dispatch receipt check and
+publication hold the same session ownership as an ordinary foreground commit,
+so another call cannot start that original between the check and publication.
+A reserved dispatch without a retained original receipt remains unresolved and
+cannot receive a zero-effect certificate.
+
+Cancellation evidence survives late supervisor observations and failed
+transport publication. A failed handoff reports
+`cancellation_reconciliation_required`, retains its certificate under
+`historical_finalization`, and leaves current physical quiescence unknown.
+A retry after failed publication rechecks the current original before accepting
+cancellation; an intervening explicit foreground commit requires its actual
+action drain. The supervisor releases the gate before calling upstream
+completion or cancellation methods; their store transition reacquires it.
+Independent Tasks retain separate gates. Expiry closes the monitor's dispatch admission without
+stopping or altering any already-dispatched original work. A separately
+authorized foreground commit remains an explicit operation independent of the
+cancelled or expired Task.
+
 Cancellation processes dependents before prerequisites. It reads retained
 receipts without polling eligibility, records `CancelRequested`, reports
 measurable drain progress, and finalizes only after the original action receipts
@@ -479,6 +500,7 @@ cargo test --locked --offline -p dfmcp-mcp --test tasks_tests
 cargo test --locked --offline -p dfmcp-mcp --lib server::task_session
 cargo test --locked --offline -p dfmcp-mcp --lib task_service::observer_request_tests
 cargo test --locked --offline -p dfmcp-mcp --lib task_service::task_progress
+cargo test --locked --offline -p dfmcp-mcp --lib task_service::task_output_budget_tests
 cargo test --locked --offline -p dfmcp-mcp --lib replay::task_tests
 python scripts/test_replay_bundle_schema.py
 cargo test --locked --offline -p dwarf-fortress-mcp --test modern_tasks_golden

@@ -856,14 +856,25 @@ pub(crate) fn observation_set_view(
 /// task projection cannot cancel an already verified and physically quiet
 /// plan. Loss of action authority cannot be hidden by transport cancellation.
 pub(crate) fn cancellation_admission(session_id: &str, digest: &str) -> Result<bool> {
+    with_cancellation_admission(session_id, digest, |committed| committed)
+}
+
+/// A queued Task must publish its no-dispatch cancellation while the receipt
+/// absence is still current. The callback may publish process-local Task state;
+/// it must not reenter an engine operation or acquire a Task operation gate.
+pub(crate) fn with_cancellation_admission<T>(
+    session_id: &str,
+    digest: &str,
+    publish: impl FnOnce(bool) -> T,
+) -> Result<T> {
     with_task_session(session_id, |session| {
         durability_gate(session)?;
         let ctx = context_for(session, session.next_request_id);
         authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
         authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly)?;
         if !session.commit_receipts.contains_key(digest) {
-            // The retained task has not dispatched its originating commit.
-            return Ok(false);
+            // Keep ordinary foreground commit outside this admission interval.
+            return Ok(publish(false));
         }
         let ids = original_actions(session, digest)?;
         let mut all_verified = true;
@@ -893,7 +904,7 @@ pub(crate) fn cancellation_admission(session_id: &str, digest: &str) -> Result<b
                 "cannot cancel a verified plan task whose original goal holds and physical work is already quiescent",
             ));
         }
-        Ok(true)
+        Ok(publish(true))
     })
 }
 

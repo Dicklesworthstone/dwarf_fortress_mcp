@@ -2403,6 +2403,9 @@ pub fn fortress_open_session_with_session(
                 // Complete publication preceded the budget change. Refresh only
                 // presentation hints; no later fitting can reverse this receipt.
                 refresh_published_output_budget_orientation(&raw);
+                // A retained Task result may now fit. Wake its recovery owner
+                // even when this accepted request repeats the current allowance.
+                crate::task_service::notify_progress();
                 raw
             }
             Err(error) => project_response(

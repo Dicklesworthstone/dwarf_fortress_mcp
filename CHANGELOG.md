@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Fence Task dispatch against cancellation and expiry
+
+- Serialize initial original dispatch, cancellation admission and execution
+  expiry per Task, preserving concurrency across independent sessions.
+- Publish queued no-effect cancellation under session ownership, refuse missing
+  receipts after dispatch reservation, preserve cancellation evidence against
+  late observations and revalidate retries after failed transport publication.
+- Wake Task monitors and retained-result recovery after accepted output-budget
+  negotiation, including unchanged-allowance retries, after publication.
+- Add deterministic cancellation/expiry and real-facade wake regressions.
+  Tests remain unexecuted because the build environment became unavailable;
+  implementation status records the qualification limits.
+
 ## Unreleased — Keep durable stores exclusive while compacting
 
 - Acquire a persistent store-wide file lock before journal recovery and retain

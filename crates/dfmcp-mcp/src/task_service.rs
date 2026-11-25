@@ -306,6 +306,11 @@ impl LabTaskService {
 /// A foreground semantic tool changed the known engine state. Wake every
 /// bounded owned supervisor without advancing time or starting detached work.
 pub(crate) fn notify_progress() {
+    #[cfg(test)]
+    if let Some(signal) = task_output_budget_tests::current_signal() {
+        signal.wake();
+        return;
+    }
     if let Some(service) = SERVICE.get() {
         service.signal.wake();
     }
@@ -460,27 +465,43 @@ impl ApplicationTaskSupervisor for LabTaskService {
                 return Ok(());
             }
             if !definition.is_observer() {
-                let recovering = self.store.mark_dispatch_started(work.task_id())?;
-                let commit = if recovering {
-                    // Receipt loss after restore must never reopen the original
-                    // mutation. A recovered monitor observes retained actions;
-                    // it does not invoke commit again.
-                    Value::Null
-                } else {
-                    self.store
-                        .record_progress(work.task_id(), json!({"stage": "dispatch_started"}))?;
-                    let commit = crate::agent_facade::fortress_commit(
-                        Some(definition.session_id().to_owned()),
-                        definition.original_digest()?.to_owned(),
-                    );
-                    let commit: Value = serde_json::from_str(&commit).map_err(|_| {
-                        McpError::internal_error("laboratory commit response is invalid")
+                let dispatch = self
+                    .store
+                    .with_original_dispatch(work.task_id(), |recovering| {
+                        // This synchronous callback shares the Task's cancellation
+                        // gate through the actual effect call and receipt retention.
+                        // No upstream terminal transition runs while the gate is held.
+                        let commit = if recovering {
+                            // Receipt loss after restore must never reopen the original
+                            // mutation. A recovered monitor observes retained actions;
+                            // it does not invoke commit again.
+                            Value::Null
+                        } else {
+                            self.store.record_progress(
+                                work.task_id(),
+                                json!({"stage": "dispatch_started"}),
+                            )?;
+                            let commit = crate::agent_facade::fortress_commit(
+                                Some(definition.session_id().to_owned()),
+                                definition.original_digest()?.to_owned(),
+                            );
+                            let commit: Value = serde_json::from_str(&commit).map_err(|_| {
+                                McpError::internal_error("laboratory commit response is invalid")
+                            })?;
+                            self.store.record_progress(
+                                work.task_id(),
+                                json!({"stage": "commit_returned", "commit_response": commit}),
+                            )?;
+                            commit
+                        };
+                        Ok((recovering, commit))
                     })?;
-                    self.store.record_progress(
-                        work.task_id(),
-                        json!({"stage": "commit_returned", "commit_response": commit}),
-                    )?;
-                    commit
+                let Some((recovering, commit)) = dispatch else {
+                    work.honor_cancellation(Some(
+                        "original dispatch stopped at cancellation admission; the retained certificate is authoritative"
+                            .to_owned(),
+                    ))?;
+                    return Ok(());
                 };
                 // Output shaping cannot decide whether an effect happened. The
                 // original receipt is authoritative even if the facade needed to
@@ -1081,3 +1102,7 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "task_output_budget_tests.rs"]
+mod task_output_budget_tests;

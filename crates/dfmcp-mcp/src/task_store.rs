@@ -39,6 +39,11 @@ struct TaskRecord {
     /// work. Keep that failure separate from immutable game-proof evidence.
     execution_failure: Option<Value>,
     dispatch_started: bool,
+    /// Serializes original dispatch and cancellation without holding the global
+    /// records lock while entering the engine or upstream store.
+    operation_gate: Arc<Mutex<()>>,
+    /// Final cancellation evidence cannot be overwritten by a late observation.
+    cancellation_evidence: Option<Value>,
     /// The application supervisor future still owns this monitor, even if its
     /// terminal wire transition has just been published.
     supervisor_active: bool,
@@ -202,6 +207,8 @@ impl LabTaskStore {
                 terminal_failure: None,
                 execution_failure: None,
                 dispatch_started: false,
+                operation_gate: Arc::new(Mutex::new(())),
+                cancellation_evidence: None,
                 supervisor_active: false,
             },
         );
@@ -273,8 +280,58 @@ impl LabTaskStore {
         let record = records
             .get_mut(id)
             .ok_or_else(|| McpError::internal_error("laboratory task binding missing"))?;
-        record.progress = progress;
+        if record.cancellation_evidence.is_none() {
+            record.progress = progress;
+        }
         Ok(())
+    }
+
+    fn retain_cancellation(&self, id: &FinalTaskId, progress: Value) -> McpResult<()> {
+        let mut records = self.records()?;
+        let record = records
+            .get_mut(id)
+            .ok_or_else(|| McpError::internal_error("laboratory task binding missing"))?;
+        record.progress = progress.clone();
+        record.cancellation_evidence = Some(progress);
+        Ok(())
+    }
+
+    /// Never wait for this per-Task gate while holding global custody. Its
+    /// caller may acquire session/world ownership and briefly publish records.
+    /// The callback must use inner store transitions, not reenter this wrapper.
+    fn with_operation_gate<T>(
+        &self,
+        id: &FinalTaskId,
+        body: impl FnOnce() -> McpResult<T>,
+    ) -> McpResult<T> {
+        let gate = self
+            .records()?
+            .get(id)
+            .map(|record| Arc::clone(&record.operation_gate))
+            .ok_or_else(|| McpError::invalid_params("Task not found"))?;
+        let _guard = gate
+            .lock()
+            .map_err(|_| McpError::internal_error("laboratory task operation gate poisoned"))?;
+        body()
+    }
+
+    /// Keep the late cancellation check and the exact synchronous commit in
+    /// one ownership interval. Terminal Task transitions happen after return:
+    /// honoring cancellation can itself reenter the gated store methods.
+    pub(crate) fn with_original_dispatch<T>(
+        &self,
+        id: &FinalTaskId,
+        dispatch: impl FnOnce(bool) -> McpResult<T>,
+    ) -> McpResult<Option<T>> {
+        self.with_operation_gate(id, || {
+            if self.inner.is_cancellation_requested(id)?
+                || matches!(self.inner.get_task(id)?, Some(FinalTask::Cancelled(_)))
+            {
+                return Ok(None);
+            }
+            let recovering = self.mark_dispatch_started(id)?;
+            dispatch(recovering).map(Some)
+        })
     }
 
     fn original_work(&self, id: &FinalTaskId) -> McpResult<TaskWork> {
@@ -386,6 +443,16 @@ impl LabTaskStore {
                 "observation Tasks cannot enter original dispatch",
             ));
         }
+        if record.cancellation_evidence.is_some()
+            || !matches!(
+                self.inner.get_task(id)?,
+                Some(FinalTask::Working(_) | FinalTask::InputRequired { .. })
+            )
+        {
+            return Err(McpError::invalid_params(
+                "original Task dispatch is closed; cancellation or terminal evidence must not reopen effects",
+            ));
+        }
         let previously_started = record.dispatch_started;
         record.dispatch_started = true;
         Ok(previously_started)
@@ -406,12 +473,56 @@ impl LabTaskStore {
             .ok_or_else(|| McpError::invalid_params("Task not found"))
     }
 
-    /// The laboratory can prove its bounded drain synchronously. Retain both
-    /// ordered phases before admitting transport cancellation: the upstream
-    /// store may finalize cancellation during lease recovery, so it must never
-    /// hold accepted cancellation intent for unresolved game work.
-    fn ensure_drained(&self, id: &FinalTaskId) -> McpResult<()> {
-        let (work, progress, observation_binding) = {
+    /// The caller holds the per-Task gate through both the engine drain and
+    /// upstream cancellation publication. No accepted cancellation can race an
+    /// initial commit, and no pending dispatch can inherit a no-effect proof.
+    fn drain_and_publish<T>(
+        &self,
+        id: &FinalTaskId,
+        publish: impl FnOnce() -> McpResult<T>,
+    ) -> McpResult<T> {
+        let result = self.drain_and_publish_owned(id, publish);
+        let diagnostic = match &result {
+            Err(error) => error.to_string(),
+            Ok(_) => "upstream cancellation publication did not become current; revalidate the original before retrying"
+                .to_owned(),
+        };
+        self.retain_unaccepted_cancellation(id, diagnostic)?;
+        result
+    }
+
+    /// A failed publication leaves dispatch closed, but its earlier certificate
+    /// is historical until fresh engine admission permits another attempt.
+    fn retain_unaccepted_cancellation(&self, id: &FinalTaskId, message: String) -> McpResult<()> {
+        if self.inner.is_cancellation_requested(id)?
+            || matches!(self.inner.get_task(id)?, Some(FinalTask::Cancelled(_)))
+        {
+            return Ok(());
+        }
+        let mut records = self.records()?;
+        let record = records
+            .get_mut(id)
+            .ok_or_else(|| McpError::invalid_params("Task not found"))?;
+        if !record.work.is_observer()
+            && let Some(evidence) = &record.cancellation_evidence
+        {
+            record.progress = json!({
+                "stage":"cancellation_reconciliation_required",
+                "original_dispatch_closed":true,
+                "physical_quiescent":null,"physical_quiescence_certified":false,
+                "message":message,
+                "historical_finalization":evidence,
+            });
+        }
+        Ok(())
+    }
+
+    fn drain_and_publish_owned<T>(
+        &self,
+        id: &FinalTaskId,
+        publish: impl FnOnce() -> McpResult<T>,
+    ) -> McpResult<T> {
+        let (work, progress, observation_binding, cancellation_finalized) = {
             let records = self.records()?;
             let record = records.get(id).ok_or_else(|| {
                 McpError::internal_error("original laboratory task work is unavailable")
@@ -420,6 +531,7 @@ impl LabTaskStore {
                 record.work.clone(),
                 record.progress.clone(),
                 record.observation_binding.clone(),
+                record.cancellation_evidence.is_some(),
             )
         };
         if work.is_observer() {
@@ -428,56 +540,94 @@ impl LabTaskStore {
             // effect grants, and cannot run the owning-plan drain below.
             crate::server::task_session::read_authority(work.session_id())
                 .map_err(|error| McpError::invalid_params(error.to_string()))?;
-            if progress["stage"] == "monitor_finalized" {
-                return Ok(());
+            if !cancellation_finalized {
+                let mut finalized = json!({
+                    "stage":"monitor_finalized","monitor_kind":work.monitor_kind(),
+                    "session_id":work.session_id(),"plan_digest":work.plan_digest(),
+                    "cancellation_scope":"monitor_only","monitor_stopped":true,
+                    "effect_cancellation_requested":false,"effects_dispatched_by_task":false,
+                    "physical_work_changed":false,"physical_quiescence_certified":false,
+                    "original_receipts_changed":false,"dispatch_handles_restored":false,
+                    "last_observation":progress,
+                });
+                work.attach_selection(&mut finalized);
+                if let Some(binding) = observation_binding {
+                    finalized["actual_plan_digests"] = binding["plan_digests"].clone();
+                    finalized["observation_binding"] = binding;
+                }
+                self.retain_cancellation(id, finalized)?;
             }
-            let mut finalized = json!({
-                "stage":"monitor_finalized","monitor_kind":work.monitor_kind(),
-                "session_id":work.session_id(),"plan_digest":work.plan_digest(),
-                "cancellation_scope":"monitor_only","monitor_stopped":true,
-                "effect_cancellation_requested":false,"effects_dispatched_by_task":false,
-                "physical_work_changed":false,"physical_quiescence_certified":false,
-                "original_receipts_changed":false,"dispatch_handles_restored":false,
-                "last_observation":progress,
-            });
-            work.attach_selection(&mut finalized);
-            if let Some(binding) = observation_binding {
-                finalized["actual_plan_digests"] = binding["plan_digests"].clone();
-                finalized["observation_binding"] = binding;
-            }
-            return self.record_progress(id, finalized);
+            return publish();
         }
-        if progress["stage"] == "finalized"
-            && progress["finalization"]["finalize_certificate"].is_object()
+        if cancellation_finalized
+            && (self.inner.is_cancellation_requested(id)?
+                || matches!(self.inner.get_task(id)?, Some(FinalTask::Cancelled(_))))
         {
-            return Ok(());
+            return publish();
         }
-        let committed = crate::server::task_session::cancellation_admission(
+
+        // A foreground commit does not use the Task gate. Hold engine ownership
+        // from the receipt check through a queued Task's proof and cancellation
+        // publication, so that ordinary same-plan commit cannot slip between
+        // those steps. A later explicit foreground commit remains independent.
+        enum Admission<T, F> {
+            Published(T),
+            Drain(F),
+        }
+        let admitted = crate::server::task_session::with_cancellation_admission(
             work.session_id(),
             work.original_digest()?,
+            |committed| -> McpResult<_> {
+                if committed {
+                    return Ok(Admission::Drain(publish));
+                }
+                {
+                    let records = self.records()?;
+                    let record = records.get(id).ok_or_else(|| {
+                        McpError::internal_error("original laboratory task work is unavailable")
+                    })?;
+                    if record.dispatch_started {
+                        return Err(McpError::invalid_params(
+                            "original dispatch started without a retained receipt; cancellation cannot certify no effects",
+                        ));
+                    }
+                }
+                let proof = json!({"plan_digest": work.plan_digest(), "effects_dispatched": false,
+                    "statement": "this task was cancelled before the original plan dispatched"});
+                self.retain_cancellation(id, json!({"stage": "finalized",
+                    "request": {"stage": "cancel_requested", "effects_dispatched": false},
+                    "finalization": {"stage": "finalized", "drain_progress": {
+                        "actions_total": 0, "remaining_nonterminal": 0, "drained": 0, "quiescent": true},
+                        "finalize_certificate": {"digest": dfmcp_core::Digest32::of_bytes(proof.to_string().as_bytes()).to_hex(),
+                        "statement": proof["statement"], "effects_dispatched": false}}}))?;
+                publish().map(Admission::Published)
+            },
         )
-        .map_err(|error| McpError::invalid_params(error.to_string()))?;
-        if !committed && progress["stage"] == "queued" {
-            let proof = json!({"plan_digest": work.plan_digest(), "effects_dispatched": false,
-                "statement": "this task was cancelled before the original plan dispatched"});
-            return self.record_progress(id, json!({"stage": "finalized",
-                "request": {"stage": "cancel_requested", "effects_dispatched": false},
-                "finalization": {"stage": "finalized", "drain_progress": {
-                    "actions_total": 0, "remaining_nonterminal": 0, "drained": 0, "quiescent": true},
-                    "finalize_certificate": {"digest": dfmcp_core::Digest32::of_bytes(proof.to_string().as_bytes()).to_hex(),
-                    "statement": proof["statement"], "effects_dispatched": false}}}));
-        }
+        .map_err(|error| McpError::invalid_params(error.to_string()))??;
+        let publish = match admitted {
+            Admission::Published(result) => return Ok(result),
+            Admission::Drain(publish) => publish,
+        };
         let requested =
             crate::server::task_session::drain(work.session_id(), work.original_digest()?, false)
                 .map_err(|error| McpError::invalid_params(error.to_string()))?;
-        self.record_progress(id, requested.clone())?;
+        {
+            // A fresh explicit cancellation may advance its own progress while
+            // retaining any earlier certificate as historical evidence.
+            let mut records = self.records()?;
+            let record = records
+                .get_mut(id)
+                .ok_or_else(|| McpError::invalid_params("Task not found"))?;
+            record.progress = requested.clone();
+        }
         let finalized =
             crate::server::task_session::drain(work.session_id(), work.original_digest()?, true)
                 .map_err(|error| McpError::invalid_params(error.to_string()))?;
-        self.record_progress(
+        self.retain_cancellation(
             id,
             json!({"stage": "finalized", "request": requested, "finalization": finalized}),
-        )
+        )?;
+        publish()
     }
 
     /// Opaque task identifiers confer no authority. Callers recheck the
@@ -651,6 +801,18 @@ impl FinalTaskStore for LabTaskStore {
         expected: &FinalTaskSnapshot,
     ) -> McpResult<Option<FinalTaskSnapshot>> {
         let id = &expected.task().base().task_id;
+        // Expiry and original dispatch share admission. Clone the gate before
+        // waiting so a committing supervisor can still publish its records.
+        let gate = {
+            let records = self.records()?;
+            let Some(record) = records.get(id) else {
+                return Ok(None);
+            };
+            Arc::clone(&record.operation_gate)
+        };
+        let _guard = gate
+            .lock()
+            .map_err(|_| McpError::internal_error("laboratory task operation gate poisoned"))?;
         let mut records = self.records()?;
         let Some(record) = records.get_mut(id) else {
             return Ok(None);
@@ -820,18 +982,27 @@ impl FinalTaskStore for LabTaskStore {
         task: FinalTask,
         notification: FinalTaskStatusNotification,
     ) -> McpResult<Option<FinalTaskSnapshot>> {
-        if cancellation_required {
-            self.ensure_drained(&expected.task().base().task_id)?;
+        if !self.records()?.contains_key(&expected.task().base().task_id) {
+            return Ok(None);
         }
-        self.inner
-            .replace_task_and_clear_input_for_handoff_if_current(
-                expected,
-                owner_id,
-                dispatch_fence,
-                cancellation_required,
-                task,
-                notification,
-            )
+        self.with_operation_gate(&expected.task().base().task_id, || {
+            let publish = || {
+                self.inner
+                    .replace_task_and_clear_input_for_handoff_if_current(
+                        expected,
+                        owner_id,
+                        dispatch_fence,
+                        cancellation_required,
+                        task,
+                        notification,
+                    )
+            };
+            if cancellation_required {
+                self.drain_and_publish(&expected.task().base().task_id, publish)
+            } else {
+                publish()
+            }
+        })
     }
 
     fn update_working_status_for_handoff_if_current(
@@ -1050,15 +1221,21 @@ impl FinalTaskStore for LabTaskStore {
         owner_id: &str,
         dispatch_fence: u64,
     ) -> McpResult<bool> {
-        if self.inner.is_cancellation_requested(task_id)? {
-            self.ensure_drained(task_id)?;
-        }
-        self.inner.finish_handoff_dispatch_for_owner_if_current(
-            task_id,
-            generation,
-            owner_id,
-            dispatch_fence,
-        )
+        self.with_operation_gate(task_id, || {
+            let publish = || {
+                self.inner.finish_handoff_dispatch_for_owner_if_current(
+                    task_id,
+                    generation,
+                    owner_id,
+                    dispatch_fence,
+                )
+            };
+            if self.inner.is_cancellation_requested(task_id)? {
+                self.drain_and_publish(task_id, publish)
+            } else {
+                publish()
+            }
+        })
     }
 
     fn request_cancellation_and_clear_input_if_current(
@@ -1068,43 +1245,57 @@ impl FinalTaskStore for LabTaskStore {
         cancelled_notification: FinalTaskStatusNotification,
     ) -> McpResult<Option<FinalTaskSnapshot>> {
         let id = &expected.task().base().task_id;
-        let Some(current) = self.inner.get_task_snapshot(id)? else {
-            return Ok(None);
-        };
-        if current.generation() != expected.generation() {
+        if !self.records()?.contains_key(id) {
             return Ok(None);
         }
-        let work = self.original_work(id)?;
-        if !work.is_observer() {
-            crate::server::task_session::cancellation_admission(
-                work.session_id(),
-                work.original_digest()?,
-            )
-            .map_err(|error| McpError::invalid_params(error.to_string()))?;
-        }
-        self.ensure_drained(id)?;
-        self.inner.request_cancellation_and_clear_input_if_current(
-            expected,
-            cancelled_task,
-            cancelled_notification,
-        )
+        self.with_operation_gate(id, || {
+            let Some(current) = self.inner.get_task_snapshot(id)? else {
+                return Ok(None);
+            };
+            if current.generation() != expected.generation() {
+                return Ok(None);
+            }
+            let work = self.original_work(id)?;
+            if !work.is_observer()
+                && let Err(error) = crate::server::task_session::cancellation_admission(
+                    work.session_id(),
+                    work.original_digest()?,
+                )
+            {
+                let error = McpError::invalid_params(error.to_string());
+                self.retain_unaccepted_cancellation(id, error.to_string())?;
+                return Err(error);
+            }
+            self.drain_and_publish(id, || {
+                self.inner.request_cancellation_and_clear_input_if_current(
+                    expected,
+                    cancelled_task,
+                    cancelled_notification,
+                )
+            })
+        })
     }
 
     fn request_cancellation(&self, task_id: &FinalTaskId) -> McpResult<()> {
-        self.ensure_drained(task_id)?;
-        self.inner.request_cancellation(task_id)
+        self.with_operation_gate(task_id, || {
+            self.drain_and_publish(task_id, || self.inner.request_cancellation(task_id))
+        })
     }
 
     fn request_cancellation_if_current(&self, expected: &FinalTaskSnapshot) -> McpResult<bool> {
         let id = &expected.task().base().task_id;
-        let Some(current) = self.inner.get_task_snapshot(id)? else {
-            return Ok(false);
-        };
-        if current.generation() != expected.generation() {
+        if !self.records()?.contains_key(id) {
             return Ok(false);
         }
-        self.ensure_drained(id)?;
-        self.inner.request_cancellation_if_current(expected)
+        self.with_operation_gate(id, || {
+            let Some(current) = self.inner.get_task_snapshot(id)? else {
+                return Ok(false);
+            };
+            if current.generation() != expected.generation() {
+                return Ok(false);
+            }
+            self.drain_and_publish(id, || self.inner.request_cancellation_if_current(expected))
+        })
     }
 
     fn is_cancellation_requested(&self, task_id: &FinalTaskId) -> McpResult<bool> {

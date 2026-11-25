@@ -1,5 +1,35 @@
 # Implementation Status
 
+## Unreleased — Order Task cancellation, dispatch and result recovery
+
+Original-plan Tasks now hold a per-Task gate through initial synchronous
+dispatch and cancellation admission/publication. Queued cancellation verifies
+receipt absence and publishes its decision under the same session ownership
+used by foreground commit. A dispatch reservation without a retained original
+receipt cannot certify zero effects. Cancellation evidence fences later Task
+dispatch and survives late observations or failed transport publication;
+retries after failed publication revalidate any intervening foreground work.
+Execution expiry uses the same dispatch gate while preserving existing
+original actions and immutable evidence. Passive observer cancellation remains
+monitor-only, and the global records lock is never held across engine effects.
+
+Accepted existing-session output renegotiation now wakes both active monitors
+and the Task service recovery owner after budget publication, including an
+accepted unchanged allowance. Retained terminal evidence can be retried under
+the current output budget without requiring another game operation.
+
+Five lifecycle regression groups cover cancellation entry points, late
+dispatch, reserved dispatch without receipts, expiry, failed publication and
+missing-record transitions. A sixth test covers real facade-to-recovery wakeup. Independent review checked engine/session/records
+lock ordering and upstream cancellation paths. These new tests have not run:
+the execution environment is unavailable. No full MCP compilation, stdio
+execution, workspace verification, release qualification or live admission is
+claimed for this increment.
+
+Owners: `df-fastmcp-conformance-5pj.3`,
+`df-tasks-projection-tests-yy4`, and `df-lab-session-output-b5r`
+(all remain in progress).
+
 ## Unreleased — Preserve durable store ownership through compaction
 
 Durable laboratory stores now acquire a persistent `store.lock` before
