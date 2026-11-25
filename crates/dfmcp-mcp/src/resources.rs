@@ -37,6 +37,7 @@ use dfmcp_core::{Capability, Digest32, EntityId, RiskTier, SessionId, StateAncho
 pub(crate) mod checkpoints;
 pub(crate) mod goals;
 pub(crate) mod plans;
+mod replay;
 pub(crate) mod state;
 
 /// One template serves every session view. The pinned fastmcp router admits
@@ -459,15 +460,7 @@ pub(crate) fn session_anchor(session_id_hex: &str, uri: &str) -> McpResult<Vec<R
 /// `df://session/{session_id}/replay` — the session's deterministic replay
 /// bundle. Requires the negotiated `observe` capability; never changes state.
 pub(crate) fn session_replay(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
-    let operation = "df://session/replay";
-    inspect_session(session_id_hex, operation, |guard| {
-        let ctx = read_context(guard);
-        authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)
-            .map_err(|error| denial(operation, error))?;
-        let mut payload = crate::server::resource_replay_bundle(guard);
-        payload["resource"] = json!(uri);
-        Ok(text_content(uri, payload.to_string()))
-    })
+    replay::read(session_id_hex, uri, "replay")
 }
 
 /// Modern Tasks have no tasks/list method. Discovery stays in the existing
@@ -782,7 +775,7 @@ pub struct SessionViewResource;
 const SESSION_VIEW_DESCRIPTION: &str = "Session views: summary (bounded snapshot projection), \
      capabilities (negotiated grants and version record), handoff (resumable packet with anchor, \
      grants, pending plan, open actions, obligations and an ordered resume protocol), replay \
-     (dfmcp.replay.bundle/1 of every recorded call for deterministic re-execution), anchor \
+     (exact deterministic replay bundle or bounded digest-pinned UTF-8 pages), anchor \
      (the session fortress's current canonical anchor), tasks and tasks-{offset} (bounded modern \
      MCP task handles, active first), task-{taskId} (original plan progress, cancellation drains \
      and final evidence; laboratory process only), entity-{id}~{generation}~{anchor_digest} \
@@ -844,6 +837,7 @@ impl ResourceHandler for SessionViewResource {
             "capabilities" => session_capabilities(raw, uri),
             "handoff" => session_handoff(raw, uri),
             "replay" => session_replay(raw, uri),
+            page if page.starts_with("replay-") => replay::read(raw, uri, page),
             "anchor" => session_anchor(raw, uri),
             entity if entity.starts_with("entity-") => session_entity(raw, uri, entity),
             "tasks" => session_tasks(raw, uri, 0),

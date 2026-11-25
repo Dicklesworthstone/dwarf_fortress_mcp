@@ -45,7 +45,8 @@ continuity metadata immutable.
 | `summary` | Bounded current snapshot summary |
 | `capabilities` | The session's negotiated grants and version record; self-description only |
 | `handoff` | Resumable current packet with pending plan, open actions, obligations and resume protocol |
-| `replay` | Recorded calls in a deterministic replay bundle |
+| `replay` | Exact CLI replay bundle, or its first bounded UTF-8 page when the whole response exceeds the negotiated output allowance |
+| `replay-{digest}~{offset}` | Byte continuation for the exact SHA-256 replay document, checked against the current session transcript |
 | `anchor` | Current source anchor and complete version tuple |
 | `entity-{id}~{generation}~{anchor_digest}` | One Query-authorized entity at the exact current complete anchor, discovered through entity query rows |
 | `tasks`, `tasks-{offset}` | Bounded modern task discovery |
@@ -76,6 +77,14 @@ Entity references require the current anchor, matching entity generation and
 current negotiated `query` authority. Retained `state` pages instead use the
 source hash and `observe` authority described below; they explicitly mark
 historical continuity and cannot supply fresh mutation preconditions.
+
+Replay resource reads leave the call log untouched. For a `dfmcp.replay.page/1`
+response, follow `next`, concatenate `part` values in byte-offset order,
+and check `total_bytes` and the SHA-256 `digest` of the UTF-8 bytes. The
+result is the original `dfmcp.replay.bundle/1` or `/2` document accepted by
+the replay CLI. The same read authority is required for each page. A changed
+transcript gives `cursor_gap` and requires a fresh read of `replay`.
+The full source still has to fit the session's record, byte and time budgets.
 
 ## Reading an immutable world
 

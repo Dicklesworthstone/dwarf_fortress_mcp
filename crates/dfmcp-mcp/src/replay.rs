@@ -69,6 +69,58 @@ impl ReplayLog {
         self.not_replayable.get_or_insert(reason);
     }
 
+    /// Bound caller-controlled input before cloning entries into an export.
+    /// The caller also checks the complete encoded bundle including its fixed
+    /// metadata, anchors, and evidence digests.
+    pub(crate) fn admit_export(
+        &self,
+        budget: dfmcp_core::WorkBudget,
+        started: std::time::Instant,
+    ) -> dfmcp_core::Result<()> {
+        let exhausted = || dfmcp_core::DfmcpError::new(
+            dfmcp_core::ErrorCode::BudgetExceeded,
+            "complete replay source exceeds the negotiated record, byte or wall budget",
+        );
+        if self.calls.len() > budget.max_entities as usize {
+            return Err(exhausted());
+        }
+        // Serialize variable-length recorded values by reference into a
+        // counting sink. No potentially oversized input is cloned here.
+        struct SourceLimit {
+            bytes_left: u64,
+            wall: std::time::Duration,
+            started: std::time::Instant,
+        }
+        impl std::io::Write for SourceLimit {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if bytes.len() as u64 > self.bytes_left || self.started.elapsed() >= self.wall {
+                    return Err(std::io::Error::other("replay source budget exhausted"));
+                }
+                self.bytes_left -= bytes.len() as u64;
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut limit = SourceLimit {
+            bytes_left: budget.max_bytes.min(MAX_BUNDLE_BYTES as u64),
+            wall: std::time::Duration::from_millis(budget.max_wall_millis),
+            started,
+        };
+        for entry in &self.calls {
+            match entry {
+                RecordedEntry::Tool(call) => serde_json::to_writer(&mut limit, &call.arguments),
+                RecordedEntry::TaskDrain(event) => {
+                    serde_json::to_writer(&mut limit, &(&event.before, &event.after))
+                }
+            }
+            .map_err(|_| exhausted())?;
+        }
+        Ok(())
+    }
+
     fn has_capacity(&mut self) -> bool {
         if self.calls.len() < MAX_RECORDED_CALLS {
             return true;

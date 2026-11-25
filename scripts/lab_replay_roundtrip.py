@@ -5,7 +5,7 @@ Then tamper with one recorded call and show the replayer localizing it.
 
 Usage: python3 scripts/lab_replay_roundtrip.py [path/to/dwarf-fortress-mcp]
 """
-import json, subprocess, sys, tempfile, os
+import hashlib, json, subprocess, sys, tempfile, os
 
 BINARY = sys.argv[1] if len(sys.argv) > 1 else "target/debug/dwarf-fortress-mcp"
 META = {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
@@ -35,8 +35,26 @@ pl = tool("fortress_plan", {"session_id": sid, "actions": json.dumps([{"action":
 tool("fortress_commit", {"session_id": sid, "plan_digest": pl["plan_digest"]})
 for _ in range(3):
     tool("fortress_wait", {"session_id": sid, "max_game_ticks": 60})
-res = call("resources/read", {"uri": f"df://session/{sid}/replay"})
-bundle = json.loads(res["result"]["contents"][0]["text"])
+def read_resource(uri):
+    return json.loads(call("resources/read", {"uri": uri})["result"]["contents"][0]["text"])
+
+bundle = read_resource(f"df://session/{sid}/replay")
+if bundle.get("schema") == "dfmcp.replay.page/1":
+    page = bundle
+    digest, total = page["digest"], page["total_bytes"]
+    document = bytearray()
+    while True:
+        assert page["schema"] == "dfmcp.replay.page/1" and page["digest"] == digest
+        assert page["total_bytes"] == total and page["offset"] == len(document)
+        part = page["part"].encode("utf-8")
+        assert part and len(document) + len(part) <= total
+        document.extend(part)
+        if page["complete"]:
+            assert page["next"] is None
+            break
+        page = read_resource(page["next"])
+    assert len(document) == total and hashlib.sha256(document).hexdigest() == digest
+    bundle = json.loads(document)
 p.stdin.close(); p.wait(timeout=10)
 print("recorded calls:", len(bundle["calls"]), "replayable:", bundle["replayable"])
 with tempfile.TemporaryDirectory() as d:
@@ -46,7 +64,6 @@ with tempfile.TemporaryDirectory() as d:
     print("replay:", out.stdout.strip(), "exit", out.returncode)
     assert out.returncode == 0
     bundle["calls"][3]["arguments"]["max_game_ticks"] = 59
-    import hashlib
     calls = json.dumps(bundle["calls"], separators=(",", ":"), sort_keys=True)
     bundle["calls_digest"] = hashlib.sha256(b"dfmcp-replay-bundle-calls/1\0" + calls.encode()).hexdigest()
     json.dump(bundle, open(path, "w"))
