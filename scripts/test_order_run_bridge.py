@@ -96,8 +96,8 @@ def main():
             ('template-recognition', 'bridge/dfhack-order-run-v1_14/native_capture.h',
              'return matches ? code : 0;', 'return (matches || a.amount_total > 0) ? code : 0;'),
             ('same-tick-samples', 'bridge/common/order_run.h',
-             'current.clock.tick >= record.counted_tick + record.goal.interval',
-             'current.clock.tick >= record.counted_tick'),
+             'current->clock.tick >= record.counted_tick + record.goal.interval',
+             'current->clock.tick >= record.counted_tick'),
         ]
         sources = ['bridge/common/order_run.h', 'bridge/common/bounded_run.h',
                    'bridge/common/order_run_wire.h', 'bridge/common/retained_snapshot.h',

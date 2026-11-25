@@ -150,6 +150,27 @@ void target_drift_and_queue_validation() {
         check(!f.observe(8).accepted()); // Bad complete queue cannot prove selected absence.
     }
 }
+void broken_queue_during_run() {
+    for (int stop = 0; stop < 3; ++stop) {
+        Fixture f;
+        const int unpauses = World::unpauses;
+        check(f.prepare().accepted() && f.commit().accepted());
+        f.world.manager_orders.all.push_back(nullptr);
+        if (stop == 0) f.step(); // The work-order observation itself fails.
+        if (stop == 1) check(f.cancel().accepted());
+        if (stop == 2) {
+            check(plugin_onstatechange(output, SC_BEGIN_UNLOAD) == CR_FAILURE);
+            f.step();
+        }
+        const auto &record = f.record();
+        check(record.run->phase == run::clock::Phase::Stopped && record.run->pause_verified);
+        check(World::paused && !engine.active() && !record.predicate_observed());
+        check(record.run->reason == (stop == 0 ? run::clock::Reason::NativeFailure
+            : stop == 1 ? run::clock::Reason::Cancelled : run::clock::Reason::Shutdown));
+        check(f.query().accepted() && f.commit().accepted() && World::unpauses == unpauses + 1);
+        check(!f.observe().accepted());
+    }
+}
 void stale_source_and_ambiguous_responses() {
     for (int n = 0; n < 3; ++n) {
         Fixture f; check(f.prepare().accepted() && f.commit().accepted()); const int pauses = World::pauses;
@@ -206,7 +227,7 @@ int main() {
     setenv("DFMCP_ALLOW_UNADMITTED_ORDER_RUN_V1_14", "1", 1); setenv("DFMCP_ORDER_RUN_TOKEN", std::string(32,'x').c_str(), 1);
     unsetenv("DFMCP_ADMITTED_BRIDGE_PROTOCOL");
     canonical_vectors(); authentication_and_shapes(); predicate_callbacks_and_disconnected_clients();
-    target_drift_and_queue_validation(); stale_source_and_ambiguous_responses(); independent_setter_scope(); unload_drain(); invalid_clocks_and_maximum_wire();
+    target_drift_and_queue_validation(); broken_queue_during_run(); stale_source_and_ambiguous_responses(); independent_setter_scope(); unload_drain(); invalid_clocks_and_maximum_wire();
     check(suspension_depth == 0);
     std::cout << "order-run bridge: " << checks << " assertions passed\n";
 }

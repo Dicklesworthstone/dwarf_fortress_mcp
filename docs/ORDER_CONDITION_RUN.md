@@ -56,8 +56,10 @@ historical, not a claim that the game is currently paused.
 
 A native callback opportunity is required to enforce either limit. There is no
 hard real-time or exact-tick guarantee. Missing/invalid native state triggers
-safety stopping rather than guessed progress. A complete target capture may be
-needed before this profile can verify a stop after a read failure.
+safety stopping. Each running callback uses one validated order capture for both
+clock limits and the order predicate. After a stop begins, the owner checks the
+fortress identity and clock independently of the manager queue. A queue read
+failure can therefore end in a verified pause while order progress stays unknown.
 
 ## Executed evidence
 

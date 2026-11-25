@@ -13,6 +13,9 @@ int main() {
         Capture value{{41,0,100,true,true,true},{41,7,"fort"},9,10,true,1,10,10,0};
         bool fail_pause = false, fail_read = false;
         auto read = [&](std::uint32_t) { if (fail_read) throw clock::Failure(5); return value; };
+        auto clock_read = [&](const Identity &expected) {
+            return expected == value.identity ? value.clock : clock::Snapshot{};
+        };
         auto write = [&](const Identity &i, bool p) {
             require(i == value.identity, 4); if (p && fail_pause) throw clock::Failure(5); value.clock.paused = p;
         };
@@ -23,7 +26,7 @@ int main() {
         const std::string key = "vector"; const auto digest = plan_digest(limits, goal, value);
         const auto &record = engine.prepare(key, digest, limits, goal, value, now, read);
         if (mode == 4) --value.left; // exact witness drift before commit
-        if (mode != 0) engine.commit(key, digest, now, read, write);
+        if (mode != 0) engine.commit(key, digest, now, read, clock_read, write);
         if (mode == 1 || mode == 2 || mode == 3 || mode == 5 || mode == 14) {
             value.status = mode == 2 ? 2 : 1; if (mode == 3) value.left = 5;
             if (mode == 5 || mode == 14) fail_pause = true;
@@ -35,8 +38,8 @@ int main() {
         if (mode == 10) { value.present = false; value.recipe = 0; value.total = value.left = 0; }
         if (mode == 11) value.recipe = 2;
         if (mode == 12) fail_read = true;
-        if (mode != 0 && mode != 4 && mode != 13) { ++value.clock.tick; engine.service(now, read, write); }
-        if (mode == 14) { value.identity.site = 8; engine.service(now, read, write); }
+        if (mode != 0 && mode != 4 && mode != 13) { ++value.clock.tick; engine.service(now, read, clock_read, write); }
+        if (mode == 14) { value.identity.site = 8; engine.service(now, read, clock_read, write); }
         std::cout << mode << '=' << hex_bytes(encode_record(record)) << '\n';
     }
     return 0;

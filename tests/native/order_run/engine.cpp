@@ -23,6 +23,9 @@ struct Case {
         if (fail_read) throw clock::Failure(5);
         return value;
     }; }
+    auto clock_reader() { return [this](const Identity &expected) {
+        return expected == value.identity ? value.clock : clock::Snapshot{};
+    }; }
     auto writer() { return [this](const Identity &identity, bool paused) {
         require(value.identity == identity && value.clock.loaded, 4);
         if (paused) {
@@ -36,10 +39,10 @@ struct Case {
     const Record &prepare(Goal goal = {}, clock::Spec limits = {100, 1000}, std::string key = "run") {
         return engine.prepare(key, plan, limits, goal, engine.observe(9, reader()), now, reader());
     }
-    const Record &commit(std::string key = "run") { return engine.commit(key, plan, now, reader(), writer()); }
+    const Record &commit(std::string key = "run") { return engine.commit(key, plan, now, reader(), clock_reader(), writer()); }
     void step(std::uint64_t ticks = 1, int ms = 1) {
         value.clock.tick += ticks; now += std::chrono::milliseconds(ms);
-        engine.service(now, reader(), writer());
+        engine.service(now, reader(), clock_reader(), writer());
     }
 };
 void predicates() {
@@ -137,19 +140,23 @@ void limits_faults_and_cancellation() {
     const auto evidence = *r.sample;
     c.value.status = 0; c.step(); check(*r.sample == evidence && c.unpauses == 1 && c.engine.active());
     refused(8, [&] { c.prepare({}, {100, 1000}, "next"); });
-    c.fail_pause = false; c.fail_after_pause = true; c.step(); check(r.run->pause_verified && *r.sample == evidence);
+    c.fail_pause = false; c.fail_after_pause = true; c.step();
+    check(!r.run->pause_verified && c.engine.active() && *r.sample == evidence);
+    c.fail_after_pause = false; c.step();
+    check(r.run->pause_verified && !c.engine.active() && *r.sample == evidence);
     Case d; const auto &s = d.prepare(); d.fail_after_unpause = true; d.commit();
     check(d.unpauses == 1 && s.run->pause_verified && !s.predicate_observed());
     d.commit(); check(d.unpauses == 1);
     Case e; const auto &t = e.prepare(); e.commit(); e.fail_read = true; e.step();
-    check(e.value.clock.paused && t.run->phase == clock::Phase::Stopping && !t.run->pause_verified);
+    check(e.value.clock.paused && t.run->phase == clock::Phase::Stopped && t.run->pause_verified
+        && t.trigger == Trigger::NativeFailure && !t.predicate_observed());
     e.fail_read = false; e.step(); check(t.run->pause_verified && !t.predicate_observed());
     Case f; const auto &u = f.prepare();
-    f.engine.cancel("run", f.plan, f.now, f.reader(), f.writer()); f.commit();
+    f.engine.cancel("run", f.plan, f.now, f.clock_reader(), f.writer()); f.commit();
     check(u.run->phase == clock::Phase::Refused && f.unpauses == 0);
     Case h; const auto &v = h.prepare(); h.commit(); h.fail_pause = true;
-    check(!h.engine.shutdown(h.now, h.reader(), h.writer()));
-    h.fail_pause = false; check(h.engine.shutdown(h.now, h.reader(), h.writer()) && v.run->pause_verified);
+    check(!h.engine.shutdown(h.now, h.clock_reader(), h.writer()));
+    h.fail_pause = false; check(h.engine.shutdown(h.now, h.clock_reader(), h.writer()) && v.run->pause_verified);
 }
 void validation_and_capacity() {
     for (Goal goal : {Goal{Predicate::Approved,1,1,1}, Goal{Predicate::Approved,0,0,1},

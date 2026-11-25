@@ -22,13 +22,16 @@ enum class Gate : unsigned char { Idle, Busy, Closing };
 std::atomic<Gate> gate{Gate::Idle};
 std::atomic<bool> drain_requested{false};
 run::Capture read_native(std::uint32_t id) { return dfmcp_order_run_native::capture(generation, id); }
+run::clock::Snapshot read_clock(const run::Identity &expected) {
+    return dfmcp_order_run_native::read_clock(generation, expected);
+}
 void write_native(const run::Identity &expected, bool paused) { dfmcp_order_run_native::set_pause(generation, expected, paused); }
 void release_idle_gate() {
     if (!engine.active()) { auto expected = Gate::Busy; (void)gate.compare_exchange_strong(expected, Gate::Idle); }
 }
 void service() {
-    if (drain_requested.load()) (void)engine.shutdown(run::Clock::now(), read_native, write_native);
-    else engine.service(run::Clock::now(), read_native, write_native);
+    if (drain_requested.load()) (void)engine.shutdown(run::Clock::now(), read_clock, write_native);
+    else engine.service(run::Clock::now(), read_native, read_clock, write_native);
     release_idle_gate();
 }
 void initialize_reply(const wire::Request &in, wire::Reply &out) {
@@ -90,12 +93,12 @@ void execute(const wire::Request &in, wire::Reply &out, Operation op) {
         const auto *known = engine.query(in.idempotency_key(), in.plan_digest());
         if (op != Operation::Query) {
             run::require(known && in.prepare_token() == run::token_for(known->run->key, known->run->plan), 7);
-            if (op == Operation::Cancel) known = &engine.cancel(in.idempotency_key(), in.plan_digest(), run::Clock::now(), read_native, write_native);
+            if (op == Operation::Cancel) known = &engine.cancel(in.idempotency_key(), in.plan_digest(), run::Clock::now(), read_clock, write_native);
             else if (known->run->phase == run::clock::Phase::Prepared) {
                 auto expected = Gate::Idle;
                 run::require(!drain_requested.load() && gate.compare_exchange_strong(expected, Gate::Busy), 8);
                 run::require(!drain_requested.load(), 8);
-                known = &engine.commit(in.idempotency_key(), in.plan_digest(), run::Clock::now(), read_native, write_native);
+                known = &engine.commit(in.idempotency_key(), in.plan_digest(), run::Clock::now(), read_native, read_clock, write_native);
             }
         }
         if (known) out.set_effect_record(run::encode_record(*known));

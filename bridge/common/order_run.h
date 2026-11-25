@@ -88,7 +88,7 @@ struct Record {
     Goal goal;
     Trigger trigger = Trigger::None;
     std::uint32_t stable_samples = 0;
-    std::uint64_t counted_tick = 0, last_tick = 0;
+    std::uint64_t counted_tick = 0;
     std::int32_t last_left = 0;
     std::uint32_t last_horizon = 0;
     std::optional<Capture> sample;
@@ -123,7 +123,7 @@ public:
         goal.validate(limits, before);
         require(!goal.matches(before), 4); // Already true: never unpause just to observe it again.
         Record value; value.before = before; value.goal = goal; value.counted_tick = before.clock.tick;
-        value.last_tick = before.clock.tick; value.last_left = before.left; value.last_horizon = before.next_order;
+        value.last_left = before.left; value.last_horizon = before.next_order;
         auto result = records_.emplace(key, std::move(value));
         try {
             result.first->second.run = &clock_.prepare(key, plan, limits, before.clock, now, [&] {
@@ -132,29 +132,44 @@ public:
         } catch (...) { records_.erase(result.first); throw; }
         return result.first->second;
     }
-    template<class Reader, class Writer> const Record &commit(const std::string &key,
-        const std::string &plan, Clock::time_point now, Reader read, Writer write) {
+    template<class Reader, class ClockReader, class Writer> const Record &commit(const std::string &key,
+        const std::string &plan, Clock::time_point now, Reader read, ClockReader read_clock, Writer write) {
         require(query(key, plan), 7); auto &record = records_.find(key)->second;
         if (record.run->phase != clock::Phase::Prepared) return record;
         bool first = true;
         const auto scoped_read = [&] {
-            auto current = observe(record.before.id, read);
-            if (first) { first = false; require(current == record.before, 6); }
-            return scoped_clock(current, record.before.identity);
+            if (first) {
+                first = false;
+                auto current = observe(record.before.id, read);
+                require(current == record.before, 6);
+                return current.clock;
+            }
+            return read_clock(record.before.identity);
         };
         clock_.commit(key, plan, now, scoped_read, [&](std::uint64_t generation, bool paused) {
             require(generation == record.before.identity.generation, 4);
             write(record.before.identity, paused);
         });
-        service(now, read, write);
+        service(now, read, read_clock, write);
         return record;
     }
-    template<class Reader, class Writer> void service(Clock::time_point now, Reader read, Writer write) {
+    template<class Reader, class ClockReader, class Writer> void service(Clock::time_point now, Reader read,
+        ClockReader read_clock, Writer write) {
         const auto *active_run = clock_.active_record();
         if (!active_run) return;
         auto &record = records_.find(active_run->key)->second;
+        std::optional<Capture> current;
+        const auto clock_only = [&] { return read_clock(record.before.identity); };
         const auto scoped_read = [&] {
-            return scoped_clock(observe(record.before.id, read), record.before.identity);
+            // Stopping and post-setter readback require only the fortress clock.
+            if (record.run->phase != clock::Phase::Running) return clock_only();
+            try {
+                current = observe(record.before.id, read);
+                return scoped_clock(*current, record.before.identity);
+            } catch (...) {
+                record.trigger = Trigger::NativeFailure;
+                throw;
+            }
         };
         const auto scoped_write = [&](std::uint64_t generation, bool paused) {
             require(generation == record.before.identity.generation, 4); write(record.before.identity, paused);
@@ -166,55 +181,42 @@ public:
             if (record.trigger == Trigger::None) record.trigger = Trigger::SourceChanged;
             return;
         }
-        if (!active() || record.run->phase != clock::Phase::Running) return;
-        try {
-            auto current = observe(record.before.id, read);
-            if (!(current.identity == record.before.identity)) { source_changed(); return; }
-            // A regression must be handled by the clock safety machinery, never
-            // counted as a new positive sample in this second capture.
-            if (current.clock.tick < record.last_tick || current.clock.tick < record.run->observed_tick) {
-                clock_.service(now, [&] { return current.clock; }, scoped_write); return;
-            }
-            if (current.clock.paused || current.clock.tick >= record.before.clock.tick + record.run->spec.game_ticks) {
-                clock_.service(now, [&] { return current.clock; }, scoped_write); return;
-            }
-            Trigger trigger = Trigger::None;
-            if (current.next_order < record.last_horizon) trigger = Trigger::HorizonRegression;
-            else if (!current.present) trigger = Trigger::TargetAbsent;
-            else if (current.recipe == 0 || current.recipe != record.before.recipe || current.total != record.before.total)
-                trigger = Trigger::TargetChanged;
-            else if (current.left > record.last_left) trigger = Trigger::CounterRegression;
-            else if (!record.goal.matches(current)) record.stable_samples = 0;
-            else if (current.clock.tick >= record.counted_tick + record.goal.interval) {
-                ++record.stable_samples; record.counted_tick = current.clock.tick;
-                if (record.stable_samples == record.goal.samples) trigger = Trigger::PredicateObserved;
-            }
-            record.last_tick = current.clock.tick; record.last_left = current.left; record.last_horizon = current.next_order;
-            // Move the complete captured value, then publish the trigger before
-            // the safety setter. Reply allocation can fail without losing either.
-            record.sample = std::move(current);
-            if (trigger != Trigger::None) {
-                record.trigger = trigger;
-                clock_.cancel(active_run->key, active_run->plan, now, scoped_read, scoped_write);
-            }
-        } catch (...) {
-            if (record.trigger == Trigger::None) record.trigger = Trigger::NativeFailure;
-            clock_.service(now, []() -> clock::Snapshot { throw clock::Failure(5); }, scoped_write);
+        // The clock owner validated this exact capture, including monotonic time,
+        // source, pause state and limits. Interpret the order once per callback.
+        if (record.run->phase != clock::Phase::Running || !current) return;
+        Trigger trigger = Trigger::None;
+        if (current->next_order < record.last_horizon) trigger = Trigger::HorizonRegression;
+        else if (!current->present) trigger = Trigger::TargetAbsent;
+        else if (current->recipe == 0 || current->recipe != record.before.recipe || current->total != record.before.total)
+            trigger = Trigger::TargetChanged;
+        else if (current->left > record.last_left) trigger = Trigger::CounterRegression;
+        else if (!record.goal.matches(*current)) record.stable_samples = 0;
+        else if (current->clock.tick >= record.counted_tick + record.goal.interval) {
+            ++record.stable_samples; record.counted_tick = current->clock.tick;
+            if (record.stable_samples == record.goal.samples) trigger = Trigger::PredicateObserved;
+        }
+        record.last_left = current->left; record.last_horizon = current->next_order;
+        // Move the complete captured value, then publish the trigger before
+        // the safety setter. Reply allocation can fail without losing either.
+        record.sample = std::move(*current);
+        if (trigger != Trigger::None) {
+            record.trigger = trigger;
+            clock_.cancel(active_run->key, active_run->plan, now, clock_only, scoped_write);
         }
     }
-    template<class Reader, class Writer> const Record &cancel(const std::string &key,
-        const std::string &plan, Clock::time_point now, Reader read, Writer write) {
+    template<class ClockReader, class Writer> const Record &cancel(const std::string &key,
+        const std::string &plan, Clock::time_point now, ClockReader read_clock, Writer write) {
         require(query(key, plan), 7); auto &record = records_.find(key)->second;
         clock_.cancel(key, plan, now,
-            [&] { return scoped_clock(observe(record.before.id, read), record.before.identity); },
+            [&] { return read_clock(record.before.identity); },
             [&](std::uint64_t g, bool p) { require(g == record.before.identity.generation, 4); write(record.before.identity, p); });
         return record;
     }
-    template<class Reader, class Writer> bool shutdown(Clock::time_point now, Reader read, Writer write) {
+    template<class ClockReader, class Writer> bool shutdown(Clock::time_point now, ClockReader read_clock, Writer write) {
         const auto *run = clock_.active_record(); if (!run) return true;
         const auto &record = records_.find(run->key)->second;
         return clock_.shutdown(now,
-            [&] { return scoped_clock(observe(record.before.id, read), record.before.identity); },
+            [&] { return read_clock(record.before.identity); },
             [&](std::uint64_t g, bool p) { require(g == record.before.identity.generation, 4); write(record.before.identity, p); });
     }
     void source_changed() {
