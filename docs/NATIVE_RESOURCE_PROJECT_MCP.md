@@ -763,6 +763,25 @@ missing members and failed publication retain the existing interruption rules.
 False stock follows the original `continue_stock_goal` path after clocks
 settle. Achieved goals cannot restart maintenance through this clock.
 
+If a response cannot publish its review, the same running process can retain
+a Prepared interval and its original stock watch without a current confirmation.
+Query or Explain then offers the exact retained `stock_watch_run` request through
+`stock_clock_guidance.plan_request`. Its original seal, game-tick count and wall
+interval are unchanged. The recommendation sets `reuses_retained_interval: true`
+and prepares a fresh review only; retained metadata supplies no current stock
+proof or permission to commit.
+
+That Plan requalifies the complete stock goal and current parent custody,
+checks both independent clock authorities over the entire retained horizon,
+and refuses insufficient tick allowances or a changed before tick. It reuses
+the same native key and preparation without another PrepareRun or unpause.
+Native wall time remains unchanged; foreground census/RPC work keeps its own
+remaining deadline. A separate explicit Commit is still required. Fresh Plan
+refuses False or unknown current stock. Source fencing, changed goal terms,
+cancelled or previously achieved goals, missing authority, or a lost
+process-local watch cannot use this advice. Recovery without the watch keeps
+the explicit inspection/cancellation path below.
+
 Each original clock retains at most 64 runs. Native receipts report historical
 advancement and pause verification; they are not current pause, inventory or
 stability proof. A changed source, missing authority, exhausted history,

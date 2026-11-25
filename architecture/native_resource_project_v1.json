@@ -765,6 +765,19 @@
     "external_recovery_configuration": "stock_clock_recovery",
     "external_and_acknowledged_heads_both_verified": true,
     "external_pin_can_initialize_missing_journal": false,
-    "newer_consumed_floors_retained_after_parent_append_failure": true
+    "newer_consumed_floors_retained_after_parent_append_failure": true,
+    "retained_prepared_review": {
+      "requires_original_process_local_watch": true,
+      "same_native_key_and_interval": true,
+      "fresh_complete_stock_and_parent_guard_required": true,
+      "canonical_and_native_horizon_authority_rechecked": true,
+      "both_current_tick_allowances_cover_full_interval": true,
+      "repeats_native_prepare": false,
+      "advances_game_time": false,
+      "restores_confirmation_from_retained_metadata": false,
+      "separate_commit_confirmation_required": true,
+      "missing_watch_requires_inspection_or_explicit_cancellation": true,
+      "guidance_grants_authority": false
+    }
   }
 }

@@ -525,6 +525,36 @@ impl Runtime {
         })
     }
 
+    fn retained_stock_clock_review(
+        &self,
+        clock: &NativeStockClock,
+    ) -> Result<(Digest32, RunRequest)> {
+        self.config.current()?;
+        self.validate_stock_target(clock.target())?;
+        let Some(Child::Production(child)) = &self.child else {
+            return Err(denied("the original stock-watch owner is absent"));
+        };
+        if self.mode != Mode::Control
+            || !child.inventory_clock_control_enabled()
+            || child.anchor().tick.get()
+                < self.high_tick.max(self.journal.pin().authority_tick_floor)
+        {
+            return Err(denied(
+                "the original stock-clock control or source floor is unavailable",
+            ));
+        }
+        let witness = child.project_stock_clock_review_witness(&self.config.goal)?;
+        let request = clock
+            .retained_review_request(
+                child.anchor().tick.get(),
+                narrowed(self.budget, child.budget()),
+            )
+            .ok_or_else(|| {
+                denied("the retained stock-clock interval is not currently reviewable")
+            })?;
+        Ok((witness, request))
+    }
+
     pub(super) fn stock_clock_guidance(&self) -> Value {
         let Some(clock) = &self.stock_clock else {
             return Value::Null;
@@ -552,11 +582,22 @@ impl Runtime {
                     && !run.entry.unresolved()
             })
         {
-            Some((
-                "stock_clock_prepared_requires_review",
-                "The original interval is prepared; request a fresh review or explicitly cancel it before rebuilding a recovered stock watch.",
-                "inspect",
-            ))
+            match self.retained_stock_clock_review(clock) {
+                Ok((witness, request)) => {
+                    guidance["goal_witness"] = json!(witness.to_hex());
+                    guidance["plan_request"] = json!({
+                        "kind":request.kind,
+                        "original_paired_seal":request.original_paired_seal,
+                        "game_ticks":request.game_ticks, "wall_millis":request.wall_millis,
+                    });
+                    None
+                }
+                Err(_) => Some((
+                    "stock_clock_prepared_requires_review",
+                    "Inspect the unchanged prepared interval or explicitly cancel it. A fresh review requires its original process-local stock watch, source tick and independent clock authority.",
+                    "inspect",
+                )),
+            }
         } else if clock.pending() || clock.may_be_running() {
             Some((
                 "stock_clock_reconciliation_required",

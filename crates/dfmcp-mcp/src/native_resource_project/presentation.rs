@@ -592,6 +592,7 @@ pub(super) fn packet(
     mut result: Value,
     mut reference: Value,
 ) -> Value {
+    stock_clock::qualify_retained_guidance(&mut result, &reference);
     let no_work_stock_goal = no_work_stock_goal(&result, &reference);
     let has_stock_watch = !result["child"]["no_work_stock_goal"].is_null()
         || !result["current_stock_goal"]["no_work_stock_goal"].is_null();

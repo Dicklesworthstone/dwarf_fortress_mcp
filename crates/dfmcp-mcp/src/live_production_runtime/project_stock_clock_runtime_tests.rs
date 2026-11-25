@@ -16,6 +16,7 @@ pub(super) fn initial_sample(runtime: &mut Runtime, goal: &ProjectStockGoal) -> 
     assert!(runtime.original.is_none());
     assert!(runtime.project_recovery_reference()["recovery"].is_null());
     assert!(runtime.project_stock_clock_basis(goal).is_err());
+    let retained_witness = runtime.project_stock_clock_review_witness(goal)?;
     let c = runtime.context(false)?;
     runtime.wait(&c)?;
     let first = runtime.project_stock_clock_basis(goal)?;
@@ -25,6 +26,7 @@ pub(super) fn initial_sample(runtime: &mut Runtime, goal: &ProjectStockGoal) -> 
         anchor.tick.get() + goal.poll_interval_ticks()
     );
     assert_eq!(sample_count(runtime)?, 0);
+    assert_eq!(first.goal_witness, retained_witness);
     assert!(runtime.no_work_goal_json()["sample"]["last_counted_tick"].is_null());
     assert!(!runtime.project_status(goal)?.original_goal_proven);
 
@@ -66,6 +68,18 @@ pub(super) fn initial_sample(runtime: &mut Runtime, goal: &ProjectStockGoal) -> 
         watch.cancelled = false;
     }
     assert!(runtime.project_stock_clock_basis(goal).is_ok());
+
+    // Successful preparation withholds its current sample. The same live watch
+    // can still name an exact re-review, whose Plan must requalify stock.
+    runtime.retain_project_stock_clock_tick(runtime.anchor.tick.get())?;
+    assert!(runtime.no_work_goal_json()["sample"].is_null());
+    assert_eq!(
+        runtime.project_stock_clock_review_witness(goal)?,
+        retained_witness
+    );
+    assert!(runtime.project_stock_clock_basis(goal).is_err());
+    let c = runtime.context(false)?;
+    runtime.wait(&c)?;
 
     let c = runtime.context(false)?;
     if runtime.opening_inventory_clock && runtime.config.orders.inventory_clock_enabled() {
@@ -124,6 +138,7 @@ pub(super) fn after_interval(
     assert_eq!(runtime.project_status(goal)?.original_goal_proven, complete);
     if complete {
         assert!(runtime.project_stock_clock_basis(goal).is_err());
+        assert!(runtime.project_stock_clock_review_witness(goal).is_err());
     } else {
         let first = runtime.project_stock_clock_basis(goal)?;
         let c = runtime.context(false)?;
@@ -157,6 +172,7 @@ pub(super) fn false_and_fenced_source(
     );
     assert!(!runtime.project_status(goal)?.original_goal_proven);
     assert!(runtime.project_stock_clock_basis(goal).is_err());
+    assert!(runtime.project_stock_clock_review_witness(goal).is_err());
 
     // Feed the authentic captured operations through the real monitor with one
     // changed source incarnation. It must fence instead of becoming clock proof.
@@ -182,6 +198,7 @@ pub(super) fn false_and_fenced_source(
     assert_eq!(runtime.no_work_goal_json()["source_fenced"], true);
     assert!(runtime.no_work_goal_json()["sample"].is_null());
     assert!(runtime.project_stock_clock_basis(goal).is_err());
+    assert!(runtime.project_stock_clock_review_witness(goal).is_err());
     assert!(!runtime.project_status(goal)?.original_goal_proven);
     assert!(runtime.original.is_none());
     assert!(runtime.project_recovery_reference()["recovery"].is_null());
@@ -200,5 +217,6 @@ pub(super) fn published_original(runtime: &Runtime, goal: &ProjectStockGoal) -> 
     assert!(runtime.original.is_some());
     assert!(!runtime.project_has_stock_watch(goal)?);
     assert!(runtime.project_stock_clock_basis(goal).is_err());
+    assert!(runtime.project_stock_clock_review_witness(goal).is_err());
     Ok(())
 }

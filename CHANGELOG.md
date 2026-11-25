@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Recover the review of an original stock-watch interval
+
+- Offer an exact retained Prepared stock-clock request through the existing
+  Plan tool when its original process-local watch still exists.
+- Requalify current stock and parent custody, canonical/native horizon
+  authority, source tick and full tick allowance before reusing the same
+  preparation; require a separate explicit Commit.
+- Keep native key, bounds and journal history unchanged, avoid a second
+  PrepareRun or unpause, and retain explicit cancellation when the watch was
+  lost during recovery.
+- Add coordinator, scalar/portfolio presentation and runtime witness
+  regressions. Latest-nightly formatting and independent source review pass;
+  new MCP/native tests remain unexecuted after the resumed build was killed
+  in the unchanged runtime dependency.
+
 ## Unreleased — Preserve uncertainty after Task dispatch receipt loss
 
 - Treat a missing original receipt after dispatch admission as indeterminate
@@ -10,8 +25,9 @@
 - Add two real-facade regression scenarios and correct the pre-existing
   future-fact assertion exposed by the actual semantic test run.
 - Baseline execution passed 430 tests and exposed that one stale assertion;
-  new tests and the correction remain unexecuted after disk exhaustion and
-  executor loss. Full qualification remains open.
+  the corrected world regression subsequently passed. New Task tests remain
+  blocked by disk/resource failures in the MCP dependency build. Full
+  qualification remains open.
 
 ## Unreleased — Fence Task dispatch against cancellation and expiry
 

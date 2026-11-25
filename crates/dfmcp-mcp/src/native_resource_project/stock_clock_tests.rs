@@ -666,3 +666,134 @@ fn clock_cannot_borrow_fortress_authority_or_exceed_any_interval_bound() -> Resu
     assert!(RunRequest::parse(&selected.to_string(), WatchClockTarget::REQUEST_KIND).is_err());
     Ok(())
 }
+
+#[test]
+fn retained_stock_interval_gets_a_fresh_review_without_repreparing_or_unpausing() -> Result<()> {
+    let (mut clock, storage, mut source, mut c, mut n) = setup()?;
+    let mut request = request(clock.target())?;
+    request.wall_millis = 60_000;
+    let prepared = clock.prepare_guarded(&request, &mut source, &c, &n, |_| Ok(()))?;
+    let original = prepared
+        .active()
+        .ok_or_else(|| corrupt("fixture original run"))?;
+    let seal = original.review_seal;
+    let plan = original.entry.plan().clone();
+    let bytes = storage.0.borrow().get_ref().clone();
+    clock.withdraw_review();
+    assert!(clock.current_review().is_none());
+    assert!(
+        clock
+            .commit_guarded(seal, true, &mut source, &c, &n, |_| Ok(()))
+            .is_err()
+    );
+    clock.inspect(&c, &n)?;
+    // Native wall time is asynchronous; fresh census/RPC work has its own
+    // remaining foreground deadline and cannot shorten the retained interval.
+    c.budget.max_wall_millis = 59_999;
+    n.budget.max_wall_millis = 59_999;
+    let offered = clock
+        .retained_review_request(c.anchor.tick.get(), c.budget)
+        .ok_or_else(|| corrupt("missing retained review request"))?;
+    assert_eq!(offered, request);
+    let mut checked = 0;
+    let reviewed = clock.prepare_guarded(&offered, &mut source, &c, &n, |edge| {
+        assert_eq!(edge.anchor, c.anchor);
+        marker_guard(&storage, &n, RunState::Prepared)?;
+        checked += 1;
+        Ok(())
+    })?;
+    assert_eq!(
+        checked, 1,
+        "re-review skipped current stock/custody qualification"
+    );
+    assert_eq!(reviewed.active().map(|run| run.entry.plan()), Some(&plan));
+    assert_eq!(reviewed.head, prepared.head);
+    assert_eq!(storage.0.borrow().get_ref(), &bytes);
+    assert_eq!(source.prepares, 1);
+    assert_eq!(source.commits, 0);
+    assert_eq!(clock.current_review(), Some(seal));
+    clock.commit_guarded(seal, true, &mut source, &c, &n, |_| Ok(()))?;
+    assert_eq!(source.commits, 1);
+    assert!(
+        clock
+            .prepare_guarded(&offered, &mut source, &c, &n, |_| Ok(()))
+            .is_ok()
+    );
+    assert!(
+        clock.current_review().is_none(),
+        "dispatched work regained a review"
+    );
+    assert!(
+        clock
+            .commit_guarded(seal, true, &mut source, &c, &n, |_| Ok(()))
+            .is_err()
+    );
+    assert_eq!(source.prepares, 1);
+    assert_eq!(source.commits, 1);
+    Ok(())
+}
+
+#[test]
+fn retained_stock_review_rechecks_full_interval_authority_and_current_parent_evidence() -> Result<()>
+{
+    for case in 0..13 {
+        let (mut clock, storage, mut source, c, n) = setup()?;
+        let request = request(clock.target())?;
+        clock.prepare_guarded(&request, &mut source, &c, &n, |_| Ok(()))?;
+        clock.withdraw_review();
+        let bytes = storage.0.borrow().get_ref().clone();
+        let mut changed_request = request.clone();
+        let mut current = c.clone();
+        let mut native = n.clone();
+        match case {
+            0 => current.budget.max_game_ticks = 9,
+            1 => native.budget.max_game_ticks = 9,
+            2 => current
+                .grants
+                .retain(|grant| grant.capability != Capability::ControlClock),
+            3 => native
+                .grants
+                .retain(|grant| grant.capability != Capability::Plan),
+            4 => current
+                .grants
+                .retain(|grant| grant.capability != Capability::Plan),
+            5 => native
+                .grants
+                .retain(|grant| grant.capability != Capability::ControlClock),
+            6 | 7 => {
+                let grants = if case == 6 {
+                    &mut current.grants
+                } else {
+                    &mut native.grants
+                };
+                for grant in grants {
+                    if grant.capability == Capability::ControlClock {
+                        grant.expires_at_tick = Some(GameTick(105));
+                    }
+                }
+            }
+            8 => current.anchor.tick = GameTick(101),
+            9 => native.anchor.tick = GameTick(101),
+            10 => changed_request.game_ticks = 5,
+            11 => changed_request.wall_millis = 500,
+            _ => {}
+        }
+        let result =
+            clock.prepare_guarded(&changed_request, &mut source, &current, &native, |_| {
+                if case == 12 {
+                    Err(denied("fresh complete stock is False"))
+                } else {
+                    Ok(())
+                }
+            });
+        assert!(
+            result.is_err(),
+            "retained review accepted changed boundary {case}"
+        );
+        assert!(clock.current_review().is_none(), "case {case}");
+        assert_eq!(storage.0.borrow().get_ref(), &bytes, "case {case}");
+        assert_eq!(source.prepares, 1, "case {case}");
+        assert_eq!(source.commits, 0, "case {case}");
+    }
+    Ok(())
+}

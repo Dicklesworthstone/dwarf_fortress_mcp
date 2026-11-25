@@ -11,6 +11,56 @@ pub(crate) struct StockWatchClockBasis {
 }
 
 impl Runtime {
+    /// Retained identity is enough to suggest re-reviewing an existing interval,
+    /// but never supplies the current stock evidence required by Plan/Commit.
+    /// A lost process-local watch cannot be recreated from its clock journal.
+    pub(crate) fn project_stock_clock_review_witness(
+        &self,
+        goal: &ProjectStockGoal,
+    ) -> Result<Digest32> {
+        let status = self.project_status(goal)?;
+        if !self.project_has_stock_watch(goal)?
+            || !status.clocks_settled
+            || self.clock_withholds_goal()
+            || self.anchor.tick < self.authority_tick_floor()
+            || self.anchor.tick.get() >= goal.deadline_tick()
+        {
+            return Err(denied(
+                "the original stock watch cannot review retained time",
+            ));
+        }
+        let (witness, cancelled, fenced, achieved, truth) =
+            if let Some(watch) = &self.stock_target_no_work {
+                (
+                    watch.monitor.witness(),
+                    watch.cancelled,
+                    watch.monitor.fenced(),
+                    watch.monitor.achieved_at().is_some(),
+                    watch.monitor.latest().map(|sample| sample.current_truth),
+                )
+            } else if let Some(watch) = &self.stock_targets_no_work {
+                (
+                    watch.monitor.witness(),
+                    watch.cancelled,
+                    watch.monitor.fenced(),
+                    watch.monitor.achieved_at().is_some(),
+                    watch.monitor.latest().map(|sample| sample.current_truth),
+                )
+            } else {
+                return Err(denied("the original process-local stock watch is absent"));
+            };
+        if cancelled
+            || fenced
+            || achieved
+            || truth.is_some_and(|truth| truth != PredicateTruth::True)
+        {
+            return Err(denied(
+                "the original stock watch is not eligible for time review",
+            ));
+        }
+        Ok(witness)
+    }
+
     pub(crate) fn project_stock_clock_shell(
         &self,
         goal: &ProjectStockGoal,

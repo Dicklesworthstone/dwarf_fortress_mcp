@@ -1,5 +1,36 @@
 # Implementation Status
 
+## Unreleased — Re-review a retained no-order stock-watch clock
+
+A running native resource project can now recover a Prepared stock-watch
+interval whose current review was withdrawn, while the original process-local
+scalar or portfolio watch still exists. Query/Explain offers the exact retained
+request through the existing Plan tool. Fresh Plan requalifies complete current
+stock, original parent custody, both independent clock authorities and their
+full horizon, the unchanged before tick, and both current tick allowances.
+It reuses the original key and interval without another native PrepareRun or
+unpause; the newly published review still needs a separate explicit Commit.
+
+Retained metadata supplies neither fresh stock proof nor a confirmation.
+Changed intervals, source fencing, False or unavailable stock, cancelled or
+achieved originals, insufficient authority/allowance and lost process-local
+watches refuse re-review. A recovered clock without its original watch keeps
+the explicit inspection/cancellation path. The asynchronous native wall bound
+stays unchanged while census/RPC work observes its own remaining deadline.
+
+Five new regression functions exercise same-key re-review, thirteen changed
+coordinator boundaries, scalar/portfolio public advice and refusal matrices,
+and missing-watch cancellation; existing actual-runtime stock-watch assertions
+also cover the new witness boundary. Changed Rust sources were formatted with
+the installed latest nightly and independently source-reviewed. The resumed
+full MCP check was killed in the unchanged pinned Asupersync dependency
+(signal 9), before application diagnostics, under renewed shared host resource
+pressure. These new MCP/native tests remain unexecuted; no complete MCP build
+or live/native qualification is claimed at this checkpoint. No tool, dependency or compatibility admission was added.
+
+Owners: `df-native-stock-target-3m9` and
+`df-combined-order-clock-c8m` (in progress).
+
 ## Unreleased — Keep lost Task dispatch receipts indeterminate
 
 Original-plan Tasks now treat unavailable original custody after dispatch
@@ -20,10 +51,12 @@ source-time selection semantics.
 Before these changes, actual latest-nightly Cargo execution at
 `73acfe183de45c3b1379efc37cf611bdea992f54` passed 28 core, 256 intent and
 146 world unit tests; one world test failed on that obsolete assertion.
-The correction and new Task tests have not executed. The exact pinned
-dependencies fetched successfully, but the full MCP check stopped in
-`serde_core` with disk exhaustion before application diagnostics, followed
-by executor loss. Baseline repository verification passed its static contracts
+The corrected world regression subsequently passed through real Cargo at
+`31d81f710d31050cf6fe211402705bed0b097cc3` (one passed, 146 filtered).
+The new Task tests remain unexecuted. The exact pinned dependencies fetched
+successfully, but the first full MCP check stopped in `serde_core` with disk
+exhaustion before application diagnostics, followed by executor loss; the
+resumed check was killed in unchanged Asupersync before application diagnostics. Baseline repository verification passed its static contracts
 through dependency policy and then stopped at the missing `br` executable.
 No complete MCP build, new-test pass, release receipt, native/game evidence
 or compatibility admission is claimed.

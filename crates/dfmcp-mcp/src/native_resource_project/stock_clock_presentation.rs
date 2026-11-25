@@ -165,12 +165,16 @@ struct Guidance<'a> {
     raw: &'a Value,
     watch: Value,
     bound: Binding<'a>,
+    source_tick: u64,
+    sample_withheld: bool,
 }
 
 fn guidance<'a>(result: &'a Value, reference: &Value) -> Option<Guidance<'a>> {
     let bound = binding(result, reference)?;
     let watch = active_watch(result)?;
     let raw = &result["stock_clock_guidance"];
+    let anchor = &result["child"]["anchor"];
+    let source_tick = anchor["tick"].as_u64()?;
     let current_witness =
         raw["goal_witness"] == watch["goal_witness"] && digest(&raw["goal_witness"]).is_some();
     let blocker_without_sample = raw["goal_witness"].is_null()
@@ -181,8 +185,53 @@ fn guidance<'a>(result: &'a Value, reference: &Value) -> Option<Guidance<'a>> {
         && raw["target_digest"] == bound.target.digest().to_hex()
         && raw["original_goal_digest"] == bound.clock["target"]["original_goal_digest"]
         && (current_witness || blocker_without_sample)
-        && (raw["plan_request"].is_null() || raw["blocker"].is_null());
-    valid.then_some(Guidance { raw, watch, bound })
+        && (raw["plan_request"].is_null() || raw["blocker"].is_null())
+        && anchor["fortress_id"] == bound.target.fortress().get().to_string()
+        && anchor["epoch"].as_u64() == Some(bound.target.epoch())
+        && anchor["sequence"].is_u64()
+        && digest(&anchor["state_hash"]).is_some()
+        && source_tick >= bound.target.original_tick();
+    valid.then_some(Guidance {
+        raw,
+        watch,
+        bound,
+        source_tick,
+        sample_withheld: result["child"]["no_work_stock_goal"]
+            .get("sample")
+            .is_some_and(Value::is_null),
+    })
+}
+
+fn retained_review(guide: &Guidance<'_>) -> bool {
+    let clock = guide.bound.clock;
+    let active = &clock["active_run"];
+    let request = &guide.raw["plan_request"];
+    let sample = &guide.watch["sample"];
+    clock["inspection_required"] == false
+        && clock["pending"] == true
+        && clock["unresolved"] == false
+        && clock["may_be_running"] == false
+        && clock["advancement_fenced"] != true
+        && clock["review_available"] == false
+        && active["state"] == "prepared"
+        && active["unresolved"] == false
+        && active["before_tick"].as_u64() == Some(guide.source_tick)
+        && guide.source_tick >= guide.bound.floor
+        && request["game_ticks"] == active["game_ticks"]
+        && request["wall_millis"] == active["wall_millis"]
+        && digest(&active["plan_digest"]).is_some()
+        && active["key"]
+            .as_str()
+            .is_some_and(|key| key.starts_with("stock-watch-clock-") && key.len() == 82)
+        && guide.watch["original_goal_proven"] == false
+        && guide.watch["consumed_tick_floor"]
+            .as_u64()
+            .is_some_and(|floor| floor <= guide.source_tick)
+        && (guide.sample_withheld
+            || (sample["current_truth"] == "true"
+                && sample["achieved_at_tick"].is_null()
+                && sample["expired"] == false
+                && sample["deadline_reached"] == false))
 }
 
 fn plan_request(guide: &Guidance<'_>) -> Option<Value> {
@@ -192,18 +241,24 @@ fn plan_request(guide: &Guidance<'_>) -> Option<Value> {
     let request = &guide.raw["plan_request"];
     let ticks = request["game_ticks"].as_u64()?;
     let wall = request["wall_millis"].as_u64()?;
-    let at = sample["anchor"]["tick"].as_u64()?;
+    let reviewing = retained_review(guide);
+    let at = if reviewing {
+        guide.source_tick
+    } else {
+        sample["anchor"]["tick"].as_u64()?
+    };
     let valid = request.as_object().is_some_and(|fields| fields.len() == 4)
         && request["kind"] == "stock_watch_run"
         && request["original_paired_seal"] == clock["original_paired_seal"]
         && guide.raw["blocker"].is_null()
-        && !unsettled(clock)
+        && (reviewing || !unsettled(clock))
         && clock["mode"] == "control"
         && clock["review_available"] == false
-        && sample["current_truth"] == "true"
-        && sample["achieved_at_tick"].is_null()
-        && sample["expired"] == false
-        && sample["deadline_reached"] == false
+        && (reviewing
+            || (sample["current_truth"] == "true"
+                && sample["achieved_at_tick"].is_null()
+                && sample["expired"] == false
+                && sample["deadline_reached"] == false))
         && at >= guide.bound.floor
         && (1..=1200).contains(&ticks)
         && (1..=60_000).contains(&wall)
@@ -211,6 +266,23 @@ fn plan_request(guide: &Guidance<'_>) -> Option<Value> {
             .checked_add(ticks)
             .is_some_and(|end| end <= guide.bound.target.deadline_tick());
     valid.then(|| request.clone())
+}
+
+/// Validate proposed re-review advice before the parent intentionally withholds
+/// pending goal samples. Otherwise that withdrawal would conceal a malformed,
+/// False or Unknown source sample as if it had already been withheld.
+pub(super) fn qualify_retained_guidance(result: &mut Value, reference: &Value) {
+    if result["stock_clock"]["pending"] != true
+        || result["stock_clock"]["review_available"] != false
+        || result["stock_clock_guidance"]["plan_request"].is_null()
+    {
+        return;
+    }
+    let qualified = guidance(result, reference)
+        .is_some_and(|guide| retained_review(&guide) && plan_request(&guide).is_some());
+    if !qualified {
+        result["stock_clock_guidance"]["plan_request"] = Value::Null;
+    }
 }
 
 fn blocker<'a>(guide: &'a Guidance<'_>) -> Option<&'a Value> {
@@ -252,6 +324,11 @@ pub(super) fn pending_next(
         && bound.clock["unresolved"] == false
         && bound.clock["may_be_running"] == false
     {
+        if guidance(result, reference)
+            .is_some_and(|guide| retained_review(&guide) && plan_request(&guide).is_some())
+        {
+            return next(result, reference, session);
+        }
         let missing_watch = result["child"]["no_work_stock_goal"].is_null()
             && result["current_stock_goal"]["no_work_stock_goal"].is_null();
         let control = result["mode"] == "control" && bound.clock["mode"] == "control";
@@ -312,10 +389,19 @@ pub(super) fn pending_next(
 pub(super) fn next(result: &Value, reference: &Value, session: SessionId) -> Option<Vec<Value>> {
     let guide = guidance(result, reference)?;
     if let Some(request) = plan_request(&guide) {
+        let reviewing = retained_review(&guide);
         let mut next = recommendation(
-            "advance_original_stock_stability",
+            if reviewing {
+                "review_retained_stock_clock"
+            } else {
+                "advance_original_stock_stability"
+            },
             "fortress_plan",
-            "Review one bounded clock interval for the unchanged original stock watch. Planning advances no game time; the clock needs its own explicit confirmation and later stock evidence.",
+            if reviewing {
+                "Obtain a fresh review of the exact retained interval after current stock and authority checks. This reuses its original key without another native preparation; confirm the newly published review separately."
+            } else {
+                "Review one bounded clock interval for the unchanged original stock watch. Planning advances no game time; the clock needs its own explicit confirmation and later stock evidence."
+            },
             "high",
             "high",
             "guarded",
@@ -325,6 +411,7 @@ pub(super) fn next(result: &Value, reference: &Value, session: SessionId) -> Opt
         );
         next["clock_scope"] = json!("stock_clock");
         next["prepares_review_only"] = json!(true);
+        next["reuses_retained_interval"] = json!(reviewing);
         next["separate_commit_confirmation_required"] = json!(true);
         next["grants_authority"] = json!(false);
         next["estimated_cost"]["game_ticks_after_separate_commit"] = request["game_ticks"].clone();
@@ -381,6 +468,7 @@ pub(super) fn affordances(result: &Value, reference: &Value) -> Vec<Value> {
         "request":request, "risk":"guarded", "prepares_review_only":true,
         "native_time_advanced_by_planning":0,
         "separate_commit_confirmation_required":true, "grants_authority":false,
+        "reuses_retained_interval":retained_review(&guide),
         "evidence":evidence(),
         "complete_evidence_pointer":"/result/stock_clock_guidance",
     })]
@@ -400,6 +488,7 @@ pub(super) fn summary(result: &Value, reference: &Value) -> Value {
         "original_goal_digest":guide.raw["original_goal_digest"],
         "goal_witness":guide.raw["goal_witness"],
         "plan_available":offer.is_some(),
+        "reuses_retained_interval":offer.is_some() && retained_review(&guide),
         "blocker":blocker,
         "original_deadline_tick":guide.bound.target.deadline_tick(),
         "grants_authority":false, "restored_from_recovery":false,

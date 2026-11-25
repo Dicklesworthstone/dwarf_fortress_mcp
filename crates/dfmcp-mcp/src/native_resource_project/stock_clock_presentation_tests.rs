@@ -762,3 +762,126 @@ fn complete_stock_clock_history_chunks_round_trip_and_oversized_review_refuses()
     assert!(render(output(result, reference)).is_none());
     Ok(())
 }
+
+fn retained_review_fixture(portfolio: bool) -> TestResult<(Value, Value, Value)> {
+    let (mut result, mut reference) = fixture(portfolio)?;
+    let request = result["stock_clock_guidance"]["plan_request"].clone();
+    prepared(&mut result, &mut reference);
+    result["stock_clock"]["review_available"] = json!(false);
+    result["child"]["no_work_stock_goal"]["sample"] = Value::Null;
+    result["stock_clock_guidance"]["plan_request"] = request.clone();
+    refresh(&mut result);
+    Ok((result, reference, request))
+}
+
+#[test]
+fn retained_stock_clock_advice_copies_exact_interval_without_restoring_stock_or_confirmation()
+-> TestResult {
+    for portfolio in [false, true] {
+        let (result, reference, expected) = retained_review_fixture(portfolio)?;
+        let original_run = result["stock_clock"]["active_run"].clone();
+        let rendered = output(result, reference);
+        let next = &rendered["agent_turn"]["recommendations"][0];
+        assert_eq!(next["tool"], "fortress_plan");
+        assert_eq!(next["reuses_retained_interval"], true);
+        assert_eq!(next["prepares_review_only"], true);
+        assert_eq!(next["separate_commit_confirmation_required"], true);
+        assert_eq!(
+            next["estimated_cost"]["native_time_advanced_by_planning"],
+            0
+        );
+        assert_eq!(next["grants_authority"], false);
+        assert_eq!(request(&rendered)?, expected);
+        assert_eq!(
+            rendered["result"]["stock_clock"]["active_run"],
+            original_run
+        );
+        assert_eq!(
+            rendered["agent_turn"]["active_work"]["confirmations"],
+            json!([])
+        );
+        assert_eq!(
+            rendered["agent_turn"]["briefing"]["original_goal_proven"],
+            false
+        );
+        assert!(rendered["agent_turn"]["briefing"]["current_goal_anchor"].is_null());
+        assert_eq!(
+            rendered["agent_turn"]["briefing"]["stock_clock_guidance"]["reuses_retained_interval"],
+            true
+        );
+        assert!(expected.get("order_step_id").is_none());
+    }
+    Ok(())
+}
+
+#[test]
+fn retained_stock_clock_advice_refuses_changed_custody_source_original_and_interval() -> TestResult
+{
+    for portfolio in [false, true] {
+        for case in 0..22 {
+            let (mut result, mut reference, _) = retained_review_fixture(portfolio)?;
+            match case {
+                0 => result["stock_clock_guidance"]["plan_request"]["game_ticks"] = json!(5),
+                1 => result["stock_clock_guidance"]["plan_request"]["wall_millis"] = json!(500),
+                2 => result["stock_clock"]["active_run"]["before_tick"] = json!(139),
+                3 => result["child"]["anchor"]["tick"] = json!(141),
+                4 => result["child"]["anchor"]["epoch"] = json!(3),
+                5 => result["child"]["anchor"]["fortress_id"] = json!("8"),
+                6 => result["stock_clock"]["inspection_required"] = json!(true),
+                7 => result["stock_clock"]["unresolved"] = json!(true),
+                8 => result["stock_clock"]["may_be_running"] = json!(true),
+                9 => result["stock_clock"]["active_run"]["state"] = json!("dispatch_started"),
+                10 => result["mode"] = json!("recover"),
+                11 => result["project_cancelled"] = json!(true),
+                12 => result["child"]["no_work_stock_goal"]["source_fenced"] = json!(true),
+                13 => result["child"]["no_work_stock_goal"]["consumed_tick_floor"] = json!(141),
+                14 => result["stock_clock_guidance"]["goal_witness"] = json!("f".repeat(64)),
+                15 => reference["parent_acknowledged"]["authority_tick_floor"] = json!(141),
+                16 => result["stock_clock"]["head"] = json!("e".repeat(64)),
+                17 => result["stock_clock"]["active_run"]["plan_digest"] = json!("invalid"),
+                18 => result["child"]["no_work_stock_goal"]["deadline_tick"] = json!(201),
+                19 => {
+                    result["child"]["no_work_stock_goal"]["sample"] =
+                        json!({"current_truth":"false"})
+                }
+                20 => {
+                    result["child"]["no_work_stock_goal"]["sample"] =
+                        json!({"current_truth":"unknown"})
+                }
+                _ => {
+                    result["child"]["no_work_stock_goal"]
+                        .as_object_mut()
+                        .ok_or("fixture stock watch is missing")?
+                        .remove("sample");
+                }
+            }
+            let rendered = output(result, reference);
+            assert_ne!(
+                rendered["agent_turn"]["recommendations"][0]["tool"], "fortress_plan",
+                "portfolio={portfolio}, case={case}"
+            );
+            assert_eq!(
+                rendered["agent_turn"]["active_work"]["confirmations"],
+                json!([])
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn retained_stock_clock_advice_cannot_reconstruct_a_lost_process_local_watch() -> TestResult {
+    let (mut result, reference, _) = retained_review_fixture(true)?;
+    result["child"]["no_work_stock_goal"] = Value::Null;
+    result["current_stock_goal"] = Value::Null;
+    let rendered = output(result, reference);
+    let next = &rendered["agent_turn"]["recommendations"][0];
+    assert_eq!(next["tool"], "fortress_cancel");
+    assert_eq!(next["arguments"]["scope"], "stock_clock");
+    assert_eq!(next["grants_authority"], false);
+    assert_eq!(
+        rendered["agent_turn"]["active_work"]["confirmations"],
+        json!([])
+    );
+    Ok(())
+}

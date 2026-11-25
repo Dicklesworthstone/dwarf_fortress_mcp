@@ -13,8 +13,8 @@ use dfmcp_adapter::bounded_run::rpc::RunSource;
 use dfmcp_adapter::bounded_run::{MAX_NATIVE_TICK, RunObservation, RunPlan};
 use dfmcp_adapter::control_effect_journal::EffectJournalStorage;
 use dfmcp_core::{
-    Capability, DfmcpError, Digest32, ErrorCode, FortressId, OperationContext, Result, RiskTier,
-    StateAnchor,
+    Capability, DfmcpError, Digest32, ErrorCode, FortressId, GameTick, OperationContext, Result,
+    RiskTier, StateAnchor, WorkBudget,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -591,6 +591,39 @@ impl<J: EffectJournalStorage> StockClock<J> {
     pub(in crate::native_resource_project) fn withdraw_review(&mut self) {
         self.current_review = None;
     }
+
+    /// Copy an unchanged, undispatched interval; never manufacture a new key,
+    /// shorten a retained interval or turn its journal into stock evidence.
+    pub(in crate::native_resource_project) fn retained_review_request(
+        &self,
+        tick: u64,
+        budget: WorkBudget,
+    ) -> Option<RunRequest> {
+        if self.inspection_required || !self.is_control() {
+            return None;
+        }
+        let view = self.latest.as_ref()?;
+        let run = view.active()?;
+        let plan = run.entry.plan();
+        let ticks = plan.spec().game_ticks();
+        let wall = plan.spec().wall_ms();
+        let valid = run.entry.state() == RunState::Prepared
+            && !view.unresolved
+            && !run.entry.unresolved()
+            && !view.may_be_running()
+            && plan.before().tick() == Some(tick)
+            && tick >= self.high_tick()
+            && plan.before().sequence() >= view.high_sequence
+            && u64::from(ticks) <= budget.max_game_ticks
+            && budget.max_wall_millis > 0
+            && self.target.plan(plan).is_ok();
+        valid.then(|| RunRequest {
+            kind: WatchClockTarget::REQUEST_KIND.into(),
+            original_paired_seal: self.target.original_paired_seal().to_hex(),
+            game_ticks: ticks,
+            wall_millis: wall,
+        })
+    }
     pub(in crate::native_resource_project) fn recovery_checkpoint(&self) -> Value {
         let (journal_id, head, high_tick, high_sequence) = self.inner.recovery_checkpoint();
         ClockCheckpoint {
@@ -659,13 +692,53 @@ impl<J: EffectJournalStorage> StockClock<J> {
         source: &mut N,
         c: &OperationContext,
         n: &OperationContext,
-        guard: F,
+        mut guard: F,
     ) -> Result<ClockView>
     where
         N: RunSource,
         F: FnMut(&OperationContext) -> Result<()>,
     {
         self.current_review = None;
+        // The shared coordinator deliberately reuses an identical preparation
+        // without another native PrepareRun. Recheck the complete current
+        // authority and the parent's fresh stock/custody guard on that path too.
+        if self
+            .latest
+            .as_ref()
+            .and_then(ClockView::active)
+            .is_some_and(|run| run.entry.state() == RunState::Prepared)
+        {
+            let retained = self
+                .retained_review_request(c.anchor.tick.get(), c.budget)
+                .ok_or_else(|| denied("retained stock clock needs its exact eligible interval"))?;
+            if retained != *request
+                || self
+                    .retained_review_request(c.anchor.tick.get(), n.budget)
+                    .as_ref()
+                    != Some(request)
+                || n.anchor.tick > c.anchor.tick
+            {
+                return Err(denied(
+                    "retained stock clock cannot change its interval or allowance",
+                ));
+            }
+            self.target.context(c)?;
+            c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+            let end = c
+                .anchor
+                .tick
+                .get()
+                .checked_add(u64::from(request.game_ticks))
+                .ok_or_else(|| denied("retained stock clock horizon overflow"))?;
+            for context in [c, n] {
+                context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+                context.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
+                let mut horizon = context.clone();
+                horizon.anchor.tick = GameTick(end);
+                horizon.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)?;
+            }
+            guard(c)?;
+        }
         self.inspection_required = true;
         let result = self
             .inner
