@@ -3,11 +3,20 @@
 df://session/{id}/replay, and re-execute it with `dwarf-fortress-mcp replay`.
 Then tamper with one recorded call and show the replayer localizing it.
 
-Usage: python3 scripts/lab_replay_roundtrip.py [path/to/dwarf-fortress-mcp]
+Usage: python3 scripts/lab_replay_roundtrip.py [path/to/dwarf-fortress-mcp] [--output bundle.json]
 """
-import hashlib, json, subprocess, sys, tempfile, os
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import tempfile
 
-BINARY = sys.argv[1] if len(sys.argv) > 1 else "target/debug/dwarf-fortress-mcp"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("binary", nargs="?", default="target/debug/dwarf-fortress-mcp")
+parser.add_argument("--output", type=Path, help="save the original verified UTF-8 replay bundle")
+args = parser.parse_args()
+BINARY = args.binary
 META = {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
         "io.modelcontextprotocol/clientCapabilities": {"tools": {"listChanged": True}},
         "io.modelcontextprotocol/clientInfo": {"name": "replay", "version": "0.0.1"}}
@@ -36,38 +45,66 @@ tool("fortress_commit", {"session_id": sid, "plan_digest": pl["plan_digest"]})
 for _ in range(3):
     tool("fortress_wait", {"session_id": sid, "max_game_ticks": 60})
 def read_resource(uri):
-    return json.loads(call("resources/read", {"uri": uri})["result"]["contents"][0]["text"])
+    return call("resources/read", {"uri": uri})["result"]["contents"][0]["text"]
 
-bundle = read_resource(f"df://session/{sid}/replay")
-if bundle.get("schema") == "dfmcp.replay.page/1":
-    page = bundle
+def export_document(uri):
+    text = read_resource(uri)
+    page = json.loads(text)
+    if page.get("schema") != "dfmcp.replay.page/1":
+        return text.encode("utf-8")
     digest, total = page["digest"], page["total_bytes"]
     document = bytearray()
     while True:
-        assert page["schema"] == "dfmcp.replay.page/1" and page["digest"] == digest
-        assert page["total_bytes"] == total and page["offset"] == len(document)
+        if (page["schema"] != "dfmcp.replay.page/1" or page["digest"] != digest
+                or page["total_bytes"] != total or page["offset"] != len(document)):
+            raise ValueError("replay page does not continue the same document")
         part = page["part"].encode("utf-8")
-        assert part and len(document) + len(part) <= total
+        if not part or len(document) + len(part) > total:
+            raise ValueError("invalid replay page length")
         document.extend(part)
         if page["complete"]:
-            assert page["next"] is None
+            if page["next"] is not None:
+                raise ValueError("completed replay page has a continuation")
             break
-        page = read_resource(page["next"])
-    assert len(document) == total and hashlib.sha256(document).hexdigest() == digest
-    bundle = json.loads(document)
-p.stdin.close(); p.wait(timeout=10)
+        page = json.loads(read_resource(page["next"]))
+    if len(document) != total or hashlib.sha256(document).hexdigest() != digest:
+        raise ValueError("reassembled replay bundle differs from its digest or byte count")
+    return bytes(document)
+
+try:
+    document = export_document(f"df://session/{sid}/replay")
+finally:
+    p.stdin.close()
+    p.wait(timeout=10)
+
+bundle = json.loads(document)
 print("recorded calls:", len(bundle["calls"]), "replayable:", bundle["replayable"])
-with tempfile.TemporaryDirectory() as d:
-    path = os.path.join(d, "bundle.json")
-    json.dump(bundle, open(path, "w"))
-    out = subprocess.run([BINARY, "replay", path], capture_output=True, text=True)
-    print("replay:", out.stdout.strip(), "exit", out.returncode)
-    assert out.returncode == 0
-    bundle["calls"][3]["arguments"]["max_game_ticks"] = 59
-    calls = json.dumps(bundle["calls"], separators=(",", ":"), sort_keys=True)
+with tempfile.TemporaryDirectory() as directory:
+    path = Path(directory) / "bundle.json"
+    path.write_bytes(document)
+    out = subprocess.run([BINARY, "replay", path], capture_output=True, text=True, check=True)
+    report = json.loads(out.stdout)
+    if report["ok"] is not True or report["replayed"] != len(bundle["calls"]):
+        raise ValueError(f"replay did not reproduce every recorded call: {report}")
+    print("replay:", out.stdout.strip())
+
+    seq = next(i for i, entry in enumerate(bundle["calls"]) if entry["tool"] == "fortress.wait")
+    bundle["calls"][seq]["arguments"]["max_game_ticks"] = 59
+    calls = json.dumps(bundle["calls"], separators=(",", ":"), sort_keys=True, ensure_ascii=False)
     bundle["calls_digest"] = hashlib.sha256(b"dfmcp-replay-bundle-calls/1\0" + calls.encode()).hexdigest()
-    json.dump(bundle, open(path, "w"))
+    path.write_text(json.dumps(bundle), encoding="utf-8")
     out = subprocess.run([BINARY, "replay", path], capture_output=True, text=True)
-    print("tampered replay:", out.stdout.strip(), "exit", out.returncode)
-    assert out.returncode != 0
+    report = json.loads(out.stdout)
+    divergence = report.get("first_divergence") or {}
+    if (out.returncode == 0 or report.get("ok") is not False or divergence.get("seq") != seq
+            or divergence.get("tool") != "fortress.wait" or divergence.get("field") != "anchor_after"):
+        raise ValueError(f"replayer failed to localize the altered wait: {report}")
+    print("tampered replay:", out.stdout.strip())
+
+if args.output:
+    with tempfile.TemporaryDirectory(dir=args.output.parent) as directory:
+        staged = Path(directory) / "bundle.json"
+        staged.write_bytes(document)
+        staged.replace(args.output)
+    print("saved verified replay:", args.output)
 print("ok")

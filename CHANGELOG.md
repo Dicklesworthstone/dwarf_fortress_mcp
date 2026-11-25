@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — Shared dormitories, recoverable clock stops and replay export
+
+- Plan and furnish a shared dormitory with an accessible aisle. The room CLI accepts 1–32 beds at a fixed or surveyed site. The laboratory provisioned-room and connected-room planners accept 1–16 beds.
+- Read and retry an externally triggered safety stop across all three bounded clock clients. A bounded manager-order run can confirm the fortress paused even when its manager-order queue has become unreadable.
+- Reuse the published world and observation on unchanged operations and spatial reads. A later update preserves the earlier snapshot held by a reader.
+- Export a laboratory recording through its replay resource and re-execute it with the CLI. Large responses use digest-bound UTF-8 pages. To save the verified original after the example completes, run `python3 scripts/lab_replay_roundtrip.py --output session.json`.
+
 ## Unreleased — Recover the review of an original stock-watch interval
 
 - Offer an exact retained Prepared stock-clock request through the existing

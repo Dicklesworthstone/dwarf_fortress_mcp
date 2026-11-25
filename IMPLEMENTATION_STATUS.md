@@ -1,5 +1,15 @@
 # Implementation Status
 
+## Unreleased — Dormitory provisioning, clock recovery and replay export
+
+A laboratory provisioned or connected room can now acquire the exact number of beds, dig a shared room and place each bed alongside a clear aisle. The lab accepts 1–16 beds and 1–8 columns. The standalone planner accepts 1–32 beds with the same column range. Verification covered 130 Python room tests and every one of the 128 supported lab bed-count and column combinations. Native dormitory-zone designation and resident assignment remain open.
+
+Run/1.13, OrderRun/1.14 and ExcavationRun/1.18 clients preserve a stopping receipt while the external pause awaits the plugin's own raw-clock check. OrderRun can verify the pause against the original fortress after an order capture fails. A verified pause carries no inference that the order completed. Checks included 69 Python client cases, 21 Rust clock-decoder cases, 7,859 native order-engine assertions, 580 plugin-handler assertions using DFHack test doubles and three independent wire vectors.
+
+Four operations and spatial journal profiles share immutable graphs and observations across an unchanged refresh. Changed generations, rollback and historical reads retain their own state. Thirty-seven Rust component tests passed. The large compressed-replay and archive cases did not finish within the available test run. Live timing and peak memory have yet to be measured.
+
+The session replay resource now emits the closed CLI bundle schema. Readers can reassemble larger documents with digest-bound byte offsets. Each page enforces the session's current Observe authority and output allowance. The round-trip example can persist the exact exported bytes after it reproduces every call and localizes an altered wait. Four command-line checks with a protocol test peer covered exact inline and paged UTF-8 output, corrupt pages, and an unrelated replay failure. The example wrote the original bytes only after successful verification. The complete MCP executable and a disposable live fortress run remain unqualified.
+
 ## Unreleased — Re-review a retained no-order stock-watch clock
 
 A running native resource project can now recover a Prepared stock-watch
