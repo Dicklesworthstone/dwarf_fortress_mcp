@@ -35,6 +35,7 @@ pub struct BlueprintLayout {
     tile_count: u64,
     access_point: Option<MapCoord>,
     reserved_crossing: Option<MapCuboid>,
+    dormitory_beds: Vec<MapCoord>,
 }
 
 impl BlueprintLayout {
@@ -65,6 +66,13 @@ impl BlueprintLayout {
         self.reserved_crossing
     }
 
+    /// Bed locations inside the single shared room, in row-major order.
+    /// Each selected tile has a free approach directly north of it.
+    #[must_use]
+    pub fn dormitory_beds(&self) -> &[MapCoord] {
+        &self.dormitory_beds
+    }
+
     pub fn generate(origin: MapCoord, template: BlueprintTemplate) -> Result<Self> {
         let mut layout = Self {
             summary: String::new(),
@@ -72,6 +80,7 @@ impl BlueprintLayout {
             tile_count: 0,
             access_point: None,
             reserved_crossing: None,
+            dormitory_beds: Vec::new(),
         };
         match template {
             BlueprintTemplate::BedroomCluster {
@@ -84,6 +93,27 @@ impl BlueprintLayout {
             BlueprintTemplate::WorkshopHub { bays_count } => {
                 layout.cluster(origin, bays_count, (5, 5), MAX_BLUEPRINT_ROOMS)?;
                 layout.summary = format!("excavate {bays_count} workshop bays");
+            }
+            BlueprintTemplate::Dormitory { bed_count, columns } => {
+                if !(1..=16).contains(&bed_count) || !(1..=8).contains(&columns) {
+                    return Err(bounds("a dormitory requires 1..16 beds and 1..8 columns"));
+                }
+                let width = bed_count.min(columns) + 1;
+                let height = 2 * bed_count.div_ceil(columns);
+                layout.push(
+                    rectangle(origin, width, height)?,
+                    DigMode::Mine,
+                    ExcavationRole::Room,
+                )?;
+                for index in 0..bed_count {
+                    layout.dormitory_beds.push(offset(
+                        origin,
+                        i64::from(index % columns) + 1,
+                        2 * i64::from(index / columns) + 1,
+                    )?);
+                }
+                layout.access_point = Some(origin);
+                layout.summary = format!("excavate shared sleeping space for {bed_count} beds");
             }
             BlueprintTemplate::DiningHall { width, height } => {
                 layout.push(

@@ -105,6 +105,9 @@
             },
             {
               "$ref": "#/$defs/dining_hall"
+            },
+            {
+              "$ref": "#/$defs/dormitory"
             }
           ]
         },
@@ -220,6 +223,34 @@
               }
             }
           }
+        }
+      }
+    },
+    "dormitory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template",
+        "origin",
+        "bed_count"
+      ],
+      "properties": {
+        "template": {
+          "const": "dormitory"
+        },
+        "origin": {
+          "$ref": "#/$defs/coordinate"
+        },
+        "bed_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 4
         }
       }
     }

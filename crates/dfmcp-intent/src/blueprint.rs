@@ -28,6 +28,10 @@ pub enum BlueprintTemplate {
         rooms_count: u32,
         room_size: (u8, u8),
     },
+    Dormitory {
+        bed_count: u8,
+        columns: u8,
+    },
     DiningHall {
         width: u8,
         height: u8,
@@ -260,10 +264,11 @@ impl BlueprintPlanner {
         spatial_index: &ChunkSpatialIndex,
         legacy: bool,
     ) -> Result<Intent> {
-        let furniture: &[&str] = match &template {
-            BlueprintTemplate::BedroomCluster { .. } => &["Bed"],
-            BlueprintTemplate::DiningHall { .. } => &["Table", "Chair"],
-            _ => &[],
+        let furniture = match &template {
+            BlueprintTemplate::BedroomCluster { .. } => vec!["Bed"],
+            BlueprintTemplate::DiningHall { .. } => vec!["Table", "Chair"],
+            BlueprintTemplate::Dormitory { bed_count, .. } => vec!["Bed"; usize::from(*bed_count)],
+            _ => Vec::new(),
         };
         let layout = self.layout(origin, template)?;
         let deadline = legacy.then(|| legacy_deadline(anchor)).transpose()?;
@@ -285,7 +290,9 @@ impl BlueprintPlanner {
             let mut occupied = Vec::new();
             for (offset, name) in furniture.iter().enumerate() {
                 let shift = i32::try_from(offset).map_err(|_| invalid("furniture offset"))?;
-                let location = if legacy {
+                let location = if let Some(&bed) = layout.dormitory_beds().get(offset) {
+                    bed
+                } else if legacy {
                     MapCoord {
                         x: if centre.x + shift <= part.area.max.x {
                             centre.x + shift
@@ -502,6 +509,49 @@ mod tests {
             tick: GameTick(100),
             state_hash: Digest32::ZERO,
         }
+    }
+
+    #[test]
+    fn shared_dormitory_seals_distinct_beds_and_approach_aisles() -> Result<()> {
+        let origin = MapCoord::new(2, 6, 10);
+        for beds in 1..=16 {
+            for columns in 1..=8 {
+                let layout = BlueprintPlanner.layout(
+                    origin,
+                    BlueprintTemplate::Dormitory {
+                        bed_count: beds,
+                        columns,
+                    },
+                )?;
+                assert_eq!(layout.excavations().len(), 1);
+                assert_eq!(layout.access_point(), Some(origin));
+                let area = layout.excavations()[0].area;
+                let targets: std::collections::BTreeSet<_> =
+                    layout.dormitory_beds().iter().copied().collect();
+                assert_eq!(targets.len(), usize::from(beds));
+                for bed in &targets {
+                    assert!(area.contains(*bed));
+                    let approach = MapCoord::new(bed.x, bed.y - 1, bed.z);
+                    assert!(area.contains(approach));
+                    assert!(
+                        (origin.x..=bed.x)
+                            .all(|x| !targets.contains(&MapCoord::new(x, approach.y, bed.z)))
+                    );
+                    assert!(
+                        (origin.y..=approach.y)
+                            .all(|y| !targets.contains(&MapCoord::new(origin.x, y, bed.z)))
+                    );
+                }
+            }
+        }
+        for (bed_count, columns) in [(0, 4), (17, 4), (1, 0), (1, 9)] {
+            assert!(
+                BlueprintPlanner
+                    .layout(origin, BlueprintTemplate::Dormitory { bed_count, columns })
+                    .is_err()
+            );
+        }
+        Ok(())
     }
 
     #[test]

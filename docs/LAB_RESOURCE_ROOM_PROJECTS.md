@@ -14,6 +14,23 @@ geometry, furnishing slots, setup permissions and any entrance/access policy
 remain bound to the project. This is laboratory functionality; current native
 and live admission boundaries are unchanged.
 
+## Shared dormitory
+
+For seven beds on the laboratory MCP server, use this `fortress.plan` blueprint:
+
+```json
+{"template":"provisioned_room","layout":{"template":"dormitory","origin":[2,6,10],"bed_count":7,"columns":4}}
+```
+
+The plan needs a suitable observed site, a bed for each position and the
+production prerequisites for any missing beds. The existing room procurement,
+optional finite-resource acquisition and separately reviewed continuation apply.
+Supply `layout` through the provisioned room inside `connected_room` to require
+the original entrance as well. The laboratory supports 1..16 beds and 1..8
+columns (default 4) under its existing exact-furnishing limit. All beds and the
+complete excavated floor participate in original-goal proof. Native zone
+creation and sleeping assignments are separate game operations.
+
 ## Request
 
 Pass this object as the JSON string in `fortress.plan`'s `blueprint` argument in

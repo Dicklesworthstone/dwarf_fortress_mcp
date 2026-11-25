@@ -41,11 +41,21 @@ enum RoomLayout {
         rooms: u32,
         room_size: [u8; 2],
     },
+    Dormitory {
+        origin: [i32; 3],
+        bed_count: u8,
+        #[serde(default = "default_dormitory_columns")]
+        columns: u8,
+    },
     DiningHall {
         origin: [i32; 3],
         width: u8,
         height: u8,
     },
+}
+
+const fn default_dormitory_columns() -> u8 {
+    4
 }
 
 impl RoomLayout {
@@ -60,6 +70,17 @@ impl RoomLayout {
                 BlueprintTemplate::BedroomCluster {
                     rooms_count: *rooms,
                     room_size: (room_size[0], room_size[1]),
+                },
+            ),
+            Self::Dormitory {
+                origin,
+                bed_count,
+                columns,
+            } => (
+                coordinate(*origin),
+                BlueprintTemplate::Dormitory {
+                    bed_count: *bed_count,
+                    columns: *columns,
                 },
             ),
             Self::DiningHall {
@@ -86,6 +107,13 @@ impl RoomLayout {
                 "template":"bedroom_cluster", "origin":origin,
                 "rooms":rooms, "room_size":room_size,
             }),
+            Self::Dormitory {
+                origin,
+                bed_count,
+                columns,
+            } => json!({
+                "template":"dormitory", "origin":origin, "bed_count":bed_count, "columns":columns,
+            }),
             Self::DiningHall {
                 origin,
                 width,
@@ -99,7 +127,7 @@ impl RoomLayout {
 
     fn furniture(&self) -> &'static [FurnitureKind] {
         match self {
-            Self::BedroomCluster { .. } => &[FurnitureKind::Bed],
+            Self::BedroomCluster { .. } | Self::Dormitory { .. } => &[FurnitureKind::Bed],
             Self::DiningHall { .. } => &[FurnitureKind::Table, FurnitureKind::Chair],
         }
     }
@@ -1221,6 +1249,18 @@ fn residual_excavations<'a>(
 }
 
 fn furniture_slots(layout: &BlueprintLayout, kinds: &[FurnitureKind]) -> Result<Vec<Slot>> {
+    if !layout.dormitory_beds().is_empty() {
+        return Ok(layout
+            .dormitory_beds()
+            .iter()
+            .map(|&location| Slot {
+                kind: FurnitureKind::Bed,
+                location,
+                // A shared dormitory has one rectangular excavation.
+                excavation: 0,
+            })
+            .collect());
+    }
     let mut slots = Vec::new();
     for (excavation, part) in layout.excavations().iter().enumerate() {
         if part.role != ExcavationRole::Room {

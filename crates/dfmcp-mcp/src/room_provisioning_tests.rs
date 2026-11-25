@@ -154,6 +154,52 @@ fn fact(value: Value, tick: GameTick) -> Fact {
 }
 
 #[test]
+fn dormitory_produces_and_installs_every_exact_bed_in_the_shared_room() -> Result<()> {
+    let room = ProvisionedRoomRequest::parse_current(
+        &json!({"template":"provisioned_room","layout":{
+            "template":"dormitory", "origin":[2,6,10], "bed_count":3,
+        }})
+        .to_string(),
+    )?;
+    let source = source()?;
+    let original = ProvisionedRoomRequest::parse(&room.canonical_json())?;
+    let (intent, analysis) = original.compile(IntentId::new(967), &source, "")?;
+    assert_eq!(analysis["inventory"][0]["new_items_required"], 3);
+    let targets: BTreeSet<_> = intent
+        .requested_actions
+        .iter()
+        .filter_map(|step| match step.action {
+            Action::PlaceFurniture {
+                kind: FurnitureKind::Bed,
+                location,
+                ..
+            } => Some(location),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        targets,
+        [
+            MapCoord::new(3, 7, 10),
+            MapCoord::new(4, 7, 10),
+            MapCoord::new(5, 7, 10)
+        ]
+        .into_iter()
+        .collect()
+    );
+    assert_eq!(
+        original.semantic_goal_truth(&source)?,
+        PredicateTruth::False
+    );
+    let (finished, _) = execute(source, &intent)?;
+    assert_eq!(
+        original.semantic_goal_truth(&finished)?,
+        PredicateTruth::True
+    );
+    Ok(())
+}
+
+#[test]
 fn original_bedrooms_produce_excavate_place_and_prove_every_furnishing() -> Result<()> {
     let source = source()?;
     let before = source.clone();
