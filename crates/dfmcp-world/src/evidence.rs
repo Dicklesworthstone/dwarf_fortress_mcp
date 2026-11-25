@@ -473,6 +473,10 @@ impl<'a> PredicateEvidence<'a> {
                     .and_then(|fact| self.fact_value(fact))
                     .map_or(Unknown, |known| crate::query::compare(known, *op, value))
             }
+            // Diagnostic presence/freshness selectors describe query metadata,
+            // never a source-qualified game fact or a mutation precondition.
+            // Keep Unknown under Not even for complete laboratory observations.
+            Predicate::FieldPresence { .. } | Predicate::FieldFreshness { .. } => Unknown,
             Predicate::EntityQuantity { kind, .. }
             | Predicate::EntityQuantityIncrease { kind, .. } => {
                 if !self.entity_absence_complete(Some(kind)) {

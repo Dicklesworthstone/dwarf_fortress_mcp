@@ -83,8 +83,8 @@ pub use model::{
 };
 pub use publication::{CapsulePublisher, PublishedRoot, RootReader};
 pub use query::{
-    CompareOp, Predicate, PredicateTruth, QueryCost, QueryOrder, QueryPlanCost, QueryResult,
-    WorldQuery, evaluate, evaluate_for, evaluate_truth_for,
+    CompareOp, FieldPresenceState, Predicate, PredicateTruth, QueryCost, QueryOrder, QueryPlanCost,
+    QueryResult, WorldQuery, evaluate, evaluate_for, evaluate_truth_for,
 };
 pub use query_page::{execute_bounded_query, execute_query};
 pub use table_ledger::{

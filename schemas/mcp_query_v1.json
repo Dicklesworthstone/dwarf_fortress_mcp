@@ -12,6 +12,7 @@
   "$defs": {
     "entity_id": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$", "description": "Canonical positive decimal u64; the runtime also checks numeric overflow."},
     "name": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\u0000]+$"},
+    "diagnostic_field": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\u0000-\u001f\u007f-\u009f]+$", "description": "Diagnostic field names are nonempty, contain no control characters and are bounded to 128 UTF-8 bytes by the runtime."},
     "spatial_coordinate": {"type":"array", "minItems":3, "maxItems":3, "items":{"type":"integer", "minimum":-2147483648, "maximum":2147483647}},
     "spatial_region": {
       "type":"object", "additionalProperties":false, "required":["min","max"],
@@ -75,7 +76,9 @@
       {"type": "object", "additionalProperties": false, "required": ["op", "args"], "properties": {"op": {"const": "all"}, "args": {"type": "array", "items": {"$ref": "#/$defs/filter"}, "maxItems": 4096, "minItems": 0}}},
       {"type": "object", "additionalProperties": false, "required": ["op", "args"], "properties": {"op": {"const": "any"}, "args": {"type": "array", "items": {"$ref": "#/$defs/filter"}, "maxItems": 4096, "minItems": 0}}},
       {"type": "object", "additionalProperties": false, "required": ["op", "arg"], "properties": {"op": {"const": "not"}, "arg": {"$ref": "#/$defs/filter"}}},
-      {"type": "object", "additionalProperties": false, "required": ["op", "field", "comparison", "value"], "properties": {"op": {"const": "compare"}, "field": {"$ref": "#/$defs/name"}, "comparison": {"enum": ["eq", "ne", "lt", "le", "gt", "ge"]}, "value": {"$ref": "#/$defs/literal"}}}
+      {"type": "object", "additionalProperties": false, "required": ["op", "field", "comparison", "value"], "properties": {"op": {"const": "compare"}, "field": {"$ref": "#/$defs/name"}, "comparison": {"enum": ["eq", "ne", "lt", "le", "gt", "ge"]}, "value": {"$ref": "#/$defs/literal"}}},
+      {"type": "object", "additionalProperties": false, "required": ["op", "field", "state"], "properties": {"op": {"const": "presence"}, "field": {"$ref": "#/$defs/diagnostic_field"}, "state": {"enum": ["known", "absent", "unknown", "unsupported", "omitted", "redacted", "stale", "unobserved", "contradicted", "future"]}}, "description": "Select a recorded field-availability category in the exact source projection. Unobserved means no field entry, not proven absence. Contradictory Known representations remain contradicted; explicit unavailable categories remain distinct. Otherwise Known or Absent observations later than the selected source tick are future. This diagnostic does not establish the hidden value, complete-world absence, source authenticity or mutation eligibility."},
+      {"type": "object", "additionalProperties": false, "required": ["op", "field", "max_age_ticks"], "properties": {"op": {"const": "freshness"}, "field": {"$ref": "#/$defs/diagnostic_field"}, "max_age_ticks": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615}}, "description": "True for a consistent Known fact observed no later than the selected source tick whose inclusive age is within max_age_ticks; False for an older Known fact. Missing, unavailable, contradictory and future facts are Unknown, including under not. Uses the selected historical source tick, never the current session tick, and does not promote provenance or grant mutation authority."}
     ]},
     "group_by": {"oneOf": [
       {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "entity_kind"}}},

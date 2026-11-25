@@ -275,6 +275,11 @@ impl<F: FnMut() -> Result<()>> Writer<'_, F> {
                 self.compare_op(*op)?;
                 self.value(value, depth + 1)?;
             }
+            Predicate::FieldPresence { .. } | Predicate::FieldFreshness { .. } => {
+                return Err(invalid(
+                    "query-only field diagnostics cannot enter a prepared-plan archive",
+                ));
+            }
             Predicate::EdgeExists { edge_id, kind } => {
                 self.byte(5)?;
                 self.u128(edge_id.get())?;

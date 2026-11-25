@@ -14,8 +14,8 @@ use dfmcp_world::graph_query::{
 };
 use dfmcp_world::query_page::{QueryCandidates, query_candidates};
 use dfmcp_world::{
-    CompareOp, EdgeKind, EntityKind, EntityRecord, Fact, FactPresence, FactSource, Predicate,
-    QueryOrder, Value as WorldValue, WorldQuery, WorldSnapshot,
+    CompareOp, EdgeKind, EntityKind, EntityRecord, Fact, FactPresence, FactSource,
+    FieldPresenceState, Predicate, QueryOrder, Value as WorldValue, WorldQuery, WorldSnapshot,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -33,6 +33,10 @@ const MAX_SOURCE_STRUCTURE_BYTES: u64 = 16 * 1024 * 1024;
 #[cfg(test)]
 #[path = "source_time_projection_tests.rs"]
 mod source_time_projection_tests;
+
+#[cfg(test)]
+#[path = "field_availability_query_tests.rs"]
+mod field_availability_query_tests;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -109,6 +113,46 @@ enum Filter {
         comparison: Comparison,
         value: Literal,
     },
+    Presence {
+        field: String,
+        state: Presence,
+    },
+    Freshness {
+        field: String,
+        max_age_ticks: u64,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Presence {
+    Known,
+    Absent,
+    Unknown,
+    Unsupported,
+    Omitted,
+    Redacted,
+    Stale,
+    Unobserved,
+    Contradicted,
+    Future,
+}
+
+impl Presence {
+    fn into_world(self) -> FieldPresenceState {
+        match self {
+            Self::Known => FieldPresenceState::Known,
+            Self::Absent => FieldPresenceState::Absent,
+            Self::Unknown => FieldPresenceState::Unknown,
+            Self::Unsupported => FieldPresenceState::Unsupported,
+            Self::Omitted => FieldPresenceState::Omitted,
+            Self::Redacted => FieldPresenceState::Redacted,
+            Self::Stale => FieldPresenceState::Stale,
+            Self::Unobserved => FieldPresenceState::Unobserved,
+            Self::Contradicted => FieldPresenceState::Contradicted,
+            Self::Future => FieldPresenceState::Future,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -350,26 +394,41 @@ impl Filter {
                 field,
                 comparison,
                 value,
-            } => {
-                if field.is_empty() || field.len() > 128 || field.contains('\0') {
-                    return Err(invalid("predicate field name violates its byte bound"));
-                }
-                Predicate::FieldCompare {
-                    entity_id: EntityId::NIL,
-                    field,
-                    op: match comparison {
-                        Comparison::Eq => CompareOp::Eq,
-                        Comparison::Ne => CompareOp::Ne,
-                        Comparison::Lt => CompareOp::Lt,
-                        Comparison::Le => CompareOp::Le,
-                        Comparison::Gt => CompareOp::Gt,
-                        Comparison::Ge => CompareOp::Ge,
-                    },
-                    value: value.into_world()?,
-                }
-            }
+            } => Predicate::FieldCompare {
+                entity_id: EntityId::NIL,
+                field: filter_field(field)?,
+                op: match comparison {
+                    Comparison::Eq => CompareOp::Eq,
+                    Comparison::Ne => CompareOp::Ne,
+                    Comparison::Lt => CompareOp::Lt,
+                    Comparison::Le => CompareOp::Le,
+                    Comparison::Gt => CompareOp::Gt,
+                    Comparison::Ge => CompareOp::Ge,
+                },
+                value: value.into_world()?,
+            },
+            Self::Presence { field, state } => Predicate::FieldPresence {
+                entity_id: EntityId::NIL,
+                field: filter_field(field)?,
+                state: state.into_world(),
+            },
+            Self::Freshness {
+                field,
+                max_age_ticks,
+            } => Predicate::FieldFreshness {
+                entity_id: EntityId::NIL,
+                field: filter_field(field)?,
+                max_age_ticks,
+            },
         })
     }
+}
+
+fn filter_field(field: String) -> Result<String> {
+    if field.is_empty() || field.len() > 128 || field.contains('\0') {
+        return Err(invalid("predicate field name violates its byte bound"));
+    }
+    Ok(field)
 }
 
 /// Decode the same closed row-filter grammar for other stateless projections.

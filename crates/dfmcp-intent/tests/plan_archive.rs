@@ -8,7 +8,7 @@ use dfmcp_intent::{
     Action, BuildingKind, DigMode, FurnitureKind, MaterialSelector, ObligationSpec, PlanStep,
     PreparedPlan, WorkOrderCondition, derive_step_idempotency_key,
 };
-use dfmcp_world::{CompareOp, EdgeKind, EntityKind, Predicate, Value};
+use dfmcp_world::{CompareOp, EdgeKind, EntityKind, FieldPresenceState, Predicate, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn anchor() -> StateAnchor {
@@ -118,6 +118,44 @@ fn original_identity_expiry_compensation_and_goal_survive_exactly() -> Result<()
     assert_eq!(plan.anchor, anchor());
     assert_eq!(plan.expires_at_tick, GameTick(200));
     Ok(())
+}
+
+#[test]
+fn query_field_diagnostics_cannot_be_archived_as_action_evidence() {
+    for diagnostic in [
+        Predicate::FieldPresence {
+            entity_id: EntityId::new(7),
+            field: "stock".to_owned(),
+            state: FieldPresenceState::Known,
+        },
+        Predicate::FieldFreshness {
+            entity_id: EntityId::new(7),
+            field: "stock".to_owned(),
+            max_age_ticks: 5,
+        },
+    ] {
+        for location in 0..4 {
+            let mut plan = pause();
+            match location {
+                0 => plan.terminal_condition = diagnostic.clone(),
+                1 => plan.steps[0].preconditions.push(diagnostic.clone()),
+                2 => plan.steps[0].postconditions.push(diagnostic.clone()),
+                _ => {
+                    plan.steps[0].obligation = Some(ObligationSpec {
+                        terminal: Predicate::Not(Box::new(diagnostic.clone())),
+                        failure: None,
+                        deadline_tick: GameTick(180),
+                        poll_interval_ticks: 5,
+                        stable_for_observations: 2,
+                    });
+                }
+            }
+            plan.digest = plan.compute_digest();
+            assert!(matches!(archive::encode(&plan, ArchiveLimits::default()),
+                Err(error) if error.code == ErrorCode::InvalidPlan
+                    && error.message.contains("query-only field diagnostics")));
+        }
+    }
 }
 #[test]
 fn all_action_families_and_all_building_and_dig_variants_roundtrip() -> Result<()> {

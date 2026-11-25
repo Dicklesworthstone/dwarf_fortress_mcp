@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Query field availability and observation freshness
+
+- Select ten explicit field-availability states through the shared typed
+  `where` grammar, including omitted, redacted, unobserved and future facts.
+- Select consistently Known values by inclusive age at the exact current or
+  retained source; preserve Unknown under negation and mask unavailable values.
+- Reuse existing aggregate, lexical, spatial, relationship, ranking and endpoint
+  consumers, with source/session-bound continuations and unchanged budgets.
+- Keep diagnostics outside mutation evidence, prepared-plan archives and
+  automatic rebase; publish the closed schema and discovery guidance.
+- Add six passing world tests and five passing actual-source JSON query cases;
+  full MCP/stdio and release qualification remain separate.
+
 ## Unreleased — Keep structured lexical search usable under output limits
 
 - Fit search rows together with the complete laboratory Agent Turn and retained

@@ -1230,6 +1230,22 @@ pub(crate) fn predicate_json(predicate: &Predicate) -> Json {
             "op": op_name(*op),
             "value": value_json(value),
         }}),
+        Predicate::FieldPresence {
+            entity_id,
+            field,
+            state,
+        } => json!({"query_field_presence": {
+            "entity_id": entity_id.to_string(), "field": field,
+            "state": state.as_str(), "eligible_as_mutation_evidence": false,
+        }}),
+        Predicate::FieldFreshness {
+            entity_id,
+            field,
+            max_age_ticks,
+        } => json!({"query_field_freshness": {
+            "entity_id": entity_id.to_string(), "field": field,
+            "max_age_ticks": max_age_ticks, "eligible_as_mutation_evidence": false,
+        }}),
         Predicate::EntityQuantity {
             kind,
             filter_field,

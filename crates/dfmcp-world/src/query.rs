@@ -1,12 +1,13 @@
 #![forbid(unsafe_code)]
 
 use dfmcp_core::{
-    DfmcpError, Digest32, EdgeId, EntityId, ErrorCode, FortressId, MapCoord, MapCuboid, Result,
-    StateAnchor,
+    DfmcpError, Digest32, EdgeId, EntityId, ErrorCode, FortressId, GameTick, MapCoord, MapCuboid,
+    Result, StateAnchor,
 };
 
 use crate::{
-    EdgeKind, EntityKind, EntityRecord, Fact, LaboratoryEntityIdentity, Value, WorldSnapshot,
+    EdgeKind, EntityKind, EntityRecord, Fact, FactPresence, LaboratoryEntityIdentity, Value,
+    WorldSnapshot,
 };
 
 const MAX_QUERY_KINDS: usize = 64;
@@ -31,6 +32,79 @@ pub enum CompareOp {
     Le,
     Gt,
     Ge,
+}
+
+/// A field's diagnostic availability within one selected snapshot. These states
+/// describe stored evidence; they do not establish a value or grant mutation
+/// authority. `Unobserved` means the field is missing from a present entity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FieldPresenceState {
+    Known,
+    Absent,
+    Unknown,
+    Unsupported,
+    Omitted,
+    Redacted,
+    Stale,
+    Unobserved,
+    Contradicted,
+    Future,
+}
+
+impl FieldPresenceState {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Known => "known",
+            Self::Absent => "absent",
+            Self::Unknown => "unknown",
+            Self::Unsupported => "unsupported",
+            Self::Omitted => "omitted",
+            Self::Redacted => "redacted",
+            Self::Stale => "stale",
+            Self::Unobserved => "unobserved",
+            Self::Contradicted => "contradicted",
+            Self::Future => "future",
+        }
+    }
+
+    pub(crate) const fn tag(self) -> u8 {
+        match self {
+            Self::Known => 0,
+            Self::Absent => 1,
+            Self::Unknown => 2,
+            Self::Unsupported => 3,
+            Self::Omitted => 4,
+            Self::Redacted => 5,
+            Self::Stale => 6,
+            Self::Unobserved => 7,
+            Self::Contradicted => 8,
+            Self::Future => 9,
+        }
+    }
+
+    fn of_fact(fact: Option<&Fact>, tick: GameTick) -> Self {
+        let Some(fact) = fact else {
+            return Self::Unobserved;
+        };
+        // Explicit unavailability and contradiction remain visible as metadata
+        // at every source tick. Only a value or absence claim is time-masked.
+        match fact.presence.as_ref() {
+            Some(FactPresence::Known(value)) if value != &fact.value => Self::Contradicted,
+            Some(FactPresence::Unknown(_)) => Self::Unknown,
+            Some(FactPresence::Unsupported(_)) => Self::Unsupported,
+            Some(FactPresence::Omitted(_)) => Self::Omitted,
+            Some(FactPresence::Redacted(_)) => Self::Redacted,
+            Some(FactPresence::Stale(_)) => Self::Stale,
+            None | Some(FactPresence::Known(_) | FactPresence::Absent)
+                if fact.observed_at > tick =>
+            {
+                Self::Future
+            }
+            Some(FactPresence::Absent) => Self::Absent,
+            None | Some(FactPresence::Known(_)) => Self::Known,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,6 +189,22 @@ pub enum Predicate {
         baseline_source_digest: Digest32,
         source_generation: u64,
         baseline_source_counters: [u64; 3],
+    },
+    /// Inspect availability metadata, without exposing an unavailable backing
+    /// value. Missing entities remain Unknown, including under negation.
+    /// Query-only: source-qualified mutation evidence never establishes it.
+    FieldPresence {
+        entity_id: EntityId,
+        field: String,
+        state: FieldPresenceState,
+    },
+    /// A consistently Known field was observed no more than this many ticks
+    /// before the selected source tick. Future or unavailable fields remain
+    /// Unknown; only an available older value is False. Query-only metadata.
+    FieldFreshness {
+        entity_id: EntityId,
+        field: String,
+        max_age_ticks: u64,
     },
 }
 
@@ -447,6 +537,26 @@ impl Predicate {
                     put_u64(output, *counter);
                 }
             }
+            Self::FieldPresence {
+                entity_id,
+                field,
+                state,
+            } => {
+                output.push(16);
+                put_u64(output, entity_id.get());
+                put_str(output, field);
+                output.push(state.tag());
+            }
+            Self::FieldFreshness {
+                entity_id,
+                field,
+                max_age_ticks,
+            } => {
+                output.push(17);
+                put_u64(output, entity_id.get());
+                put_str(output, field);
+                put_u64(output, *max_age_ticks);
+            }
         }
     }
 }
@@ -564,6 +674,33 @@ fn evaluate_truth(
             .filter(|fact| fact.observed_at <= snapshot.tick)
             .and_then(Fact::known_value)
             .map_or(PredicateTruth::Unknown, |known| compare(known, *op, value)),
+        Predicate::FieldPresence {
+            entity_id,
+            field,
+            state,
+        } => snapshot
+            .graph
+            .entities
+            .get(&target_entity(*entity_id, candidate))
+            .map_or(PredicateTruth::Unknown, |entity| {
+                PredicateTruth::from_bool(
+                    FieldPresenceState::of_fact(entity.fields.get(field), snapshot.tick) == *state,
+                )
+            }),
+        Predicate::FieldFreshness {
+            entity_id,
+            field,
+            max_age_ticks,
+        } => snapshot
+            .graph
+            .entities
+            .get(&target_entity(*entity_id, candidate))
+            .and_then(|entity| entity.fields.get(field))
+            .filter(|fact| fact.known_value().is_some())
+            .and_then(|fact| snapshot.tick.0.checked_sub(fact.observed_at.0))
+            .map_or(PredicateTruth::Unknown, |age| {
+                PredicateTruth::from_bool(age <= *max_age_ticks)
+            }),
         Predicate::EdgeExists { edge_id, kind } => {
             PredicateTruth::from_bool(snapshot.graph.edges.get(edge_id).is_some_and(|edge| {
                 match kind.as_ref() {
@@ -964,6 +1101,20 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
                 ));
             }
             Predicate::FieldCompare { value, .. } => validate_query_value(value)?,
+            Predicate::FieldPresence { field, .. } | Predicate::FieldFreshness { field, .. } => {
+                if field.len() > MAX_QUERY_FIELD_BYTES {
+                    return Err(DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "query diagnostic field name exceeds its explicit byte bound",
+                    ));
+                }
+                if field.is_empty() || field.chars().any(char::is_control) {
+                    return Err(DfmcpError::new(
+                        ErrorCode::InvalidRequest,
+                        "query diagnostic field requires a nonempty non-control name",
+                    ));
+                }
+            }
             Predicate::EntityQuantity {
                 kind,
                 filter_field,

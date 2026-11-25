@@ -139,6 +139,78 @@ Negation preserves that uncertainty. A known nonmatching selector does not
 require its unused quantity. Source-qualified mutation evidence retains its
 independent coverage and provenance checks.
 
+## Select field availability and observation age
+
+The shared row-filter grammar accepts two diagnostic operations wherever an
+existing entity, aggregate, lexical, spatial, relationship or ranking query
+accepts `where`. Relationship targets and selected endpoint/baseline projections
+use the same grammar. Both operations compose with `all`, `any`, `not` and typed
+value comparisons without another tool or a bridge refresh.
+
+`{"op":"presence","field":"labor.BREW","state":"unobserved"}` selects
+entities whose recorded projection has no entry for that field. This lets an
+agent inspect or count missing evidence before planning, without downloading
+the entire population. The supported states are:
+
+| State | Meaning in the selected source |
+| --- | --- |
+| `known` | A consistent available value, including a typed null, observed by the source tick |
+| `absent` | An explicit Absent marker observed by the source tick |
+| `unknown` | An explicit Unknown marker |
+| `unsupported`, `omitted`, `redacted`, `stale` | The corresponding explicit unavailable marker |
+| `unobserved` | No field entry on the recorded entity; this is not proof of absence |
+| `contradicted` | Explicit Known and compatibility values disagree |
+| `future` | An otherwise consistent Known or Absent fact was observed after the source tick |
+
+These categories are disjoint. Explicit unavailability and contradiction keep
+their classifications even when their timestamp is in the source's future,
+matching the existing fact projection. Future values and absence claims still
+render as Unknown with no value. Filtering by an unavailable state never
+reveals its compatibility value or promotes its provenance. A missing entity
+remains Unknown rather than becoming an entity with an unobserved field.
+
+`{"op":"freshness","field":"alive","max_age_ticks":20}` is True only
+when a consistently Known fact was observed no more than 20 game ticks before
+the selected source tick. The boundary is inclusive; zero requires the same
+tick, and the unsigned bound supports the full u64 range. A known older fact
+is False. Missing, unavailable, contradictory and future facts remain Unknown,
+including under `not`. Explicit Absent is not an available value for freshness.
+Use `presence` to inspect that metadata instead.
+
+For example, count citizens with a current available alive flag:
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "aggregate",
+    "kinds": ["unit"],
+    "where": {
+      "op": "all",
+      "args": [
+        {"op":"freshness","field":"alive","max_age_ticks":20},
+        {"op":"compare","field":"alive","comparison":"eq","value":{"type":"bool","value":true}}
+      ]
+    }
+  }
+}
+```
+
+Historical queries measure age against the exact retained snapshot, while
+Query authorization continues to use the current session anchor. Changing a
+diagnostic field, state or age bound invalidates its continuation. Complete
+source, predicate-work, original wall-time and whole-response budgets remain
+in force. Diagnostic field names must be nonempty, contain no control
+characters and fit 128 UTF-8 bytes at the MCP boundary.
+
+Presence and freshness are query metadata, not source-qualified mutation
+evidence. `PredicateEvidence` returns Unknown for both leaves; prepared-plan
+archives reject them and automatic rebase cannot certify them. An aggregate
+selected by `presence: redacted` may count those records, but numeric metrics
+still exclude their redacted values. Lexical search may match their public
+labels, but cannot search hidden field payloads. Existing comparisons and
+their three-valued semantics are unchanged.
+
 ## Filtered operational aggregates
 
 The stateless `dfmcp.query/1` aggregate accepts the same typed `where` grammar as

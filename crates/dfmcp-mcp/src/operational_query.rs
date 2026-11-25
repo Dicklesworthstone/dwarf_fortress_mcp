@@ -2597,6 +2597,59 @@ mod tests {
         assert_eq!(new["selection"]["complete_within_projection"], true);
         Ok(())
     }
+
+    #[test]
+    fn availability_filters_select_unavailable_rows_without_promoting_their_values() -> Result<()> {
+        let (snapshot, context) = fixture();
+        let redacted = json!({"op":"presence","field":"stock","state":"redacted"});
+        let mut aggregate = numeric_query();
+        aggregate["query"]["where"] = redacted.clone();
+        let counted = execute(&snapshot, &context, &aggregate)?;
+        assert_eq!(counted["matched"], 1);
+        assert_eq!(counted["selection"]["excluded_unknown"], 0);
+        assert_eq!(
+            counted["groups"][0]["metrics"]["stock"]["excluded"]["redacted"],
+            1
+        );
+        assert!(counted["groups"][0]["metrics"]["stock"]["sum"].is_null());
+        assert!(!counted.to_string().contains("9000"));
+
+        let searched = execute(
+            &snapshot,
+            &context,
+            &envelope(json!({
+                "kind":"search","text":"child","text_fields":["message"],
+                "where":redacted,"limit":4
+            })),
+        )?;
+        assert_eq!(searched["matched"], 1);
+        assert_eq!(searched["rows"][0]["entity_id"], "3");
+        assert_eq!(searched["selection"]["matched_predicate"], 1);
+        assert!(!searched.to_string().contains("secret flood"));
+        assert_eq!(searched["coverage"]["absence_proven"], false);
+
+        let fresh = json!({"op":"freshness","field":"alive","max_age_ticks":0});
+        let filtered = execute(
+            &snapshot,
+            &context,
+            &envelope(json!({
+                "kind":"aggregate","where":fresh.clone()
+            })),
+        )?;
+        assert_eq!(filtered["matched"], 2);
+        assert_eq!(filtered["selection"]["excluded_unknown"], 2);
+        let negated = execute(
+            &snapshot,
+            &context,
+            &envelope(json!({
+                "kind":"aggregate","where":{"op":"not","arg":fresh}
+            })),
+        )?;
+        assert_eq!(negated["matched"], 0);
+        assert_eq!(negated["selection"]["excluded_unknown"], 2);
+        assert_eq!(snapshot.anchor(), context.anchor);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

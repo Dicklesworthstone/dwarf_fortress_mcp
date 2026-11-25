@@ -1,5 +1,40 @@
 # Implementation Status
 
+## Unreleased — Select unavailable facts and observation age
+
+The shared structured row filter now supports explicit `presence` and inclusive
+`freshness` selectors through entity, aggregate, lexical, spatial, relationship,
+ranking and selected-endpoint consumers. Agents can find unavailable evidence
+or require recent Known values without downloading every record. The ten
+availability states distinguish missing field entries, explicit absence,
+unknown, unsupported, omitted, redacted, stale, contradictory and future
+observations from available values. Historical age uses the exact selected
+source tick; current Query authority, complete-source work and full response
+budgets remain binding.
+
+Unavailable values stay hidden. Freshness preserves Unknown under negation;
+only an older Known value is False. Continuations bind diagnostic fields,
+states and age bounds with appended predicate tags, preserving all prior
+encodings. Diagnostics supply no mutation proof: source-qualified evidence
+returns Unknown, prepared-plan archives reject them, and automatic rebase
+cannot certify them. The public schema and laboratory discovery describe the
+new closed grammar without adding a tool or native read.
+
+Six exact-source world integration tests pass on current nightly. The actual
+shared JSON query modules also pass four new availability/freshness tests and
+one aggregate/lexical integration case in a focused harness using the real
+core/world/intent sources and exact locked serde dependencies. The new archive
+guard regression also passes, for 12 focused passing cases. Schema checking
+accepts 52 valid cases and rejects 11 malformed cases. The harness excludes
+FastMCP transport and does not qualify the full MCP crate or public facade.
+Repository verification passed its integrity, contracts, admission and dependency
+checks before stopping at the missing `br` executable. Release qualification
+refused the dirty worktree. Full workspace, native/live and compatibility
+admission remain unestablished. No protocol, dependency pin or production
+capability changes.
+
+Owner: `df-lab-structured-query-f7q.7` (in progress).
+
 ## Unreleased — Fit lexical pages to complete Agent Turns
 
 Structured laboratory search now selects a complete ordered prefix against the

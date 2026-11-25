@@ -80,6 +80,24 @@ snapshot tick as Unknown, including for retained historical reads. Projected
 facts retain their presence, source, observation tick and epistemic class;
 unavailable compatibility values are not returned.
 
+To discover missing information directly, the same `where` grammar also accepts
+`{"op":"presence","field":"labor.BREW","state":"unobserved"}`. The
+states are `known`, `absent`, `unknown`, `unsupported`, `omitted`, `redacted`,
+`stale`, `unobserved`, `contradicted` and `future`. Unobserved describes a
+missing field entry, not proven absence. Unavailable values stay hidden even
+when a diagnostic deliberately selects their records.
+
+`{"op":"freshness","field":"alive","max_age_ticks":20}` selects available
+Known facts observed within an inclusive 20-tick age at the selected source.
+Older Known facts are False; missing, unavailable, contradictory and future
+facts remain Unknown even under `not`. Combine it with a typed comparison to
+require both an available recent observation and its desired value. Retained
+reads use the old snapshot's tick for age and the current session's grants for
+authority. These filters also work in aggregates, lexical search, spatial and
+relationship selection, ranking and complete endpoint selections. They remain
+diagnostic metadata and cannot become mutation evidence or archived plan
+predicates. See `QUERY_EXECUTION.md` for category precedence and full bounds.
+
 An aggregate can group units by profession without dumping their records:
 
 ```json

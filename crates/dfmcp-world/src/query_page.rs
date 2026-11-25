@@ -247,6 +247,26 @@ fn encode_predicate(bytes: &mut Vec<u8>, predicate: &Predicate) -> Result<()> {
             });
             value.encode(bytes);
         }
+        Predicate::FieldPresence {
+            entity_id,
+            field,
+            state,
+        } => {
+            bytes.push(16);
+            put_u64(bytes, entity_id.get());
+            put_str(bytes, field);
+            bytes.push(state.tag());
+        }
+        Predicate::FieldFreshness {
+            entity_id,
+            field,
+            max_age_ticks,
+        } => {
+            bytes.push(17);
+            put_u64(bytes, entity_id.get());
+            put_str(bytes, field);
+            put_u64(bytes, *max_age_ticks);
+        }
         Predicate::EdgeExists { edge_id, kind } => {
             bytes.push(5);
             bytes.extend_from_slice(&edge_id.get().to_be_bytes());
