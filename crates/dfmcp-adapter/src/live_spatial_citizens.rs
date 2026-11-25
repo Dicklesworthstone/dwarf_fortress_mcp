@@ -14,6 +14,7 @@ use dfmcp_world::{
     WorldSnapshot,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 pub const MAX_COHERENT_CITIZENS: usize = 4096;
 pub const MAX_SPATIAL_CITIZEN_BYTES: usize = 16 * 1024 * 1024;
@@ -393,21 +394,30 @@ fn mapped_position(
 
 #[derive(Clone, Debug, Default)]
 pub struct LiveSpatialCitizenState {
-    observation: Option<LiveSpatialCitizenObservation>,
-    snapshot: Option<WorldSnapshot>,
-    generations: BTreeMap<EntityId, u32>,
+    observation: Option<Arc<LiveSpatialCitizenObservation>>,
+    snapshot: Option<Arc<WorldSnapshot>>,
+    generations: Arc<BTreeMap<EntityId, u32>>,
 }
 impl LiveSpatialCitizenState {
+    pub(crate) fn into_snapshot(self) -> Option<WorldSnapshot> {
+        self.snapshot.map(Arc::unwrap_or_clone)
+    }
     pub fn observation_full(&self) -> Option<&LiveSpatialCitizenObservation> {
-        self.observation.as_ref()
+        self.observation.as_deref()
     }
     pub fn publish(&mut self, value: LiveSpatialCitizenObservation) -> Result<JobPublication> {
+        // The complete retained observation has already passed this fixed profile's validation.
+        if self.observation.as_deref() == Some(&value) {
+            return Ok(JobPublication::Heartbeat);
+        }
         value.validate()?;
         let source = value.source_digest()?;
         let tick = value.spatial.terrain().tick();
         let mut cursor = ObservationCursor::ORIGIN;
         let mut outcome = JobPublication::Bootstrap;
-        if let (Some(prior), Some(snapshot)) = (&self.observation, &self.snapshot) {
+        if let (Some(prior), Some(snapshot)) =
+            (self.observation.as_deref(), self.snapshot.as_deref())
+        {
             let a = prior.spatial.terrain();
             let b = value.spatial.terrain();
             if a.world_folder != b.world_folder
@@ -420,9 +430,6 @@ impl LiveSpatialCitizenState {
                     ErrorCode::StaleAnchor,
                     "spatial/1.8 world, region or software changed; reopen session",
                 ));
-            }
-            if prior == &value {
-                return Ok(JobPublication::Heartbeat);
             }
             let reset = a.bridge_generation != b.bridge_generation
                 || b.tick() < a.tick()
@@ -717,7 +724,7 @@ impl LiveSpatialCitizenState {
                 return Err(invalid("spatial/1.8 edge identity collision"));
             }
         }
-        let mut generations = self.generations.clone();
+        let mut generations = self.generations.as_ref().clone();
         let revision = cursor
             .sequence
             .checked_add(1)
@@ -757,9 +764,9 @@ impl LiveSpatialCitizenState {
             value.spatial.terrain().paused,
             graph,
         );
-        self.observation = Some(value);
-        self.snapshot = Some(snapshot);
-        self.generations = generations;
+        self.observation = Some(Arc::new(value));
+        self.snapshot = Some(Arc::new(snapshot));
+        self.generations = Arc::new(generations);
         Ok(outcome)
     }
 }
@@ -773,7 +780,7 @@ fn rebind(fact: &mut Fact, source: Digest32) {
 }
 impl SpatialStateView for LiveSpatialCitizenState {
     fn snapshot(&self) -> Option<&WorldSnapshot> {
-        self.snapshot.as_ref()
+        self.snapshot.as_deref()
     }
     fn spatial_observation(&self) -> Option<&LiveSpatialObservation> {
         self.observation.as_ref().map(|v| v.spatial())

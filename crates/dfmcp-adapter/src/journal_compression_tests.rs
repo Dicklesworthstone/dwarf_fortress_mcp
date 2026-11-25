@@ -517,3 +517,79 @@ fn legacy_profiles_keep_raw_bytes_and_reject_delta_markers_before_tail_repair() 
     assert_eq!(memory.bytes.get_ref(), &bytes);
     Ok(())
 }
+
+#[test]
+fn cloned_publications_share_immutable_roots_and_isolate_each_profiles_changes() -> Result<()> {
+    fn exercise<P: JournalProfile>(
+        first: P::Observation,
+        second: P::Observation,
+        reset: P::Observation,
+    ) -> Result<()> {
+        let mut original = P::empty();
+        assert_eq!(
+            P::publish(&mut original, first.clone())?,
+            JobPublication::Bootstrap
+        );
+        let mut candidate = original.clone();
+        let initial = P::snapshot(&original).ok_or_else(|| corrupt("original snapshot"))?;
+        let initial_observation =
+            P::observation(&original).ok_or_else(|| corrupt("original observation"))?;
+        assert!(std::ptr::eq(
+            initial,
+            P::snapshot(&candidate).ok_or_else(|| corrupt("candidate snapshot"))?
+        ));
+        assert!(std::ptr::eq(
+            initial_observation,
+            P::observation(&candidate).ok_or_else(|| corrupt("candidate observation"))?
+        ));
+        assert_eq!(
+            P::publish(&mut candidate, first)?,
+            JobPublication::Heartbeat
+        );
+        assert!(std::ptr::eq(
+            initial,
+            P::snapshot(&candidate).ok_or_else(|| corrupt("heartbeat snapshot"))?
+        ));
+
+        assert_eq!(
+            P::publish(&mut candidate, second.clone())?,
+            JobPublication::Advanced
+        );
+        let pending = P::into_snapshot(candidate).ok_or_else(|| corrupt("staged snapshot"))?;
+        assert_ne!(pending.anchor(), initial.anchor());
+        assert!(std::ptr::eq(
+            initial,
+            P::snapshot(&original).ok_or_else(|| corrupt("published snapshot"))?
+        ));
+        assert_eq!(P::publish(&mut original, second)?, JobPublication::Advanced);
+        assert_eq!(P::snapshot(&original), Some(&pending));
+
+        let mut candidate = original.clone();
+        assert_eq!(P::publish(&mut candidate, reset)?, JobPublication::Reset);
+        let reset = P::into_snapshot(candidate).ok_or_else(|| corrupt("reset snapshot"))?;
+        assert_eq!(reset.cursor.epoch, pending.cursor.epoch + 1);
+        assert_eq!(reset.cursor.sequence, 0);
+        assert_eq!(P::snapshot(&original), Some(&pending));
+        Ok(())
+    }
+
+    let first = observation(3, 2, 7)?;
+    let next = observation(4, 3, 7)?;
+    let reset = observation(3, 1, 8)?;
+    exercise::<Operations13>(
+        first.spatial().operations().clone(),
+        next.spatial().operations().clone(),
+        reset.spatial().operations().clone(),
+    )?;
+    exercise::<Operations14>(
+        first.spatial().operations().clone(),
+        next.spatial().operations().clone(),
+        reset.spatial().operations().clone(),
+    )?;
+    exercise::<Spatial16>(
+        first.spatial().clone(),
+        next.spatial().clone(),
+        reset.spatial().clone(),
+    )?;
+    exercise::<Spatial18>(first, next, reset)
+}

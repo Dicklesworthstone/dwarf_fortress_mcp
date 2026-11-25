@@ -11,6 +11,7 @@ use dfmcp_world::{
     WorldSnapshot,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 #[path = "operations_profile.rs"]
 mod profile;
 pub use profile::OperationsProfile;
@@ -462,9 +463,9 @@ pub fn item_entity_id(id: u32) -> EntityId {
 #[derive(Clone, Debug, Default)]
 pub struct LiveOperationsState {
     profile: OperationsProfile,
-    observation: Option<LiveOperationsObservation>,
-    snapshot: Option<WorldSnapshot>,
-    generations: BTreeMap<EntityId, u32>,
+    observation: Option<Arc<LiveOperationsObservation>>,
+    snapshot: Option<Arc<WorldSnapshot>>,
+    generations: Arc<BTreeMap<EntityId, u32>>,
 }
 impl LiveOperationsState {
     pub fn with_profile(profile: OperationsProfile) -> Self {
@@ -484,26 +485,32 @@ impl LiveOperationsState {
     }
     #[must_use]
     pub fn snapshot(&self) -> Option<&WorldSnapshot> {
-        self.snapshot.as_ref()
+        self.snapshot.as_deref()
     }
     /// Move a temporary component projection into its enclosing observation.
     /// Consuming the state keeps its canonical graph from being copied or reused.
     pub(crate) fn into_snapshot(self) -> Option<WorldSnapshot> {
-        self.snapshot
+        self.snapshot.map(Arc::unwrap_or_clone)
     }
     #[must_use]
     pub fn observation(&self) -> Option<&LiveOperationsObservation> {
-        self.observation.as_ref()
+        self.observation.as_deref()
     }
 
     pub fn publish(&mut self, observation: LiveOperationsObservation) -> Result<JobPublication> {
+        // The complete retained observation has already passed this fixed profile's validation.
+        if self.observation.as_deref() == Some(&observation) {
+            return Ok(JobPublication::Heartbeat);
+        }
         observation.validate_profile(self.profile)?;
         let source = observation.source_digest_profile(self.profile)?;
         let fortress = observation.jobs.fortress_id()?;
         let tick = observation.jobs.tick();
         let mut cursor = ObservationCursor::ORIGIN;
         let mut outcome = JobPublication::Bootstrap;
-        if let (Some(prior), Some(snapshot)) = (&self.observation, &self.snapshot) {
+        if let (Some(prior), Some(snapshot)) =
+            (self.observation.as_deref(), self.snapshot.as_deref())
+        {
             if observation.jobs.world_folder != prior.jobs.world_folder
                 || observation.jobs.site_id != prior.jobs.site_id
                 || observation.jobs.df_version != prior.jobs.df_version
@@ -513,9 +520,6 @@ impl LiveOperationsState {
                     ErrorCode::StaleAnchor,
                     "operations source changed world, site, or software; reopen session",
                 ));
-            }
-            if &observation == prior {
-                return Ok(JobPublication::Heartbeat);
             }
             let reset = observation.jobs.bridge_generation != prior.jobs.bridge_generation
                 || tick < prior.jobs.tick()
@@ -830,7 +834,7 @@ impl LiveOperationsState {
                 ]),
             )?;
         }
-        let mut generations = self.generations.clone();
+        let mut generations = self.generations.as_ref().clone();
         let revision = cursor
             .sequence
             .checked_add(1)
@@ -868,9 +872,9 @@ impl LiveOperationsState {
             edge.revision = revision;
         }
         let snapshot = WorldSnapshot::new(fortress, tick, cursor, observation.jobs.paused, graph);
-        self.observation = Some(observation);
-        self.snapshot = Some(snapshot);
-        self.generations = generations;
+        self.observation = Some(Arc::new(observation));
+        self.snapshot = Some(Arc::new(snapshot));
+        self.generations = Arc::new(generations);
         Ok(outcome)
     }
 }

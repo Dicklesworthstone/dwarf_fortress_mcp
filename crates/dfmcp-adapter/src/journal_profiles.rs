@@ -28,6 +28,8 @@ pub trait JournalProfile: sealed::Sealed {
     fn empty() -> Self::State;
     fn publish(state: &mut Self::State, value: Self::Observation) -> Result<JobPublication>;
     fn snapshot(state: &Self::State) -> Option<&WorldSnapshot>;
+    fn into_snapshot(state: Self::State) -> Option<WorldSnapshot>;
+    fn observation(state: &Self::State) -> Option<&Self::Observation>;
     fn encode(value: &Self::Observation) -> Result<Vec<u8>>;
     fn decode(
         bytes: &[u8],
@@ -72,6 +74,12 @@ macro_rules! operations_profile {
             }
             fn snapshot(state: &Self::State) -> Option<&WorldSnapshot> {
                 state.snapshot()
+            }
+            fn into_snapshot(state: Self::State) -> Option<WorldSnapshot> {
+                state.into_snapshot()
+            }
+            fn observation(state: &Self::State) -> Option<&Self::Observation> {
+                state.observation()
             }
             fn encode(value: &Self::Observation) -> Result<Vec<u8>> {
                 value.encode_profile($profile)
@@ -132,6 +140,12 @@ impl JournalProfile for Spatial16 {
     fn snapshot(state: &Self::State) -> Option<&WorldSnapshot> {
         state.snapshot()
     }
+    fn into_snapshot(state: Self::State) -> Option<WorldSnapshot> {
+        state.into_snapshot()
+    }
+    fn observation(state: &Self::State) -> Option<&Self::Observation> {
+        state.observation()
+    }
     fn encode(value: &Self::Observation) -> Result<Vec<u8>> {
         value.encode_payload()
     }
@@ -172,6 +186,12 @@ impl JournalProfile for Spatial18 {
     fn snapshot(state: &Self::State) -> Option<&WorldSnapshot> {
         use crate::live_spatial::SpatialStateView;
         state.snapshot()
+    }
+    fn into_snapshot(state: Self::State) -> Option<WorldSnapshot> {
+        state.into_snapshot()
+    }
+    fn observation(state: &Self::State) -> Option<&Self::Observation> {
+        state.observation_full()
     }
     fn encode(value: &Self::Observation) -> Result<Vec<u8>> {
         value.encode_payload()

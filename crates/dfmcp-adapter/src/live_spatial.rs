@@ -12,6 +12,7 @@ use crate::live_operations::{LiveOperationsObservation, LiveOperationsState, Ope
 use dfmcp_core::{DfmcpError, Digest32, EntityId, ErrorCode, ObservationCursor, Result};
 use dfmcp_world::{Fact, FactSource, Value, WorldSnapshot};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 pub const MAX_SPATIAL_BYTES: usize = 16 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"DFMS1600";
@@ -160,21 +161,21 @@ pub trait SpatialStateView {
 
 #[derive(Clone, Debug, Default)]
 pub struct LiveSpatialState {
-    observation: Option<LiveSpatialObservation>,
-    snapshot: Option<WorldSnapshot>,
-    generations: BTreeMap<EntityId, u32>,
+    observation: Option<Arc<LiveSpatialObservation>>,
+    snapshot: Option<Arc<WorldSnapshot>>,
+    generations: Arc<BTreeMap<EntityId, u32>>,
 }
 impl LiveSpatialState {
     pub fn observation(&self) -> Option<&LiveSpatialObservation> {
-        self.observation.as_ref()
+        self.observation.as_deref()
     }
     pub fn snapshot(&self) -> Option<&WorldSnapshot> {
-        self.snapshot.as_ref()
+        self.snapshot.as_deref()
     }
     /// Move a temporary component projection into its enclosing observation.
     /// Consuming the state keeps its canonical graph from being copied or reused.
     pub(crate) fn into_snapshot(self) -> Option<WorldSnapshot> {
-        self.snapshot
+        self.snapshot.map(Arc::unwrap_or_clone)
     }
     pub fn source_digest(&self) -> Result<Digest32> {
         self.observation
@@ -183,12 +184,18 @@ impl LiveSpatialState {
             .source_digest()
     }
     pub fn publish(&mut self, value: LiveSpatialObservation) -> Result<JobPublication> {
+        // The complete retained observation has already passed this fixed profile's validation.
+        if self.observation.as_deref() == Some(&value) {
+            return Ok(JobPublication::Heartbeat);
+        }
         value.validate()?;
         let source = value.source_digest()?;
         let tick = value.terrain.tick();
         let mut cursor = ObservationCursor::ORIGIN;
         let mut outcome = JobPublication::Bootstrap;
-        if let (Some(prior), Some(snapshot)) = (&self.observation, &self.snapshot) {
+        if let (Some(prior), Some(snapshot)) =
+            (self.observation.as_deref(), self.snapshot.as_deref())
+        {
             let a = &prior.terrain;
             let b = &value.terrain;
             if a.world_folder != b.world_folder
@@ -201,9 +208,6 @@ impl LiveSpatialState {
                     ErrorCode::StaleAnchor,
                     "spatial world, region or software changed; reopen session",
                 ));
-            }
-            if prior == &value {
-                return Ok(JobPublication::Heartbeat);
             }
             let reset = a.bridge_generation != b.bridge_generation
                 || b.tick() < a.tick()
@@ -277,7 +281,7 @@ impl LiveSpatialState {
                 return Err(invalid("spatial entity namespace collision"));
             }
         }
-        let mut generations = self.generations.clone();
+        let mut generations = self.generations.as_ref().clone();
         let revision = cursor
             .sequence
             .checked_add(1)
@@ -317,9 +321,9 @@ impl LiveSpatialState {
             value.terrain.paused,
             graph,
         );
-        self.generations = generations;
-        self.observation = Some(value);
-        self.snapshot = Some(snapshot);
+        self.generations = Arc::new(generations);
+        self.observation = Some(Arc::new(value));
+        self.snapshot = Some(Arc::new(snapshot));
         Ok(outcome)
     }
 }

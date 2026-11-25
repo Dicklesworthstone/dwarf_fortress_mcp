@@ -318,8 +318,10 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
         if P::fortress(&observation)? != self.fortress {
             return Err(corrupt("journal observation has another fortress"));
         }
+        // The predecessor's immutable observation, graph and identity map remain shared until
+        // a changed observation has been projected and its record has reached durable storage.
         let mut candidate = self.state.clone();
-        let outcome = P::publish(&mut candidate, observation.clone())?;
+        let outcome = P::publish(&mut candidate, observation)?;
         if outcome == JobPublication::Heartbeat {
             return Ok(outcome);
         }
@@ -337,7 +339,8 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
             self.entries.len() as u64 + 1,
             self.head,
             anchor,
-            &observation,
+            P::observation(&candidate)
+                .ok_or_else(|| corrupt("journal candidate observation missing"))?,
             self.payload_base.as_ref(),
         )?;
         let next_length = self
@@ -502,9 +505,7 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
         context: &OperationContext,
     ) -> Result<WorldSnapshot> {
         let state = self.state_at(number, digest, context)?;
-        P::snapshot(&state)
-            .cloned()
-            .ok_or_else(|| corrupt("historical snapshot absent"))
+        P::into_snapshot(state).ok_or_else(|| corrupt("historical snapshot absent"))
     }
     pub fn entries(&self) -> &[JournalEntry] {
         &self.entries
