@@ -1,5 +1,36 @@
 # Implementation Status
 
+## Unreleased — Keep lost Task dispatch receipts indeterminate
+
+Original-plan Tasks now treat unavailable original custody after dispatch
+admission as indeterminate on both the first supervisor attempt and later
+recovery. A successful synchronous commit can be followed by restore before
+the supervisor reads its receipt; that interval no longer fabricates a
+never-dispatched state, zero remaining work or physical quiescence. The exact
+returned commit response remains explicitly historical, current counts remain
+unknown, and the next step requires inspection and reconciliation without
+automatic retry. A retained original receipt still enters ordinary monitoring.
+
+Two new actual-facade regression scenarios cover successful dispatch followed
+by real checkpoint restore, and an initial refused request whose pending
+original remains available for a separate foreground commit. The world
+evidence test's old future-fact assertion is also corrected to match existing
+source-time selection semantics.
+
+Before these changes, actual latest-nightly Cargo execution at
+`73acfe183de45c3b1379efc37cf611bdea992f54` passed 28 core, 256 intent and
+146 world unit tests; one world test failed on that obsolete assertion.
+The correction and new Task tests have not executed. The exact pinned
+dependencies fetched successfully, but the full MCP check stopped in
+`serde_core` with disk exhaustion before application diagnostics, followed
+by executor loss. Baseline repository verification passed its static contracts
+through dependency policy and then stopped at the missing `br` executable.
+No complete MCP build, new-test pass, release receipt, native/game evidence
+or compatibility admission is claimed.
+
+Owners: `df-fastmcp-conformance-5pj.3` and
+`df-tasks-projection-tests-yy4` (in progress).
+
 ## Unreleased — Order Task cancellation, dispatch and result recovery
 
 Original-plan Tasks now hold a per-Task gate through initial synchronous

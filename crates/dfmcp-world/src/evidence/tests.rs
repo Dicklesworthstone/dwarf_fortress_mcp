@@ -263,7 +263,12 @@ fn general_source_grants_reject_variant_name_digest_and_future_forgery() -> Resu
         let evidence = PredicateEvidence::scoped(&snapshot, source_policy(&snapshot))?;
         assert_unknown_logic(&evidence, field(Value::Bool(true)))?;
         assert_unknown_logic(&evidence, field(Value::Bool(false)))?;
-        assert!(crate::evaluate(&snapshot, &field(Value::Bool(true))));
+        // Ordinary selection ignores source-policy admission, but it must
+        // still refuse a value observed after this snapshot's own tick.
+        assert_eq!(
+            crate::evaluate(&snapshot, &field(Value::Bool(true))),
+            observed_at <= snapshot.tick,
+        );
     }
     Ok(())
 }

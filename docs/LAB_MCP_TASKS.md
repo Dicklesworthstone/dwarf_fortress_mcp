@@ -335,10 +335,14 @@ evidence that they were never dispatched. Indeterminate effects remain
 explicitly `indeterminate` in the failed task's evidence, with
 `recovery_class: "reconciliation_required"` and `blind_retry_allowed: false`.
 A failed transport task does not erase unresolved engine work. If the original
-receipt can no longer be read after restore or monitor recovery, failure
-evidence explicitly reports unknown physical work and
-`physical_quiescent: false`; unavailable counts are `null`, never an invented
-zero. Bounded terminal
+receipt can no longer be read after dispatch admission, failure evidence
+explicitly reports unknown physical work and `physical_quiescent: false`;
+unavailable counts are `null`, never an invented zero. This applies on the
+first supervisor attempt too: restore can retire a receipt after a successful
+synchronous commit but before the supervisor inspects custody. Any returned
+commit response is retained as `historical_dispatch_attempt_response`, not
+current proof of work or quiescence. An initial refusal without retained
+original custody likewise cannot certify zero effects from absence alone. Bounded terminal
 summaries retain `proof_status`, `action_proof_status`, compact original-goal
 evidence, replanning status, drain progress and physical quiescence as well as
 the continuation to complete evidence.

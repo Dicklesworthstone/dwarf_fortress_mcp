@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Preserve uncertainty after Task dispatch receipt loss
+
+- Treat a missing original receipt after dispatch admission as indeterminate
+  on the initial attempt as well as recovery; restore can retire custody after
+  a successful effect.
+- Retain the returned commit response as historical diagnosis, keep physical
+  work and counts unknown, and require reconciliation without blind retry.
+- Add two real-facade regression scenarios and correct the pre-existing
+  future-fact assertion exposed by the actual semantic test run.
+- Baseline execution passed 430 tests and exposed that one stale assertion;
+  new tests and the correction remain unexecuted after disk exhaustion and
+  executor loss. Full qualification remains open.
+
 ## Unreleased — Fence Task dispatch against cancellation and expiry
 
 - Serialize initial original dispatch, cancellation admission and execution

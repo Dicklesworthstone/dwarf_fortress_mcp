@@ -36,6 +36,45 @@ fn unresolved_drain_progress() -> Value {
     })
 }
 
+/// Dispatch admission is not evidence that an effect did or did not happen.
+/// In particular, restore can retire a successful commit's receipt between
+/// the synchronous facade returning and this supervisor reading custody.
+/// Keep the returned response as history, but never turn missing custody into
+/// an invented zero-effect or quiescence certificate, even on the first try.
+fn missing_original_receipt(
+    work: &TaskWork,
+    commit: Value,
+    recovering: bool,
+) -> McpResult<Option<(&'static str, Value)>> {
+    if crate::server::task_session::has_original_receipt(
+        work.session_id(),
+        work.original_digest()?,
+    )
+    .map_err(|error| McpError::invalid_params(error.to_string()))?
+    {
+        return Ok(None);
+    }
+    let failure = "the original receipt is unavailable after dispatch admission; past effects are unknown and must not be retried";
+    let payload = json!({
+        "ok": false, "session_id": work.session_id(),
+        "plan_digest": work.plan_digest(), "status": "failed",
+        "proof_status": "unknown", "original_plan_dispatched": null,
+        "remaining_work": null, "physical_quiescent": false,
+        "cleanup_required": true,
+        "physical_work": {"state": "unknown", "quiescent": false, "reason": failure},
+        "drain_progress": unresolved_drain_progress(),
+        "indeterminate": true, "blind_retry_allowed": false,
+        "recovery_class": "reconciliation_required",
+        "dispatch_admitted": true, "receipt_available": false,
+        "monitor_recovery_attempt": recovering,
+        "next_step": {"tool": "fortress.observe", "arguments": {"session_id": work.session_id()},
+            "note": "Inspect current original custody and retained historical response before separately authorized reconciliation; receipt absence does not prove no effects."},
+        "commit_response": commit,
+        "commit_response_scope": "historical_dispatch_attempt_response",
+    });
+    Ok(Some((failure, payload)))
+}
+
 /// The predicate itself is retained in the complete evidence pages. Its
 /// domain-qualified JSON digest lets a bounded result identify that exact
 /// projection without dropping the decisive truth and source anchor.
@@ -506,37 +545,9 @@ impl ApplicationTaskSupervisor for LabTaskService {
                 // Output shaping cannot decide whether an effect happened. The
                 // original receipt is authoritative even if the facade needed to
                 // replace a large success response with a budget refusal.
-                if !crate::server::task_session::has_original_receipt(
-                    definition.session_id(),
-                    definition.original_digest()?,
-                )
-                .map_err(|error| McpError::invalid_params(error.to_string()))?
+                if let Some((failure, payload)) =
+                    missing_original_receipt(&definition, commit, recovering)?
                 {
-                    let failure = if recovering {
-                        "the original receipt is unavailable after recovery; past effects are unknown and must not be retried"
-                    } else {
-                        "the original plan was not dispatched; inspect refusal or required shared-world consent"
-                    };
-                    let payload = json!({"ok": false, "session_id": definition.session_id(),
-                    "plan_digest": definition.plan_digest(), "status": "failed",
-                    "proof_status": if recovering { "unknown" } else { "failed" },
-                    "original_plan_dispatched": if recovering { Value::Null } else { json!(false) },
-                    "remaining_work": if recovering { Value::Null } else { json!(0) },
-                    "physical_quiescent": !recovering, "cleanup_required": recovering,
-                    "physical_work": {
-                        "state": if recovering { "unknown" } else { "never_dispatched" },
-                        "quiescent": !recovering, "reason": failure,
-                    },
-                    "drain_progress": if recovering { unresolved_drain_progress() } else { json!({
-                        "actions_total": 0, "remaining_nonterminal": 0, "remaining_work": 0,
-                        "unknown_work": 0, "remaining_actions": 0, "drained": 0,
-                        "physical_quiescent": true, "quiescent": true,
-                    }) },
-                    "indeterminate": recovering, "blind_retry_allowed": false,
-                    "recovery_class": if recovering { "reconciliation_required" } else { "operator_action_required" },
-                    "next_step": {"tool": "fortress.observe", "arguments": {"session_id": definition.session_id()},
-                        "note": "inspect current state and the retained refusal or shared-world consent before choosing a new plan"},
-                    "commit_response": commit});
                     let bounded = self.bounded_terminal_evidence(
                         work.task_id(),
                         &definition,
@@ -546,7 +557,7 @@ impl ApplicationTaskSupervisor for LabTaskService {
                     work.fail_task(
                         task_error(failure, bounded)?,
                         Some(
-                            "commit refused; inspect the retained Agent Turn before replanning"
+                            "original receipt unavailable; reconcile retained evidence before replanning"
                                 .to_owned(),
                         ),
                     )?;
@@ -1106,3 +1117,7 @@ mod tests {
 #[cfg(test)]
 #[path = "task_output_budget_tests.rs"]
 mod task_output_budget_tests;
+
+#[cfg(test)]
+#[path = "task_dispatch_receipt_tests.rs"]
+mod task_dispatch_receipt_tests;
