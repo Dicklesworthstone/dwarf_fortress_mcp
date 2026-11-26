@@ -227,6 +227,33 @@ pub fn laboratory_building_footprints(
     Ok(footprints)
 }
 
+/// Rasterize supplied footprints in the canonical z/y/x order of `region_tiles`.
+/// This is pure clipped geometry: it establishes no source qualification,
+/// lifecycle, coverage, or mutation authority. Callers making occupancy decisions
+/// must obtain eligible footprints separately, for example through
+/// `laboratory_building_footprints`.
+///
+/// Both the output region and footprint count are bounded at 65,536. Every cuboid
+/// is validated before allocation, including footprints outside the region.
+/// Footprints themselves may be larger than the output region: each is clipped
+/// once. Work is O(footprints + region tiles), and the three-dimensional difference
+/// buffer contains at most eight times the number of region tiles.
+pub fn laboratory_building_occupancy_mask(
+    area: MapCuboid,
+    footprints: &BTreeMap<EntityId, MapCuboid>,
+) -> Result<Vec<bool>> {
+    crate::terrain::validate_region(area)?;
+    if footprints.len() > MAX_LABORATORY_ACCESS_ENTITIES {
+        return Err(bounded(
+            "laboratory occupancy mask exceeds its 65536-footprint bound",
+        ));
+    }
+    for footprint in footprints.values() {
+        MapCuboid::new(footprint.min, footprint.max)?;
+    }
+    Ok(PairedStairsGrid::new(area)?.occupied(footprints))
+}
+
 struct Grid {
     area: MapCuboid,
     width: usize,
@@ -644,3 +671,7 @@ mod tests;
 #[cfg(test)]
 #[path = "laboratory_access_paired_stairs_tests.rs"]
 mod paired_stairs_tests;
+
+#[cfg(test)]
+#[path = "laboratory_occupancy_tests.rs"]
+mod occupancy_tests;

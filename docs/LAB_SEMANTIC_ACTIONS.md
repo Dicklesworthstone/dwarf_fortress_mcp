@@ -42,6 +42,21 @@ preparation before prerequisite excavation. It prevents overlapping abstract
 workshops from creating artificial parallel production capacity in the default
 laboratory just as in material-backed scenarios.
 
+Excavation also checks current building occupancy before dispatch and before
+an active timeline begins. Only tiles whose terrain would change are excluded:
+a partially excavated room can still be repaired around an installed furnishing
+that already stands on the target floor. A restored or externally changed
+overlap refuses before any timeline effects publish. New construction and
+furniture cannot claim the footprint of an unfinished channel, ramp or stair
+designation while its current terrain is still floor; compatible Mine work,
+disjoint levels and explicit cancellation remain supported.
+
+A complete qualified building census is captured once per timeline. Clipped
+three-dimensional occupancy uses the existing difference-array algorithm,
+bounded to 65,536 region tiles and 65,536 footprints, with charged scans and
+allocation work. Disjoint regions skip the grid after the complete census.
+These runtime exclusions do not change archived action or planner generations.
+
 Before publishing a new terminal proof, ordinary `build` and
 `create_work_order` actions also require the original typed entity at generation
 one and eligible, nonfuture evidence for its immutable parameters. Building

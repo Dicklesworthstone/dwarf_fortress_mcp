@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Exclude terrain-changing work from occupied construction
+
+- Refuse excavation beneath buildings at dispatch and before timeline progress;
+  preserve already-correct occupied cells in partial room repairs.
+- Block new construction over unfinished channel, stair or ramp work while
+  allowing compatible mining, separate levels and explicitly cancelled work.
+- Reuse bounded linear-time clipped occupancy geometry with complete source
+  qualification, a cached timeline census and explicit work accounting.
+- Add eight effect and six geometry regression functions, including exhaustive
+  small-grid oracles. All 791 intent/world tests pass on current nightly in the
+  isolated actual-source core workspace, with zero failures or ignored tests.
+
 ## Unreleased — Reject overlapping laboratory construction
 
 - Check the complete current building footprint before every Build effect,

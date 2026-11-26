@@ -36,6 +36,8 @@ mod carpentry;
 mod compensation;
 #[path = "effects_construction_materials.rs"]
 mod construction_materials;
+#[path = "effects_excavation_occupancy.rs"]
+mod excavation_occupancy;
 #[path = "effects_furniture.rs"]
 mod furniture;
 #[path = "effects_harvest.rs"]
@@ -1034,6 +1036,9 @@ fn apply_effect_inner(
             }
             let target = dig_target_tile_code(*mode);
             let remaining = count_remaining(snapshot, *area, target);
+            if remaining != 0 {
+                excavation_occupancy::validate_dispatch(snapshot, *area, target)?;
+            }
             create_entity(
                 snapshot,
                 created_entity_id(idempotency_key, 0),
@@ -1624,6 +1629,7 @@ impl EffectTimeline {
                 }
             }
         }
+        let mut occupied_buildings = None;
         let mut timeline = Self {
             staffed,
             provisions,
@@ -1727,6 +1733,19 @@ impl EffectTimeline {
                         if code != target {
                             pending.insert((coord.z, coord.y, coord.x));
                         }
+                    }
+                    if !pending.is_empty() {
+                        if occupied_buildings.is_none() {
+                            occupied_buildings =
+                                Some(excavation_occupancy::capture_buildings(snapshot, budget)?);
+                        }
+                        let buildings = occupied_buildings.as_ref().ok_or_else(|| {
+                            DfmcpError::new(
+                                ErrorCode::InternalInvariantViolation,
+                                "excavation occupancy census was not retained",
+                            )
+                        })?;
+                        excavation_occupancy::validate_pending(area, &pending, buildings, budget)?;
                     }
                     timeline.digs.insert(
                         record.id,
@@ -2691,6 +2710,10 @@ mod tests;
 #[cfg(test)]
 #[path = "effects_construction_occupancy_tests.rs"]
 mod construction_occupancy_tests;
+
+#[cfg(test)]
+#[path = "effects_excavation_occupancy_tests.rs"]
+mod excavation_occupancy_tests;
 
 #[cfg(test)]
 #[path = "effects_timeline_tests.rs"]

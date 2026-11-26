@@ -30,7 +30,7 @@ pub(super) fn require_vacant(
             )));
         }
     }
-    Ok(())
+    excavation_occupancy::require_clear_for_construction(snapshot, footprint)
 }
 
 pub(super) fn intersects(left: MapCuboid, right: MapCuboid) -> bool {

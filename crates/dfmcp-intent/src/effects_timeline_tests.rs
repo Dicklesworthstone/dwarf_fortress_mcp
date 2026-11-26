@@ -57,6 +57,9 @@ fn world() -> Result<WorldSnapshot> {
         EntityKind::Building,
         vec![
             ("building_kind", Value::Text("workshop:Still".to_owned())),
+            ("position", Value::Coord(MapCoord::new(0, 0, 1))),
+            ("footprint_min", Value::Coord(MapCoord::new(0, 0, 1))),
+            ("footprint_max", Value::Coord(MapCoord::new(0, 0, 1))),
             (
                 CONSTRUCTION_STAGE_FIELD,
                 Value::Text(STAGE_COMPLETE.to_owned()),

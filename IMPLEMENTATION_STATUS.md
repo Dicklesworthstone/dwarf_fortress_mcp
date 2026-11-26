@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Keep excavation and construction spatially compatible
+
+Reference excavation now checks changed cells against complete current building
+occupancy at dispatch and before timeline effects. Already-correct cells under
+furniture remain valid during room repairs. Retained conflicting work refuses
+before publishing time, terrain or unrelated physical progress. Construction
+and exact furniture also refuse unfinished non-floor excavation at their
+footprints, while compatible mining, disjoint levels and explicit cancellation
+remain usable.
+
+The timeline caches one qualified building census. A bounded public geometry
+helper reuses the existing three-dimensional difference array, clips footprints
+once, charges source/mask work before allocation and avoids a grid for disjoint
+regions. Geometry supplies no source evidence or authority. Existing action
+encodings and archived seals remain unchanged.
+
+Eight new effect regression functions and six geometry functions cover spatial
+exclusion, source uncertainty, cancellation, safe room repair, recovered
+conflicts, budgets, 256 point subsets, 729 cuboid pairs and extreme coordinates.
+The old timeline workshop fixture now supplies its explicit remote footprint.
+All 791 intent/world tests pass (427 intent and 364 world, zero ignored),
+including all 20 new regressions across the construction and excavation work.
+The current-nightly run uses the isolated actual-source core workspace with
+locked/offline resolution; all 180 inventoried source/manifests remained stable.
+Independent review, scoped formatting and whitespace checks also pass.
+Repository verification passed its preceding contracts and dependency policy
+before bead coverage stopped because the environment lacks the br executable.
+Full workspace, MCP, native/live and compatibility admission remain unestablished.
+
+Owners: `df-lab-connected-room-access-7c2`,
+`df-lab-workshop-materials-6p8` and `df-lab-shared-workforce-8n4`
+(in progress).
+
 ## Unreleased — Preserve real construction space and workshop capacity
 
 All laboratory Build effects now inspect complete current building occupancy
