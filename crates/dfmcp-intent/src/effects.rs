@@ -1473,7 +1473,15 @@ pub fn advance_effects_with_limits(
     // rewinding it: a fact from inside the proposed interval must not become
     // legitimate simply because the destination clock has reached it.
     budget.charge(snapshot.graph.entities.len() as u64 + snapshot.graph.edges.len() as u64)?;
-    for record in snapshot.graph.entities.values() {
+    for (id, record) in &snapshot.graph.entities {
+        // Canonical bytes encode each record's identity, not its lookup key.
+        // Count one real entity once before deriving capacity or consuming
+        // stock; a second key must never manufacture another worker.
+        if *id != record.id || *id == EntityId::NIL || record.generation == 0 {
+            return Err(precondition(
+                "reference advancement requires matching nonzero entity identities and positive generations",
+            ));
+        }
         // Canonical v1 encodes kind names: Other("unit") has the same bytes as
         // Unit, but the physical model requires the named enum variants. Do
         // not silently omit a consumer, worker, building, order or hostile at
@@ -1491,7 +1499,12 @@ pub fn advance_effects_with_limits(
         }
         validate_advance_source_fields(&record.fields, start, &mut budget)?;
     }
-    for record in snapshot.graph.edges.values() {
+    for (id, record) in &snapshot.graph.edges {
+        if *id != record.id || id.get() == 0 {
+            return Err(precondition(
+                "reference advancement requires matching nonzero edge identities",
+            ));
+        }
         validate_advance_source_fields(&record.fields, start, &mut budget)?;
     }
     snapshot.tick = GameTick(start);
@@ -1586,6 +1599,33 @@ fn designation_area(record: &EntityRecord, tick: GameTick) -> Result<MapCuboid> 
         ));
     };
     MapCuboid::new(min, max)
+}
+
+/// A retained target must agree with its qualified registered mode, both for
+/// progress and for deciding whether construction can share its footprint.
+/// Binding that pair to a sealed original action remains the adapter's duty.
+fn designation_target(record: &EntityRecord, tick: GameTick) -> Result<u32> {
+    let mode = match field_text(record, "mode", tick) {
+        Some("mine") => DigMode::Mine,
+        Some("channel") => DigMode::Channel,
+        Some("up_stair") => DigMode::UpStair,
+        Some("down_stair") => DigMode::DownStair,
+        Some("up_down_stair") => DigMode::UpDownStair,
+        Some("ramp") => DigMode::Ramp,
+        Some("remove_construction") => DigMode::RemoveConstruction,
+        _ => {
+            return Err(precondition(
+                "dig designation requires a qualified registered excavation mode",
+            ));
+        }
+    };
+    let target = dig_target_tile_code(mode);
+    if field_u64(record, "target_tile_code", tick)? != u64::from(target) {
+        return Err(precondition(
+            "dig designation target disagrees with its retained excavation mode",
+        ));
+    }
+    Ok(target)
 }
 
 impl EffectTimeline {
@@ -1722,20 +1762,18 @@ impl EffectTimeline {
                 {
                     let area = designation_area(record, snapshot.tick)?;
                     let tiles = validate_region(area)?;
-                    if staffed
-                        && (field_u64(record, "tiles_total", snapshot.tick)? != tiles
-                            || field_u64(record, TILES_REMAINING_FIELD, snapshot.tick)? > tiles)
+                    let remaining = field_u64(record, TILES_REMAINING_FIELD, snapshot.tick)?;
+                    if record.generation != 1
+                        || field_u64(record, "tiles_total", snapshot.tick)? != tiles
+                        || remaining == 0
+                        || remaining > tiles
                     {
                         return Err(precondition(
-                            "staffed excavation has noncanonical tile counters",
+                            "active excavation requires its original generation and canonical tile counters",
                         ));
                     }
                     budget.charge(tiles)?;
-                    let target =
-                        u32::try_from(field_u64(record, "target_tile_code", snapshot.tick)?)
-                            .map_err(|_| {
-                                precondition("dig designation target tile code is invalid")
-                            })?;
+                    let target = designation_target(record, snapshot.tick)?;
                     if field_u64(record, "work_ticks", snapshot.tick)? >= DIG_TICKS_PER_TILE {
                         return Err(precondition(
                             "active dig designation has noncanonical progress counters",
@@ -2741,6 +2779,10 @@ mod construction_progress_tests;
 #[cfg(test)]
 #[path = "effects_excavation_occupancy_tests.rs"]
 mod excavation_occupancy_tests;
+
+#[cfg(test)]
+#[path = "effects_excavation_identity_tests.rs"]
+mod excavation_identity_tests;
 
 #[cfg(test)]
 #[path = "effects_timeline_tests.rs"]

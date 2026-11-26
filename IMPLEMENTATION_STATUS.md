@@ -1,5 +1,43 @@
 # Implementation Status
 
+## Unreleased — Validate physical work identity before simulation advances
+
+The complete entity and edge census now requires matching nonzero lookup and
+record identities, plus positive entity generations, before the clock is
+rewound or any physical event runs. Duplicate lookup entries cannot turn one
+worker into additional production capacity, including when canonical bytes and
+the apparent anchor remain unchanged. Valid later entity generations remain
+supported.
+
+Active excavation now requires its original reference generation, exact bounded
+area totals, positive bounded retained remaining work, bounded partial service,
+and a qualified registered mode agreeing with its stored target. Construction
+uses the same mode/target check before accepting overlapping excavation as
+harmless mining. Current terrain is still recomputed independently: another
+actor may finish a valid designation without rewriting its previous counter.
+Binding both mode and target to an archived original action remains the
+adapter's separate responsibility.
+
+Actual-source current-nightly execution passes all 291 intent library tests,
+the five new source-identity integration tests and the three terrain integration
+tests from the preceding checkpoint. The 156-test world library result also
+includes all three terrain unit groups. These 455 distinct passing tests include
+all fifteen new regression groups across the two increments, with zero ignored
+tests. The identity fixture was corrected to use the registered laboratory
+producer after its positive control exposed an ineligible Replay fact source;
+no production rule was weakened. Scoped formatting, whitespace checks and
+independent source review pass. The tested core/world/intent source and manifest
+blob inventory was compared with the publication parent before commit.
+
+Repository verification passes its preceding contract and dependency-policy
+gates, then stops because the environment lacks the br executable. Full
+workspace, MCP, clean release and native/live qualification remain unestablished;
+no receipt or compatibility admission is created.
+
+Owners: `df-predicate-evidence-authority-r7m`,
+`df-lab-shared-workforce-8n4` and `df-lab-connected-room-access-7c2`
+(broader acceptance remains in progress).
+
 ## Unreleased — Refuse malformed terrain before excavation, construction and proof
 
 Canonical terrain reads and writes now require each chunk's stored coordinate

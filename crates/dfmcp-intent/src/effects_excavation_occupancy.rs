@@ -130,7 +130,7 @@ pub(super) fn require_clear_for_construction(
         if !occupancy::intersects(area, footprint) {
             continue;
         }
-        if field_u64(record, "target_tile_code", snapshot.tick)? != u64::from(tile_codes::FLOOR) {
+        if designation_target(record, snapshot.tick)? != tile_codes::FLOOR {
             return Err(precondition(
                 "construction footprint overlaps unfinished terrain-changing excavation",
             ));

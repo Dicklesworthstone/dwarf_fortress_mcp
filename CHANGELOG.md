@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Keep retained excavation and production capacity source-qualified
+
+- Admit matching nonzero entity/edge lookup identities and positive entity
+  generations before any simulation event, preventing duplicate records from
+  multiplying worker capacity.
+- Validate active excavation's reference generation, area totals, retained
+  counters and registered mode/target relationship before progress. Apply the
+  same target interpretation to construction exclusions.
+- Preserve all seven excavation modes, valid later entity generations, split
+  progress and terrain completed by another actor.
+- Add four excavation unit groups and five source-identity integration groups.
+  Current-nightly actual-source execution passes all 291 intent unit tests,
+  those five integrations and the preceding three terrain integrations; the
+  world library suite passes 156 tests. All fifteen new regression groups pass.
+- Repository verification reaches the existing missing-br gate. Full workspace,
+  MCP, clean release and native/live qualification remain separate.
+
 ## Unreleased — Reject malformed terrain at the shared simulation boundary
 
 - Require chunk lookup identity and one to 256 positive RLE runs totaling
