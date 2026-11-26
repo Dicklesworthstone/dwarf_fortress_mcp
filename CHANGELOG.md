@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Reject overlapping laboratory construction
+
+- Check the complete current building footprint before every Build effect,
+  including marker-free worlds, so stacked workshops cannot create artificial
+  production capacity.
+- Share canonical, source-qualified occupancy checks with exact-item furniture;
+  retain cancellation, level separation and stricter material-release rules.
+- Add six regression functions for geometry, source uncertainty, lifecycle,
+  capacity conservation and entity bounds. All 419 intent tests, including the
+  new cases, pass on current nightly in the isolated actual-source core workspace.
+
 ## Unreleased — Shared dormitories, recoverable clock stops and replay export
 
 - Plan and furnish a shared dormitory with an accessible aisle. The room CLI accepts 1–32 beds at a fixed or surveyed site. The laboratory provisioned-room and connected-room planners accept 1–16 beds.

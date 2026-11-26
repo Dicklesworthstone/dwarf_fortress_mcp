@@ -40,6 +40,8 @@ mod construction_materials;
 mod furniture;
 #[path = "effects_harvest.rs"]
 mod harvest;
+#[path = "effects_occupancy.rs"]
+mod occupancy;
 #[path = "effects_provisions.rs"]
 mod provisions;
 #[path = "effects_workforce.rs"]
@@ -1069,10 +1071,6 @@ fn apply_effect_inner(
             footprint,
             material,
         } => {
-            if let Some(changed) = construction_materials::build(snapshot, action, idempotency_key)?
-            {
-                return Ok(changed);
-            }
             if !footprint.contains(*location) {
                 return Err(DfmcpError::new(
                     ErrorCode::InvalidRequest,
@@ -1080,6 +1078,20 @@ fn apply_effect_inner(
                 ));
             }
             validate_region(*footprint)?;
+            if snapshot.graph.entities.len() >= MAX_EFFECT_ADVANCE_PRODUCTION_ENTITIES {
+                return Err(advance_budget_error(
+                    "building placement would exceed the canonical entity bound",
+                ));
+            }
+            // Every construction family shares the same complete occupancy
+            // evidence. Material custody may impose additional requirements,
+            // but a marker-free world cannot stack abstract workshops on one
+            // tile and count each of them as independent production capacity.
+            occupancy::require_vacant(snapshot, *footprint, None)?;
+            if let Some(changed) = construction_materials::build(snapshot, action, idempotency_key)?
+            {
+                return Ok(changed);
+            }
             for coord in region_tiles(*footprint) {
                 match snapshot.tile_code_at(coord) {
                     Some(tile_codes::FLOOR) => {}
@@ -2675,6 +2687,10 @@ fn advance_building(
 #[cfg(test)]
 #[path = "effects_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "effects_construction_occupancy_tests.rs"]
+mod construction_occupancy_tests;
 
 #[cfg(test)]
 #[path = "effects_timeline_tests.rs"]

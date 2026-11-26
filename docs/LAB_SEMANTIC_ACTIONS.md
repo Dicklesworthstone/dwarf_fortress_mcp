@@ -27,6 +27,21 @@ Entities an action creates get an identity derived only from the step's
 idempotency key (`effects::created_entity_id`), so the sealed plan names them
 before dispatch and a retry cannot create a duplicate.
 
+Every `build` dispatch also requires its complete footprint to be vacant in a
+bounded, current, source-qualified building census. Planned, active and complete
+buildings occupy their whole cuboid, including canonical building-kind aliases;
+an unobserved or malformed footprint cannot certify empty ground. Exact-item
+furniture uses the same census during placement and progress. Adjacent tiles
+and separate levels remain independent. Unfinished cancellation releases ground
+only under the applicable construction and item-custody rules; cancelling a
+completed building does not make it disappear. Material-backed workshops retain
+their stricter proved-release requirements.
+
+This dispatch check does not change action encodings, archived plan seals or
+preparation before prerequisite excavation. It prevents overlapping abstract
+workshops from creating artificial parallel production capacity in the default
+laboratory just as in material-backed scenarios.
+
 Before publishing a new terminal proof, ordinary `build` and
 `create_work_order` actions also require the original typed entity at generation
 one and eligible, nonfuture evidence for its immutable parameters. Building

@@ -1,5 +1,29 @@
 # Implementation Status
 
+## Unreleased — Preserve real construction space and workshop capacity
+
+All laboratory Build effects now inspect complete current building occupancy
+before creating a building or allocating material. Whole cuboid intersections,
+canonical building-kind aliases, unavailable footprints and invalid source
+identities cannot certify vacant ground. Exact-item furniture uses the same
+census during placement and progress. Specialized material-release checks,
+valid unfinished cancellation and adjacent or separate-level construction remain.
+Planner generations, action encodings and archived seals are unchanged.
+
+Six new actual-effects regression functions cover overlap across lifecycles,
+twelve unavailable-evidence variants, cancellation, independent sites, aliases,
+domain bounds and two brewing orders sharing one actual workshop after a
+duplicate Still is refused. All 419 intent tests pass (263 unit and 156
+integration, zero ignored), including the six new regressions. This run uses
+the actual source through an isolated five-core-crate workspace, locked/offline
+resolution and nightly 1.102.0 (6c709eb42); source remained stable throughout.
+Independent source review, scoped formatting and whitespace checks also pass.
+Full workspace, MCP, native/live qualification and compatibility admission
+remain unestablished.
+
+Owners: `df-lab-workshop-materials-6p8` and `df-lab-shared-workforce-8n4`
+(in progress).
+
 ## Unreleased — Dormitory provisioning, clock recovery and replay export
 
 A laboratory provisioned or connected room can now acquire the exact number of beds, dig a shared room and place each bed alongside a clear aisle. The lab accepts 1–16 beds and 1–8 columns. The standalone planner accepts 1–32 beds with the same column range. Verification covered 130 Python room tests and every one of the 128 supported lab bed-count and column combinations. Native dormitory-zone designation and resident assignment remain open.

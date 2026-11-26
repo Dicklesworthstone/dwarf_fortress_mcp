@@ -543,19 +543,14 @@ fn location_available(
             "furniture target is not established open floor",
         ));
     }
-    for record in snapshot.graph.entities.values() {
-        if record.kind != EntityKind::Building || Some(record.id) == own_building {
-            continue;
-        }
-        if occupied_building_footprint(snapshot, record.id)?
-            .is_some_and(|area| area.contains(location))
-        {
-            return Err(precondition(
-                "furniture target is already occupied by a building",
-            ));
-        }
-    }
-    Ok(())
+    occupancy::require_vacant(
+        snapshot,
+        MapCuboid {
+            min: location,
+            max: location,
+        },
+        own_building,
+    )
 }
 
 /// Establish the closed single-tile target and complete current building
