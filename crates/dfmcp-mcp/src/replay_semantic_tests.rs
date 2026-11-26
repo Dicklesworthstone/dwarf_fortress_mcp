@@ -227,3 +227,45 @@ fn legacy_tool_and_task_archives_keep_their_exact_encoding_and_weaker_claim() ->
     );
     Ok(())
 }
+
+#[test]
+fn uppercase_session_aliases_replay_with_canonical_owner_commitments() -> TestResult {
+    let _serial = crate::test_serial();
+    // Require an alphabetic digit so the bounded fixture exercises an alias.
+    let mut selected = None;
+    for _ in 0..32 {
+        let candidate = open("7824604")?;
+        if candidate.bytes().any(|byte| (b'a'..=b'f').contains(&byte)) {
+            selected = Some(candidate);
+            break;
+        }
+    }
+    let session =
+        selected.ok_or("no alphabetic session identity within bounded fixture allocation")?;
+    let alias = session.to_ascii_uppercase();
+    assert_ne!(alias, session);
+    let queried = parsed(&f::fortress_query(
+        Some(alias.clone()),
+        Some(json!({"mode":"entities", "kind":"unit", "limit":2}).to_string()),
+    ))?;
+    assert_eq!(queried["ok"], true, "{queried}");
+    assert_eq!(queried["session_id"], session);
+    assert!(
+        queried["rows"][0]["resource_uri"]
+            .as_str()
+            .is_some_and(|uri| uri.starts_with(&format!("df://session/{session}/entity-"))),
+        "{queried}"
+    );
+    let observed = parsed(&f::fortress_observe(Some(alias)))?;
+    assert_eq!(observed["ok"], true, "{observed}");
+    let bundle = crate::server::replay_bundle_for(&session)?;
+    assert_eq!(bundle["calls"].as_array().map(Vec::len), Some(3));
+    let report = replay_bundle(&bundle);
+    assert_eq!(report["ok"], true, "{report}");
+    assert_eq!(report["verification"]["semantic_result_calls"], 2);
+    assert_eq!(
+        crate::server::replay_bundle_for(&field(&report, "replay_session_id")?)?,
+        bundle
+    );
+    Ok(())
+}

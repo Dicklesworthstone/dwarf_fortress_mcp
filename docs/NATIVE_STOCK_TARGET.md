@@ -233,6 +233,43 @@ request against the original private journal; a caller-supplied JSON object or
 matching content digest is insufficient. These adapter APIs alone do not make a
 standalone combined session durable.
 
+### Resume an authenticated resource-project watch
+
+The resource-project parent retains the complete original request and canonical
+watch checkpoint in its existing acknowledged child journal reference. Only that
+private parent-custody path can supply a watch to a reopened production child.
+The original workers, labor choice, assignment option, recipes, minima, finite
+caps, observation selector and timing stay fixed. First watch publication requires
+current Control and Plan authority before the parent writes or acknowledges it.
+
+Recovery verifies the original native and prerequisite custodians before restoring
+historical watch ownership. Missing, substituted, noncanonical or regressed custody
+refuses; an operator-supplied count or recovery JSON does not reconstruct a lost
+watch. Legacy references without watch custody remain legacy references. No new
+sidecar, public tool or native protocol is introduced.
+
+Wait and default Observe can then gather fresh complete scalar or portfolio
+samples under the unchanged deadline. Unfinished stability starts again; past
+timely achievement, cancellation, expiry and source fences remain historical.
+A still unfinished eligible watch can use the existing explicit
+`continue_stock_goal` request after fresh stock loss, preserving the same
+workers, target set and timing. Completed or cancelled watches cannot become
+maintenance. Pending first-production recovery retains whichever authenticated
+watch checkpoint has the newer comparable source history; incompatible histories
+are rejected rather than merged into invented evidence.
+
+An acknowledged parent cancellation dominates its no-order watch even when the
+process died before the child recorded cancellation. The reopened child withdraws
+proof and continuation guidance without native I/O. Independently retained stock
+clocks remain available for their existing pause/reconciliation and cancellation
+paths; no new run authority is restored. Positive production originals retain
+their own unchanged execution and predecessor history.
+
+Standalone combined sessions remain process-local. The parent-journal integration
+and its actual Runtime/private-file/TCP regression sources have separate evidence
+status in `IMPLEMENTATION_STATUS.md`; adapter checkpoint tests do not qualify
+the complete MCP or native recovery flow.
+
 ### Keep every already-met target stable together
 
 The reusable `StockTargetsWatch` accepts one through four distinct, already-met
@@ -274,8 +311,9 @@ has been consumed by sampling. Cancellation and failed publication
 withdraw the complete current proof. Decoded native and canonical rejection
 floors survive later authority, policy or budget failures, and source or identity
 regression fences the complete watch. Recovery output preserves original target
-identity without a current sample; restarting restores no joint achievement,
-unfinished streak or current proof.
+identity without a current sample. Standalone reopening restores no joint
+achievement; authenticated resource-project reopening retains historical joint
+achievement, but never an unfinished streak or current proof.
 
 This path creates no insertion keys, effect-bearing original, native preparation,
 labor assignment, clock run or goal-history sidecar. Sampling reports stock loss
@@ -312,8 +350,9 @@ inventory basis before computing any deficit.
 The watch must still be unfinished, uncancelled, unfenced and inside its
 original deadline. A previous timely achievement makes it ineligible even if
 the latest sample or current proof was later withdrawn. Completed goals do not
-become recurring maintenance. Restart does not reconstruct a lost process-local
-watch from historical recovery JSON.
+become recurring maintenance. A resource-project parent can restore the exact
+original watch from authenticated journal custody. Historical recovery JSON alone
+cannot reconstruct a lost standalone process-local watch.
 
 Continuation requires current Plan and production authority, plus labor
 authority when the original request selected assignment. It rechecks eligible

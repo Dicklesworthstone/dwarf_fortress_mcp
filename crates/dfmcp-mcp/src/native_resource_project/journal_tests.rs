@@ -1297,10 +1297,9 @@ fn clocked_portfolio_publication() -> (Value, Checkpoint, Checkpoint, Checkpoint
     let clocks: Vec<_> = (1..=4)
         .map(|step_id| {
             let pin = |family: &str| {
-                let id = Digest32::of_bytes(
-                    format!("original portfolio {family} {step_id}").as_bytes(),
-                )
-                .to_hex();
+                let id =
+                    Digest32::of_bytes(format!("original portfolio {family} {step_id}").as_bytes())
+                        .to_hex();
                 json!({
                     "journal_id":id,"head":id,
                     "authority_tick_floor":130,"high_source_sequence":0,
@@ -3182,3 +3181,5 @@ mod private_files {
 
 #[path = "stock_clock_recovery_tests.rs"]
 mod stock_clock_recovery;
+#[path = "stock_watch_recovery_tests.rs"]
+mod stock_watch_recovery;

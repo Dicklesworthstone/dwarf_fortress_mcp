@@ -25,6 +25,9 @@ pub struct StockWatchCheckpointTerms {
     pub deadline_tick: GameTick,
     pub poll_interval_ticks: u64,
     pub stable_samples: u32,
+    pub achieved_at: Option<GameTick>,
+    pub expired: bool,
+    pub fenced: bool,
 }
 
 pub(super) fn corrupt() -> dfmcp_core::DfmcpError {
@@ -154,6 +157,9 @@ impl Checkpoint {
             deadline_tick: self.deadline,
             poll_interval_ticks: self.cadence,
             stable_samples: self.stable,
+            achieved_at: self.achieved,
+            expired: self.expired,
+            fenced: self.fenced,
         })
     }
 

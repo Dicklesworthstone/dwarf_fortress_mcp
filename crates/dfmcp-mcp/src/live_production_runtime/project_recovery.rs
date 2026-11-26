@@ -50,6 +50,10 @@ impl ProjectProductionIntent {
         }
         intent.goal.validate()?;
         let expected = retained(&intent.recovery_reference)?;
+        if let Some(watch) = &expected.stock_watch {
+            watch.validate_goal(&intent.goal)?;
+            watch.require_unfinished()?;
+        }
         let recovery = reference_recovery(&intent.recovery_reference)?;
         validate_reference_sources(&expected, recovery)?;
         if expected.portfolio_clocks.as_ref().is_some_and(|slots| {
@@ -221,6 +225,10 @@ impl ProjectProductionIntent {
     /// failed-call rejection floors; recovery joins those floors with the
     /// immutable intent. After publication every original floor is monotone.
     pub(crate) fn validate_checkpoint(&self, checkpoint: &Value) -> Result<()> {
+        super::super::project_stock_watch::verify_intent_watch(
+            &self.recovery_reference,
+            checkpoint,
+        )?;
         let expected = retained(&self.recovery_reference)?;
         let actual = retained(checkpoint)?;
         same_digest(
@@ -282,6 +290,7 @@ struct Retained {
     clock: Option<ClockPin>,
     inventory_clock: Option<ClockPin>,
     portfolio_clocks: Option<Vec<PortfolioClockPin>>,
+    stock_watch: Option<super::super::project_stock_watch::Checkpoint>,
     workshop_prerequisite: Option<WorkshopSource>,
     manager_prerequisite: Option<ManagerSource>,
     input_supply: Option<InputSource>,
@@ -353,6 +362,7 @@ fn retained(value: &Value) -> Result<Retained> {
             "project recovery is historical custody, not restored authority or proof",
         ));
     }
+    super::super::project_stock_watch::from_reference(value)?;
     Ok(retained)
 }
 
@@ -368,7 +378,9 @@ fn reference_recovery(reference: &Value) -> Result<Recovery> {
 
 fn validate_preplan_sources(reference: &Retained) -> Result<()> {
     if reference.recovery.is_none() && reference.portfolio_clocks.is_some() {
-        return Err(denied("pre-plan custody cannot adopt original portfolio clocks"));
+        return Err(denied(
+            "pre-plan custody cannot adopt original portfolio clocks",
+        ));
     }
     digest(&reference.native_custody.workforce_journal_id)?;
     digest(&reference.native_custody.order_journal_id)?;
@@ -691,6 +703,7 @@ fn publication_reference(prior: &Value, intent: &ProjectProductionIntent) -> Res
             }
         }
     }
+    super::super::project_stock_watch::join_intent_watch(&mut reference, prior)?;
     Ok(reference)
 }
 
@@ -836,7 +849,9 @@ fn validate_portfolio(recovery: Recovery) -> Result<()> {
                     .flatten()
                 {
                     if id == Digest32::ZERO || !identities.insert(id) {
-                        return Err(denied("original portfolio clocks require distinct custodians"));
+                        return Err(denied(
+                            "original portfolio clocks require distinct custodians",
+                        ));
                     }
                 }
             }
@@ -862,7 +877,9 @@ fn portfolio_clock_pins(
         return if reference.portfolio_clocks.is_none() {
             Ok(None)
         } else {
-            Err(denied("scalar original cannot adopt portfolio clock custody"))
+            Err(denied(
+                "scalar original cannot adopt portfolio clock custody",
+            ))
         };
     };
     let first = slots[0].ok_or_else(|| denied("project portfolio lost its first order"))?;
@@ -871,44 +888,47 @@ fn portfolio_clock_pins(
         return if reference.portfolio_clocks.is_none() {
             Ok(None)
         } else {
-            Err(denied("clockless original cannot add portfolio clock metadata"))
+            Err(denied(
+                "clockless original cannot add portfolio clock metadata",
+            ))
         };
     }
-    let pins = reference
-        .portfolio_clocks
-        .as_deref()
-        .ok_or_else(|| denied("project recovery requires every original clock head and source floor"))?;
+    let pins = reference.portfolio_clocks.as_deref().ok_or_else(|| {
+        denied("project recovery requires every original clock head and source floor")
+    })?;
     if pins.len() != slots.iter().flatten().count()
         || pins.is_empty()
         || pins.len() > 4
         || pins[0].clock != reference.clock
         || pins[0].inventory_clock != reference.inventory_clock
     {
-        return Err(denied("project clock vector changed its complete first-order summary"));
+        return Err(denied(
+            "project clock vector changed its complete first-order summary",
+        ));
     }
     let mut result = [None; 4];
     for (index, (pin, slot)) in pins.iter().zip(slots.into_iter().flatten()).enumerate() {
         if pin.step_id != slot.step_id {
-            return Err(denied("project clock vector replaced or reordered an original slot"));
+            return Err(denied(
+                "project clock vector replaced or reordered an original slot",
+            ));
         }
-        let decode = |pin: Option<&ClockPin>, expected: Option<Digest32>| {
-            match (pin, expected) {
-                (Some(pin), Some(expected))
-                    if digest(&pin.journal_id)? == expected
-                        && pin.authority_tick_floor <= reference.observation_tick_floor =>
-                {
-                    Ok(Some(ProjectClockRecovery {
-                        journal_id: expected,
-                        head: digest(&pin.head)?,
-                        authority_tick_floor: pin.authority_tick_floor,
-                        high_source_sequence: pin.high_source_sequence,
-                    }))
-                }
-                (None, None) => Ok(None),
-                _ => Err(denied(
-                    "project clock vector lost a custodian or its consumed source floor",
-                )),
+        let decode = |pin: Option<&ClockPin>, expected: Option<Digest32>| match (pin, expected) {
+            (Some(pin), Some(expected))
+                if digest(&pin.journal_id)? == expected
+                    && pin.authority_tick_floor <= reference.observation_tick_floor =>
+            {
+                Ok(Some(ProjectClockRecovery {
+                    journal_id: expected,
+                    head: digest(&pin.head)?,
+                    authority_tick_floor: pin.authority_tick_floor,
+                    high_source_sequence: pin.high_source_sequence,
+                }))
             }
+            (None, None) => Ok(None),
+            _ => Err(denied(
+                "project clock vector lost a custodian or its consumed source floor",
+            )),
         };
         result[index] = Some(ProjectPortfolioClockRecovery {
             step_id: pin.step_id,
@@ -943,7 +963,9 @@ fn compare_portfolio_clock_sources(
             }
             Ok(())
         }
-        _ => Err(denied("project publication changed its complete clock source vector")),
+        _ => Err(denied(
+            "project publication changed its complete clock source vector",
+        )),
     }
 }
 
@@ -1203,6 +1225,16 @@ impl Config {
             ));
         }
         let prior = retained(reference)?;
+        if let Some(watch) = &prior.stock_watch {
+            let terms = watch.terms()?;
+            if terms.deadline_tick.get() != binding.deadline_tick
+                || terms.original_anchor.fortress_id != self.workforce.acceptance().fortress()
+            {
+                return Err(denied(
+                    "project stock watch changed its original fortress or deadline",
+                ));
+            }
+        }
         let portfolio_clocks = if prior.recovery.is_some() {
             let recovery = reference_recovery(reference)?;
             validate_reference_sources(&prior, recovery)?;
@@ -1248,7 +1280,10 @@ impl Config {
             for slot in slots.into_iter().flatten() {
                 source_floor = source_floor
                     .max(slot.clock.map_or(0, |pin| pin.authority_tick_floor))
-                    .max(slot.inventory_clock.map_or(0, |pin| pin.authority_tick_floor));
+                    .max(
+                        slot.inventory_clock
+                            .map_or(0, |pin| pin.authority_tick_floor),
+                    );
             }
         }
 
@@ -1353,6 +1388,7 @@ impl Config {
             ));
         }
         self.current()?;
+        self.project_stock_watch = prior.stock_watch;
         self.project_recovery = Some(ProjectRecovery {
             workforce_journal,
             order_journal,

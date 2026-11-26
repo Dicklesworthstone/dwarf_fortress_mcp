@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Recover original resource-project stock goals
+
+- Restore scalar and portfolio no-order watches from authenticated parent journal
+  custody, retaining original workers, targets, timing and terminal history.
+- Require fresh complete samples after restart and preserve the existing explicit
+  finite-production continuation for still unfinished goals.
+- Enforce Control/Plan before first watch acknowledgment, reject rewritten or
+  regressed history, and retain newer comparable pending-publication checkpoints.
+- Carry a durable parent stop into its recovered no-order child without native
+  I/O or rewriting positive originals; preserve independent stock-clock safety
+  routing. Add journal, private-file and native Runtime/TCP regression sources.
+- Canonicalize accepted session-handle aliases during replay capture and add a
+  real-facade regression. All 63 stock adapter component tests pass, including
+  final lifecycle-term assertions, and the actual full adapter library checks.
+  Scoped Rust formatting, Python campaign syntax and whitespace checks pass.
+  Full native/MCP integration remains unverified: the test metadata compiler
+  was killed in the pinned asupersync dependency before application diagnostics.
+
 ## Unreleased — Compare read payloads during deterministic replay
 
 - Record new replay.bundle/3 transcripts with semantic tool-result commitments,

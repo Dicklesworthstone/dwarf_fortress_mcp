@@ -23,7 +23,7 @@ pub(crate) struct StockTarget {
     pub max_order_amount: u32,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct StockTargetsRequest {
     pub kind: String,

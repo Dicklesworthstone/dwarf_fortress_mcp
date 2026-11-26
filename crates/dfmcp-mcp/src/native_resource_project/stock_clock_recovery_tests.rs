@@ -78,7 +78,7 @@ fn stock_progress(checkpoint: &mut Checkpoint, tick: u64, sequence: u64) -> Test
 
 /// Public checksums are reproducible. This deliberately bypasses append so
 /// replay must independently reject an invalid, canonically encoded transition.
-fn append_stock_replay_frame(
+pub(super) fn append_stock_replay_frame(
     storage: &Memory,
     acknowledgements: &Memory,
     pin: &Pin,

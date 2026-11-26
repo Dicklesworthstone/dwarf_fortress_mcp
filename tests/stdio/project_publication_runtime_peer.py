@@ -113,7 +113,7 @@ def run_case(executable, test, requested_case, clocks=(), one_order=False,
                 phase = stage.read_text() if stage.exists() else ""
                 if phase == "continue_deficit":
                     self.inventory_stack, self.chair_stack = 2, 1
-                offset = {"first_sample": 5, "second_sample": 10, "at_parent_floor": 20}.get(phase)
+                offset = {"first_sample": 5, "second_sample": 10, "third_sample": 15, "at_parent_floor": 20}.get(phase)
                 if offset is not None:
                     assert not self.order_created and not self.workforce_applied
                     self.order_tick = self.workforce_tick = combined.TICK + offset
@@ -124,7 +124,7 @@ def run_case(executable, test, requested_case, clocks=(), one_order=False,
 
         peer = ProjectPeer(production)
         try:
-            met = case in ("no_work", "no_work_floor") or case.startswith("continue_") or reopening
+            met = case in ("no_work", "no_work_floor") or case.startswith(("continue_", "watch_")) or reopening
             peer.inventory_stack = 6 if met else 2
             peer.chair_stack = 2 if met or one_order else 1
             environment = combined.environment(production, peer.endpoint)
@@ -152,10 +152,10 @@ def run_case(executable, test, requested_case, clocks=(), one_order=False,
             environment["DFMCP_COMBINED_PRODUCTION_WORKSHOP_TOKEN"] = "t" * 32
             retained_path = directory / "publication.json"
             if reopening:
-                # First retain the complete fixed vector in a no-work session.
+                # First retain the fixed root and custody before any watch/effect original.
                 # Reopen actual native custodians before compiling any original,
                 # with the same root deadline and independently retained floor.
-                child(executable, test, "control", "portfolio_no_work", environment,
+                child(executable, test, "control", "portfolio_preplan_only", environment,
                       retained_path, retained_path)
                 preplan = json.loads(retained_path.read_text())
                 assert preplan["intent"] is None and preplan["actual"]["recovery"] is None
@@ -202,6 +202,10 @@ def run_case(executable, test, requested_case, clocks=(), one_order=False,
             assert not any(operation.startswith("Commit") for operation in calls)
             assert "PrepareOrder" not in calls
             assert not peer.workforce_applied and not peer.order_created
+            if case.startswith("watch_"):
+                run_watch_recovery(executable, test, requested_case, combined,
+                                   environment, retained_path, production,
+                                   directory, peer, workshop)
             if case in ("published", "partial", "advanced", "slot_collision"):
                 reopened = pending_environment(combined, environment, retained)
                 offline = {key: value for key, value in reopened.items()
@@ -295,6 +299,91 @@ def run_case(executable, test, requested_case, clocks=(), one_order=False,
                 peer.close()
             finally:
                 workshop.close()
+
+
+
+def run_watch_recovery(executable, test, requested_case, combined, environment,
+                       retained_path, production, directory, peer, workshop):
+    """Use actual native owners and custody; never substitute recovery models."""
+    retained = json.loads(retained_path.read_text())
+    case = requested_case.removeprefix("portfolio_")
+    prefix = "portfolio_" if requested_case.startswith("portfolio_") else ""
+    assert retained["intent"] is None and retained["actual"]["recovery"] is None
+    assert retained["actual"]["stock_watch"]["schema"] == "dfmcp.project-stock-watch/1"
+    reopened = pending_environment(combined, environment, retained)
+    parent = json.loads(reopened["DFMCP_COMBINED_PRODUCTION_CONFIG"])
+    parent["workshop_prerequisite_checkpoint"] = (
+        retained["actual"]["workshop_prerequisite"]["checkpoint"])
+    reopened["DFMCP_COMBINED_PRODUCTION_CONFIG"] = json.dumps(parent)
+    offline = {key: value for key, value in reopened.items()
+               if not (key.startswith("DFMCP_") and key.endswith((
+                   "_TOKEN", "_ALLOW_LABOR", "_ALLOW_PRODUCTION",
+                   "_ALLOW_CLOCK", "_ALLOW_INVENTORY_CLOCK")))}
+    calls_before = (list(peer.calls), list(workshop.calls))
+    files_before = combined.custody_files(production)
+    child(executable, test, "watch-recover", requested_case, offline, retained_path,
+          directory / "watch-offline.json")
+    assert calls_before == (peer.calls, workshop.calls), "offline watch recovery contacted a source"
+    assert files_before == combined.custody_files(production), "offline watch recovery changed custody"
+
+    if case == "watch_restart":
+        for changed in ("oversized", "schema", "unknown", "deadline"):
+            damaged = json.loads(retained_path.read_text())
+            watch = damaged["actual"]["stock_watch"]
+            if changed == "oversized":
+                watch["checkpoint_hex"] = "ab" * 2049
+            elif changed == "schema":
+                watch["schema"] = "dfmcp.project-stock-watch/2"
+            elif changed == "unknown":
+                watch["current_goal_proven"] = True
+            else:
+                watch["request"]["deadline_tick"] += 1
+            source = directory / f"watch-{changed}.json"
+            source.write_text(json.dumps(damaged))
+            child(executable, test, "watch-reject", requested_case, offline, source,
+                  directory / "watch-refused.json")
+        for path in sorted(production.glob("*/*.journal")):
+            if path.parent.name not in ("workforce", "orders"):
+                continue
+            hidden = directory / f"saved-watch-{path.parent.name}-{path.name}"
+            path.rename(hidden)
+            try:
+                absent = combined.custody_files(production)
+                child(executable, test, "watch-reject", requested_case, offline,
+                      retained_path, directory / "watch-refused.json")
+                assert absent == combined.custody_files(production), "watch recovery recreated missing custody"
+            finally:
+                hidden.rename(path)
+        assert calls_before == (peer.calls, workshop.calls)
+        assert files_before == combined.custody_files(production)
+
+    resumed_path = directory / "watch-resumed.json"
+    child(executable, test, "watch-resume", requested_case, reopened, retained_path, resumed_path)
+    assert not any(operation.startswith(("Prepare", "Commit")) for _, operation in peer.calls)
+    assert not peer.workforce_applied and not peer.order_created
+    if case == "watch_continue":
+        continued = json.loads(resumed_path.read_text())
+        assert continued["intent"] is not None and continued["actual"]["recovery"] is not None
+        assert (continued["actual"]["stock_watch"]["request"]
+                == retained["actual"]["stock_watch"]["request"])
+        continued_env = pending_environment(combined, reopened, continued)
+        parent = json.loads(continued_env["DFMCP_COMBINED_PRODUCTION_CONFIG"])
+        parent.pop("workshop_prerequisite_checkpoint", None)
+        continued_env["DFMCP_COMBINED_PRODUCTION_CONFIG"] = json.dumps(parent)
+        continued_offline = {key: value for key, value in continued_env.items()
+                            if not (key.startswith("DFMCP_") and key.endswith((
+                                "_TOKEN", "_ALLOW_LABOR", "_ALLOW_PRODUCTION",
+                                "_ALLOW_CLOCK", "_ALLOW_INVENTORY_CLOCK")))}
+        current_calls = (list(peer.calls), list(workshop.calls))
+        current_files = combined.custody_files(production)
+        child(executable, test, "recover", prefix + "published", continued_offline,
+              resumed_path, directory / "watch-positive-recovered.json")
+        assert current_calls == (peer.calls, workshop.calls), "positive watch recovery contacted a source"
+        assert current_files == combined.custody_files(production), "positive watch recovery changed custody"
+    else:
+        assert files_before == combined.custody_files(production), "resumed watch wrote effect custody"
+        if case in ("watch_cancelled", "watch_fenced", "watch_parent_stopped"):
+            assert calls_before == (peer.calls, workshop.calls), "stopped watch contacted a native source"
 
 
 def run_ordinary_case(executable, test, clocks, count=2, assign_labor=True,
@@ -440,7 +529,16 @@ def run_ordinary_case(executable, test, clocks, count=2, assign_labor=True,
 
 
 def main():
-    executable, test = sys.argv[1:]
+    executable, test, *selection = sys.argv[1:]
+    if selection:
+        assert selection == ["--stock-watch-only"]
+        for prefix in ("", "portfolio_"):
+            for case in ("watch_restart", "watch_achieved", "watch_cancelled",
+                         "watch_fenced", "watch_continue", "watch_parent_stopped"):
+                run_case(executable, test, prefix + case)
+        run_case(executable, test, "portfolio_watch_restart", ("inventory_clock",))
+        print("project-stock-watch-campaign:checked")
+        return
     cases = ("no_work", "no_work_floor", "ack_refusal", "published", "partial", "advanced", "prepared_floor",
              "continue_ack_refusal", "continue_partial", "continue_published")
     for case in cases:

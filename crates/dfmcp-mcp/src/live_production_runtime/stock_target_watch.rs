@@ -52,6 +52,7 @@ impl Runtime {
             "stable_samples_required": goal.request.stable_samples,
             "cancelled": goal.cancelled,
             "source_fenced": goal.monitor.fenced(),
+            "historical_achieved_at_tick": goal.monitor.achieved_at().map(GameTick::get),
             "consumed_tick_floor": goal.monitor.high_tick().get(),
             "continuation_request": self.stock_continuation_request_json(),
             "original_goal_proven": self.no_work_goal_proven(),
@@ -105,6 +106,12 @@ impl Runtime {
     }
 
     pub(super) fn require_no_active_stock_watch(&self) -> Result<()> {
+        if self.config.project_binding.is_some() && self.project_stock_watch_checkpoint().is_some()
+        {
+            return Err(denied(
+                "the fixed project retains its original stock watch; it cannot replace a cancelled or completed goal",
+            ));
+        }
         if self.has_active_stock_watch() {
             return Err(denied(
                 "retain the original no-work stock goal or explicitly cancel it before new planning",

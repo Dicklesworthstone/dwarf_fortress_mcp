@@ -3,9 +3,7 @@
 //! An opening marker is acknowledged before constructing each child. Replay
 //! never grants initialization, restores a review, or proves a current goal.
 //! The independent ACK refuses valid-prefix rollback even after a lost reply.
-use super::runtime::stock_clock::{
-    ClockCheckpoint, original_digest, production_source_digest,
-};
+use super::runtime::stock_clock::{ClockCheckpoint, original_digest, production_source_digest};
 use crate::live_production_runtime::ProjectStockGoal;
 use std::io::SeekFrom;
 use std::path::Path;
@@ -222,17 +220,34 @@ fn validate_stock_clock(
     initial_tick: u64,
     retained_tick: u64,
 ) -> Result<()> {
+    if let Some(reference) = &snapshot.checkpoint.production
+        && reference.get("stock_watch").is_some()
+    {
+        let goal: ProjectStockGoal =
+            serde_json::from_value(original.get("goal").cloned().ok_or_else(corrupt)?)
+                .map_err(|_| corrupt())?;
+        crate::live_production_runtime::project_stock_watch::validate_parent_reference(
+            reference,
+            &goal,
+            fortress,
+            initial_tick,
+            retained_tick,
+        )?;
+    }
     let Some(value) = &snapshot.checkpoint.stock_clock else {
         return Ok(());
     };
     require(stock_watch_policy(original)?)?;
     let clock = ClockCheckpoint::from_json(value)?;
-    let goal: ProjectStockGoal = serde_json::from_value(
-        original.get("goal").cloned().ok_or_else(corrupt)?,
-    )
-    .map_err(|_| corrupt())?;
+    let goal: ProjectStockGoal =
+        serde_json::from_value(original.get("goal").cloned().ok_or_else(corrupt)?)
+            .map_err(|_| corrupt())?;
     goal.validate()?;
-    let production = snapshot.checkpoint.production.as_ref().ok_or_else(corrupt)?;
+    let production = snapshot
+        .checkpoint
+        .production
+        .as_ref()
+        .ok_or_else(corrupt)?;
     clock.target().matches_original(
         parent_journal_id,
         original_digest(original)?,
@@ -334,6 +349,9 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<()> {
     }
     if let Some(value) = &c.production {
         value_bytes(value, MAX_CHECKPOINT)?;
+        crate::live_production_runtime::project_stock_watch::verify_reference_continuity(
+            value, value,
+        )?;
     }
     if let Some(value) = &c.production_intent {
         value_bytes(value, MAX_CHECKPOINT)?;
@@ -436,6 +454,23 @@ fn transition(old: &Snapshot, new: &Snapshot, after_manager: Option<Stage>) -> R
     if before.production_intent.is_some() && before.production_intent != after.production_intent {
         return Err(conflict());
     }
+    let had_watch = before
+        .production
+        .as_ref()
+        .is_some_and(|value| value.get("stock_watch").is_some());
+    let has_watch = after
+        .production
+        .as_ref()
+        .is_some_and(|value| value.get("stock_watch").is_some());
+    if !had_watch
+        && has_watch
+        && (old.stage != Stage::Production
+            || new.stage != Stage::Production
+            || before.production_intent.is_some()
+            || after.production_intent.is_some())
+    {
+        return Err(conflict());
+    }
     if let Some(retained) = &before.stock_clock {
         let retained = ClockCheckpoint::from_json(retained)?;
         let current = ClockCheckpoint::from_json(after.stock_clock.as_ref().ok_or_else(conflict)?)?;
@@ -461,7 +496,17 @@ fn transition(old: &Snapshot, new: &Snapshot, after_manager: Option<Stage>) -> R
             return Err(conflict());
         }
     }
-    if before.production_intent.is_some() || before.stock_clock.is_some() {
+    if before.production_intent.is_some()
+        || before.stock_clock.is_some()
+        || before
+            .production
+            .as_ref()
+            .is_some_and(|reference| reference.get("stock_watch").is_some())
+        || after
+            .production
+            .as_ref()
+            .is_some_and(|reference| reference.get("stock_watch").is_some())
+    {
         // The child owns descriptor semantics. Reuse the parent's ordinary
         // original/floor continuity check so even a checksummed replay cannot
         // erase a published original or newer sticky rejection evidence.
@@ -1047,8 +1092,26 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
             && snapshot.checkpoint.production_intent.is_some();
         let starts_stock_clock = self.snapshot.checkpoint.stock_clock.is_none()
             && snapshot.checkpoint.stock_clock.is_some();
-        let starts_original = starts_stage || starts_intent || starts_stock_clock;
+        let starts_stock_watch = self
+            .snapshot
+            .checkpoint
+            .production
+            .as_ref()
+            .is_none_or(|value| value.get("stock_watch").is_none())
+            && snapshot
+                .checkpoint
+                .production
+                .as_ref()
+                .is_some_and(|value| value.get("stock_watch").is_some());
+        let starts_original =
+            starts_stage || starts_intent || starts_stock_clock || starts_stock_watch;
         let mut retained_context = context.clone();
+        if let Some(reference) = &snapshot.checkpoint.production
+            && let Some(tick) =
+                crate::live_production_runtime::project_stock_watch::reference_high_tick(reference)?
+        {
+            retained_context.anchor.tick = retained_context.anchor.tick.max(GameTick(tick));
+        }
         if let Some(value) = &snapshot.checkpoint.stock_clock {
             let clock = ClockCheckpoint::from_json(value)?;
             // A sibling clock floor must not disappear behind a newer child

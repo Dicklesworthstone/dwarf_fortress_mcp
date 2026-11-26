@@ -515,9 +515,12 @@ parent stock-watch clock can advance one separately reviewed interval as
 described below. Repeated Plan and Query calls cannot renew the deadline or
 manufacture samples. Failed observations or
 publication withdraw current proof; consumption makes current truth false.
-Explicit goal/project cancellation withdraws the watch. Its sample history is
-process-local and is never restored from the retained census or recovery JSON.
-The parent goal and deadline remain immutable across recovery.
+Explicit goal/project cancellation withdraws the watch. Its unfinished sample
+streak and current proof remain process-local. The parent
+journal now independently acknowledges the complete original watch request,
+canonical assessment and source history before publishing it to the caller.
+Restart recovers that historical owner under the same goal and absolute deadline;
+it contributes no new sample and cannot renew the original.
 
 For the four-target configuration above, use this production request:
 
@@ -614,9 +617,14 @@ step review, Commit and clock confirmation rules then apply.
 
 A refused read or prepublication check retains the watch and consumed source
 floors while withdrawing current proof. Partial publication remains fenced.
-Neither recovery JSON nor the marker in a later archive recreates a watch or
-its prior stability samples. After timely watch achievement, later stock loss
-is current evidence loss and does not authorize another maintenance cycle.
+Recovery reopens a watch only from the original parent's authenticated journal
+and independent ACK, after checking its exact native and prerequisite custody.
+The complete request, source rejection floors, cancellation and first timely
+achievement survive; unfinished stability and current proof do not. The marker
+in a later production archive remains historical predecessor identity. Its
+retained watch checkpoint cannot reactivate another watch after that original
+exists. After timely achievement, later stock loss is current evidence loss
+and does not authorize another maintenance cycle.
 
 ### 5. Verify the original outcome
 
@@ -720,7 +728,7 @@ the first production original.
 
 The target binds the complete original goal, parent journal and acknowledged
 production source custody, including the original fortress, source epoch and
-absolute deadline. It does not use a process-local watch witness as a durable
+absolute deadline. It does not use the stock-watch witness as its clock
 identity. Scalar and one-to-four-target portfolio goals use the same parent
 clock, and every original minimum must hold in the fresh joint census.
 
@@ -778,9 +786,11 @@ the same native key and preparation without another PrepareRun or unpause.
 Native wall time remains unchanged; foreground census/RPC work keeps its own
 remaining deadline. A separate explicit Commit is still required. Fresh Plan
 refuses False or unknown current stock. Source fencing, changed goal terms,
-cancelled or previously achieved goals, missing authority, or a lost
-process-local watch cannot use this advice. Recovery without the watch keeps
-the explicit inspection/cancellation path below.
+cancelled or previously achieved goals, missing authority, or missing
+authenticated watch custody cannot use this advice. Recovery of an acknowledged
+watch can obtain a fresh review of the unchanged interval after independently
+qualifying the complete current stock goal. Legacy recovery without that watch
+keeps the explicit inspection/cancellation path below.
 
 Each original clock retains at most 64 runs. Native receipts report historical
 advancement and pause verification; they are not current pause, inventory or
@@ -795,10 +805,15 @@ configuration when reopening. It is an additional exact clock pin, not a new
 original: both its head and the acknowledged parent clock head must occur in
 the surviving journal, and their rejection floors combine monotonically. It
 cannot initialize a missing file or enable the feature for an older project.
-A retained Prepared interval without its process-local watch
-must be explicitly cancelled in Control mode before rebuilding the unchanged
-watch. Recover mode can inspect and reconcile; it cannot promote itself to
-Control. Cancellation uses independent Query and ControlClock authority and
+A retained Prepared interval can resume its existing review path when the
+same parent journal also authenticates its original stock watch. Recovery
+restores no review or stock proof: an explicit Plan must freshly qualify the
+complete goal and review the unchanged interval before a separate Commit.
+Legacy references that never acknowledged a watch still require explicit
+cancellation of the Prepared interval in Control mode before creating the
+unchanged original watch. Recover mode can inspect and reconcile; it cannot
+promote itself to Control. Cancellation uses independent Query and ControlClock
+authority and
 remains available after the goal deadline or parent stop, without requiring
 Plan, Observe or current stock truth. Project cancellation still retires a
 later ordinary production preparation after its separate stock clock settles.
@@ -825,6 +840,8 @@ Retain the complete recovery reference after every successful or failed call:
 - Each immutable handoff from the parent checkpoint.
 - The separate `stock_clock` target and journal pin when configured, plus
   `stock-watch-clock.journal`. Its floors remain binding after later production.
+- The optional closed `production.stock_watch` checkpoint for an original
+  no-order goal, retained even after an explicit first-production continuation.
 - Any immutable `production_intent` from the parent checkpoint, including when
   the child original was not yet acknowledged in the next parent checkpoint.
 - Consumed authority/source floors and sticky discontinuity fences, including
@@ -907,6 +924,53 @@ rolled-back journal/ACK data is not repaired in place. A failed response fit or
 expired final publication budget withdraws live reviews before the session lock
 is released. Recovery data never restores a native permit or current goal proof.
 
+### Recover the original no-order stock watch
+
+The existing `dfmcp.project-production-recovery/1` child reference can now carry
+an optional `stock_watch` with schema `dfmcp.project-stock-watch/1`. It retains
+the complete original scalar or portfolio request, canonical adapter checkpoint
+bytes in lowercase hexadecimal, and cancellation. The request fixes the original
+observation selector, selected citizen IDs, labor, assignment choice, every
+minimum and order cap, absolute deadline, cadence and required sample count.
+
+The parent acknowledges the first watch in its existing Production stage under
+current Control and Plan authority. It creates no effect-bearing original,
+production intent, new sidecar, native preparation or clock run. Later parent
+frames retain monotone source tick, cursor and allocator floors, sticky fences,
+cancellation and first timely achievement. Replay validates the same closed
+request and lifecycle rules; a valid checksum cannot justify replacing workers,
+erasing terminal history or dropping the watch. Older references omit this field
+and retain their exact original bytes and recovery behavior.
+
+On reopening, the actual parent journal and independent ACK supply the watch;
+a caller's recovery JSON or a retained census cannot create one. The child first
+verifies its original workforce/order journals, configured clocks and exact
+Workshop/Manager/input prerequisites through their ordinary owners. It then
+recovers the watch without native contact or custody writes, retaining the
+original deadline and rejection floors. Offline inspection exposes history with
+no current sample or proof. Wait or default Observe in an eligible online owner
+acquires a complete fresh qualified census. An unfinished goal starts a new
+stability streak; an earlier timely achievement remains historical and needs
+fresh True evidence to establish current proof again.
+
+A still unfinished, uncancelled, unfenced watch may explicitly continue after
+stock loss through the unchanged `continue_stock_goal` Plan request. Restart
+never changes its workers, amount caps, assignment choice or timing. The child
+freshly qualifies its original selection and deficit, and the parent ACKs the
+exact first-production intent before child files are created. That intent and
+all later checkpoints retain the watch's historical predecessor. Pending
+publication joins only comparable monotone rejection histories and refuses
+incomparable branches. Once the effect-bearing original exists, recovery does
+not reactivate the watch. Achieved or cancelled goals cannot become maintenance.
+
+The parent's acknowledged terminal stop also retires an unfinished child watch
+when a crash preceded the child's own cancellation checkpoint. Reopening and
+later ordinary calls apply this local, idempotent withdrawal before exposing
+stock proof or continuation advice; Offline mode performs no native call or
+custody write. Existing positive production originals and their historical watch
+predecessors stay with their original recovery owners. Independent stock-clock
+custody remains available for inspection, Wait and safety cancellation.
+
 ### Complete portfolio clock recovery custody
 
 Production recovery can retain `portfolio_clocks`, an ordered vector matching
@@ -935,8 +999,10 @@ rejects advanced clocks, goal history or native effects in every original slot.
 This custody and routing support is independently source-reviewed. Regression
 sources cover child validation, actual parent journal plus independent ACK
 replay, prospective header identity, explicit selectors, presentation and the
-actual combined-production Runtime/native-TCP publication campaign. The new
-tests have not executed because the execution environment is unavailable.
+actual combined-production Runtime/native-TCP publication campaign. These
+integration tests have not executed in the current session; the validation
+record below and `IMPLEMENTATION_STATUS.md` distinguish current checks from
+historical receipts.
 
 ## Shared request and output bounds
 
@@ -955,6 +1021,7 @@ tests have not executed because the execution environment is unavailable.
 | Manager handoff | 16 KiB |
 | Child checkpoint | 32 KiB each |
 | Exact production publication intent | 32 KiB |
+| Original no-order watch checkpoint | 16 KiB within its child checkpoint; canonical adapter bytes at most 2,048 bytes |
 | Parent configuration | 128 KiB |
 | `stock_targets` planning request | 8 KiB |
 | Other parent planning requests | 4 KiB |
@@ -994,6 +1061,29 @@ separate.
 
 ## Validation record
 
+### Original no-order stock-watch recovery
+
+The actual stock adapter component passes **63 tests, zero failures**, including
+nine canonical-checkpoint regression groups and the exported historical
+achievement, expiry and fencing assertions. All 15 included production/test
+inputs remained unchanged during that run. This receipt covers the adapter
+checkpoint implementation; it excludes the parent journal and Runtime recovery
+integration.
+
+The integration adds eight closed-checkpoint/admission groups, seven actual
+parent journal/independent-ACK groups, and one native Runtime/TCP/private-custody
+campaign covering 13 scalar, portfolio and configured-clock cases. Those
+16 integration tests have not executed. Independent source review checked
+immutable requests, initial Control/Plan admission, pending-intent history joins,
+native custody before watch restoration, the parent-cancellation crash window,
+and preserved independent stock-clock safety/reconciliation routing. Changed
+Rust files pass scoped latest-nightly formatting checks; the Python peer passes
+an AST syntax check, and patch whitespace checks pass. These source checks do
+not establish compiled Runtime or executed native-campaign behavior.
+
+Full MCP/stdio, real Asupersync scheduling and live DFHack acceptance remain
+unqualified. Earlier receipts below apply only to their stated source and scope.
+
 ### No-order stock-watch time
 
 The independent owner, parent journal replay, fixed native header creation,
@@ -1020,8 +1110,9 @@ exercise the distinct combined-project publication path.
 
 Independent source review checked the acknowledged descriptor, exclusive native
 initializers, all changed callsites and the partial-publication failure paths.
-These new Rust/Python sources have not been compiled, formatted or executed:
-the execution environment is unavailable. Earlier component receipts do not
+The fixtures changed in the current watch-recovery increment pass scoped
+formatting and Python syntax checks. The expanded Runtime/TCP campaign has not
+been compiled or executed in this session. Earlier component receipts do not
 qualify this increment; full MCP and live DFHack acceptance remain open.
 
 ### Current per-order inspection and portfolio-clock increment
@@ -1035,11 +1126,10 @@ Independent source reviews cover the child recovery and header calculation,
 parent routing, actual journal/ACK replay regressions, presentation and the
 native-TCP fixture extensions. The five initial inspection Rust files passed a
 parser check using the available September nightly rustfmt during a brief host
-recovery. No new Cargo build, Rust test execution, formatter pass, integrated
-MCP/stdio or live DFHack result is claimed. The execution environment repeatedly
-failed during latest-nightly provisioning and is unavailable. Earlier receipts
-below concern their exact earlier source revisions and do not qualify these
-changes.
+recovery. At that checkpoint no new Cargo build, Rust test execution, formatter
+pass, integrated MCP/stdio or live DFHack result was established. Earlier
+receipts below concern their exact earlier source revisions and do not qualify
+this extension; current watch-recovery checks are recorded above.
 
 ### Current parent-portfolio increment
 

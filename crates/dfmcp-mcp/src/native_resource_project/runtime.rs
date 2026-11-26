@@ -417,14 +417,18 @@ impl Runtime {
         )?;
         let mut high_tick = journal.pin().authority_tick_floor;
         if let Some(recovery) = &config.stock_clock_recovery {
-            let prior = journal.snapshot().checkpoint.stock_clock.as_ref()
+            let prior = journal
+                .snapshot()
+                .checkpoint
+                .stock_clock
+                .as_ref()
                 .ok_or_else(|| denied("external stock-clock recovery has no acknowledged owner"))?;
             let prior = stock_clock::ClockCheckpoint::from_json(prior)?;
             let recovery = stock_clock::ClockCheckpoint::from_json(recovery)?;
-            if prior.target() != recovery.target()
-                || prior.journal_id() != recovery.journal_id()
-            {
-                return Err(denied("external stock-clock recovery names another original owner"));
+            if prior.target() != recovery.target() || prior.journal_id() != recovery.journal_id() {
+                return Err(denied(
+                    "external stock-clock recovery names another original owner",
+                ));
             }
             high_tick = high_tick.max(recovery.high_tick());
         }
@@ -767,7 +771,9 @@ impl Runtime {
         let stock_recovery = self.journal.snapshot().checkpoint.stock_clock.is_some();
         let reserve = if stock_recovery {
             2 * journal::WORK_BYTES + stock_clock_runtime::OPEN_BYTES
-        } else { journal::WORK_BYTES };
+        } else {
+            journal::WORK_BYTES
+        };
         let mut budget = work.child(MAX_BYTES, reserve)?;
         budget.max_output_tokens = budget.max_output_tokens.min(32_768);
         if config.clock.is_none() && config.inventory_clock.is_none() {
@@ -790,7 +796,7 @@ impl Runtime {
         };
         // Authenticate the actual recovered original and fixed parent goal
         // before acknowledging its adoption, including legacy checkpoints.
-        let status = child.project_status(&self.config.goal)?;
+        let mut status = child.project_status(&self.config.goal)?;
         if let Some(intent) = &intent {
             child.validate_project_publication(&self.config.goal, intent)?;
         }
@@ -798,6 +804,14 @@ impl Runtime {
         if stock_recovery {
             self.open_stock_clock(work, false)?;
             self.save_child(work, None)?;
+        }
+        // Retain independent time custody before the local goal stop. A root
+        // cancellation must not strand an existing run's recovery owner.
+        self.retire_stopped_stock_watch()?;
+        if self.cancelled()
+            && let Some(Child::Production(child)) = &self.child
+        {
+            status = child.project_status(&self.config.goal)?;
         }
         if !self.stock_clock_withholds_goal() {
             self.current_goal = status.to_json();
@@ -837,9 +851,12 @@ impl Runtime {
         // The first reservation cannot be reused by the child or final save.
         let reserved = work.reserve(&base, journal::WORK_BYTES)?;
         let may_open_clock = self.config.stock_watch_clock && self.stock_clock.is_none();
-        let after = journal::WORK_BYTES + if may_open_clock {
-            2 * journal::WORK_BYTES + stock_clock_runtime::OPEN_BYTES
-        } else { 0 };
+        let after = journal::WORK_BYTES
+            + if may_open_clock {
+                2 * journal::WORK_BYTES + stock_clock_runtime::OPEN_BYTES
+            } else {
+                0
+            };
         let mut budget = work.child(MAX_BYTES, after)?;
         let Some(Child::Production(child)) = &mut self.child else {
             return Err(denied("original production owner is unavailable"));
@@ -981,6 +998,19 @@ impl Runtime {
         }))
     }
 
+    /// A parent terminal ACK can outlive the child's cancellation checkpoint.
+    /// Reapply only the logical no-order stop before any nested view or sample;
+    /// positive originals retain their existing reconciliation/cancel owners.
+    fn retire_stopped_stock_watch(&mut self) -> Result<()> {
+        if self.cancelled()
+            && let Some(Child::Production(child)) = &mut self.child
+        {
+            child.retire_project_stock_watch_after_stop(&self.config.goal)?;
+            self.last_child_reference = child.project_recovery_reference();
+        }
+        Ok(())
+    }
+
     fn child_call(&mut self, action: Action, work: &mut Work) -> Result<Value> {
         action.validate_order_scope(
             matches!(&self.child, Some(Child::Production(_))),
@@ -1013,6 +1043,9 @@ impl Runtime {
                 }
             }
         }
+        // Dedicated stock-clock safety/reconciliation routing above remains
+        // independent of ordinary goal sampling and continuation.
+        self.retire_stopped_stock_watch()?;
         let mut stock_target = false;
         if let Action::Plan(raw) = &action {
             if raw.len() > 8192 {

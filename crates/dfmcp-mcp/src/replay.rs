@@ -254,7 +254,13 @@ pub(crate) fn record(
             receipt["previous_budget"]["max_output_tokens"].clone();
         arguments["admitted_max_output_tokens"] = receipt["budget"]["max_output_tokens"].clone();
     }
-    let result_commitment = result::commitment(tool, &arguments, payload, &target);
+    // Accepted hexadecimal aliases name the same owner. Bind the resolved
+    // identity, while leaving every returned foreign/user value untouched.
+    let Ok(canonical_target) = crate::server::parse_session_id_arg(&target) else {
+        return;
+    };
+    let result_commitment =
+        result::commitment(tool, &arguments, payload, &canonical_target.to_string());
     let Ok(mut guard) = session.lock() else {
         return;
     };

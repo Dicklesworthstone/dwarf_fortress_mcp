@@ -218,6 +218,10 @@ fn portfolio_checkpoint_retains_joint_achievement_and_withdraws_current_proof() 
     sample(&mut watch, 130, 8, [20; 4])?;
     sample(&mut watch, 140, 9, [20; 4])?;
     let bytes = watch.checkpoint_bytes();
+    let terms = StockTargetsWatch::checkpoint_terms(&bytes)?;
+    assert_eq!(terms.achieved_at, Some(GameTick(140)));
+    assert!(!terms.expired);
+    assert!(!terms.fenced);
     let mut recovered = StockTargetsWatch::recover(&bytes, &context)?;
     assert_eq!(recovered.achieved_at(), Some(GameTick(140)));
     assert!(recovered.latest().is_none());

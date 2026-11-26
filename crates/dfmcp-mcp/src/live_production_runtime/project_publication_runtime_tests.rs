@@ -32,13 +32,21 @@ fn budget() -> WorkBudget {
         max_entities: 8192,
         max_actions: 5,
         max_output_tokens: MAX_OUTPUT_TOKENS,
-        max_game_ticks: if std::env::var(CLOCKS).is_ok() { 1200 } else { 0 },
+        max_game_ticks: if std::env::var(CLOCKS).is_ok() {
+            1200
+        } else {
+            0
+        },
     }
 }
 
 fn expected_order_steps() -> Vec<u32> {
     let first = u32::from(std::env::var(ASSIGN_LABOR).as_deref() != Ok("0"));
-    let fallback = if std::env::var(ONE_ORDER).as_deref() == Ok("1") { 1 } else { 2 };
+    let fallback = if std::env::var(ONE_ORDER).as_deref() == Ok("1") {
+        1
+    } else {
+        2
+    };
     let count = std::env::var(ORDER_COUNT)
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
@@ -71,7 +79,9 @@ fn foreign_clock_file(path: &Path) -> Result<()> {
 }
 
 fn check_portfolio_clocks(reference: &Value, order: bool, inventory: bool) -> TestResult {
-    let slots = reference["recovery"]["portfolio"].as_array().ok_or("missing original slots")?;
+    let slots = reference["recovery"]["portfolio"]
+        .as_array()
+        .ok_or("missing original slots")?;
     assert_eq!(slots.len(), expected_order_steps().len());
     assert_eq!(reference["clock"].is_object(), order);
     assert_eq!(reference["inventory_clock"].is_object(), inventory);
@@ -83,7 +93,9 @@ fn check_portfolio_clocks(reference: &Value, order: bool, inventory: bool) -> Te
         }
         return Ok(());
     }
-    let clocks = reference["portfolio_clocks"].as_array().ok_or("missing complete clock pins")?;
+    let clocks = reference["portfolio_clocks"]
+        .as_array()
+        .ok_or("missing complete clock pins")?;
     assert_eq!(clocks.len(), slots.len());
     assert_eq!(reference["clock"], clocks[0]["clock"]);
     assert_eq!(reference["inventory_clock"], clocks[0]["inventory_clock"]);
@@ -99,8 +111,14 @@ fn check_portfolio_clocks(reference: &Value, order: bool, inventory: bool) -> Te
             assert_eq!(slot[field], pin["journal_id"]);
             if configured {
                 let id = pin["journal_id"].as_str().ok_or("missing clock identity")?;
-                assert!(ids.insert(id.to_owned()), "two original clocks share a journal");
-                assert_eq!(pin["head"], pin["journal_id"], "publication advanced a clock");
+                assert!(
+                    ids.insert(id.to_owned()),
+                    "two original clocks share a journal"
+                );
+                assert_eq!(
+                    pin["head"], pin["journal_id"],
+                    "publication advanced a clock"
+                );
                 assert_eq!(pin["high_source_sequence"], 0);
             }
         }
@@ -406,9 +424,21 @@ fn control(requested_case: &str) -> TestResult {
     request["labor"] = json!("CARPENTER");
     let prior = runtime.project_recovery_reference();
     assert!(prior["recovery"].is_null());
+    if case == "preplan_only" {
+        return output(&json!({
+            "intent":null, "prior":prior, "goal":goal,
+            "actual":runtime.project_recovery_reference(),
+            "workforce_journal_id":runtime.workforce_journal.to_hex(),
+        }));
+    }
     let directory = runtime.config.directory.clone();
-    let order_config: Value = serde_json::from_str(&std::env::var("DFMCP_SEMANTIC_WORK_ORDER_CONFIG")?)?;
-    let order_directory = Path::new(order_config["directory"].as_str().ok_or("missing order directory")?);
+    let order_config: Value =
+        serde_json::from_str(&std::env::var("DFMCP_SEMANTIC_WORK_ORDER_CONFIG")?)?;
+    let order_directory = Path::new(
+        order_config["directory"]
+            .as_str()
+            .ok_or("missing order directory")?,
+    );
     let order_clock = runtime.config.clock.is_some();
     let inventory_clock = runtime.config.inventory_clock.is_some();
     let collision_path = order_directory.join(if inventory_clock {
@@ -423,6 +453,7 @@ fn control(requested_case: &str) -> TestResult {
     let before_plan = custody_bytes()?;
     let mut recorded = None;
     let mut calls = 0_u32;
+    let watch_prior = std::cell::RefCell::new(None::<Value>);
     let mut record = |intent: &ProjectProductionIntent, _: &OperationContext| -> Result<()> {
         calls += 1;
         for name in ORIGINAL_FILES {
@@ -434,18 +465,27 @@ fn control(requested_case: &str) -> TestResult {
         for slot in 2..=4 {
             for family in ["clock", "inventory-clock"] {
                 assert!(
-                    !order_directory.join(format!("portfolio-{slot}-{family}.journal")).exists(),
+                    !order_directory
+                        .join(format!("portfolio-{slot}-{family}.journal"))
+                        .exists(),
                     "child wrote an additional clock before parent ACK"
                 );
             }
         }
-        intent.validate_checkpoint(&prior)?;
+        intent.validate_checkpoint(watch_prior.borrow().as_ref().unwrap_or(&prior))?;
         let intended = intent.to_json();
         if portfolio {
-            check_portfolio_clocks(&intended["recovery_reference"], order_clock, inventory_clock)
-                .map_err(|_| invalid("prospective clock publication fixture"))?;
+            check_portfolio_clocks(
+                &intended["recovery_reference"],
+                order_clock,
+                inventory_clock,
+            )
+            .map_err(|_| invalid("prospective clock publication fixture"))?;
             assert_eq!(intended["recovery_reference"]["clock"], prior["clock"]);
-            assert_eq!(intended["recovery_reference"]["inventory_clock"], prior["inventory_clock"]);
+            assert_eq!(
+                intended["recovery_reference"]["inventory_clock"],
+                prior["inventory_clock"]
+            );
         }
         recorded = Some(intended);
         if matches!(case, "ack_refusal" | "continue_ack_refusal") {
@@ -490,13 +530,17 @@ fn control(requested_case: &str) -> TestResult {
         assert!(watch["goal_witness"].is_string());
         assert_eq!(watch["deadline_tick"], goal.deadline_tick());
         assert_eq!(custody_bytes()?, before_plan);
+        *watch_prior.borrow_mut() = Some(runtime.project_recovery_reference());
         stage("continue_deficit")?;
         let c = runtime.context(false)?;
         result = runtime.project_continue_stock_goal_recorded(
             &goal,
-            StockGoalContinuationRequest::parse(&json!({
-                "kind":"continue_stock_goal", "goal_witness":watch["goal_witness"],
-            }).to_string())?,
+            StockGoalContinuationRequest::parse(
+                &json!({
+                    "kind":"continue_stock_goal", "goal_witness":watch["goal_witness"],
+                })
+                .to_string(),
+            )?,
             &c,
             &mut record,
         );
@@ -505,6 +549,18 @@ fn control(requested_case: &str) -> TestResult {
         None
     };
     match case {
+        "watch_restart"
+        | "watch_achieved"
+        | "watch_cancelled"
+        | "watch_fenced"
+        | "watch_continue"
+        | "watch_parent_stopped" => {
+            let view = result?.value;
+            assert_eq!(calls, 0);
+            assert!(recorded.is_none());
+            assert!(view["original_plan"].is_null());
+            stock_watch_recovery::retain(&mut runtime, &goal, case)?;
+        }
         "no_work" | "no_work_floor" => {
             let view = result?.value;
             assert_eq!(calls, 0);
@@ -565,7 +621,11 @@ fn control(requested_case: &str) -> TestResult {
             assert!(result.is_err());
             assert_eq!(calls, 1);
             assert!(!runtime.initialization_failed);
-            assert_eq!(custody_bytes()?, before_plan, "ACK refusal wrote child custody");
+            assert_eq!(
+                custody_bytes()?,
+                before_plan,
+                "ACK refusal wrote child custody"
+            );
             for name in ORIGINAL_FILES {
                 assert!(!directory.join(name).exists());
             }
@@ -618,7 +678,9 @@ fn control(requested_case: &str) -> TestResult {
                     Some(3)
                 );
                 check_portfolio_clocks(&reference, order_clock, inventory_clock)?;
-                let selected = *expected_order_steps().last().ok_or("missing original selector")?;
+                let selected = *expected_order_steps()
+                    .last()
+                    .ok_or("missing original selector")?;
                 let c = runtime.context(false)?;
                 runtime.select_order(Some(selected), &c)?;
                 assert_eq!(
@@ -634,7 +696,10 @@ fn control(requested_case: &str) -> TestResult {
                 {
                     assert_eq!(entry["goal_history_present"], false);
                     assert_eq!(entry["clock_journal_id"].is_string(), order_clock);
-                    assert_eq!(entry["inventory_clock_journal_id"].is_string(), inventory_clock);
+                    assert_eq!(
+                        entry["inventory_clock_journal_id"].is_string(),
+                        inventory_clock
+                    );
                 }
             }
             if case == "advanced" {
@@ -651,20 +716,36 @@ fn control(requested_case: &str) -> TestResult {
     if let Some(watch) = prior_watch {
         if case == "continue_published" {
             assert!(runtime.no_work_goal_json().is_null());
-            assert_eq!(runtime.stock_continuation_json()["original_watch_witness"], watch["goal_witness"]);
-            let original = runtime.original.as_ref().ok_or("continued project original missing")?;
+            assert_eq!(
+                runtime.stock_continuation_json()["original_watch_witness"],
+                watch["goal_witness"]
+            );
+            let original = runtime
+                .original
+                .as_ref()
+                .ok_or("continued project original missing")?;
             goal.validate_original(original, origin)?;
         } else {
             let retained = runtime.no_work_goal_json();
-            for field in ["goal_witness", "deadline_tick", "poll_interval_ticks", "stable_samples_required", "targets", "target_stack_units"] {
-                assert_eq!(retained[field], watch[field], "parent refusal changed original watch {field}");
+            for field in [
+                "goal_witness",
+                "deadline_tick",
+                "poll_interval_ticks",
+                "stable_samples_required",
+                "targets",
+                "target_stack_units",
+            ] {
+                assert_eq!(
+                    retained[field], watch[field],
+                    "parent refusal changed original watch {field}"
+                );
             }
             assert!(retained["sample"].is_null());
             assert_eq!(runtime.initialization_failed, case == "continue_partial");
         }
     }
     output(&json!({
-        "intent": recorded,"prior":prior,"goal":goal,
+        "intent": recorded,"prior":watch_prior.borrow().as_ref().unwrap_or(&prior),"goal":goal,
         "actual":runtime.project_recovery_reference(),
         "workforce_journal_id":runtime.workforce_journal.to_hex(),
     }))
@@ -760,7 +841,9 @@ fn recover(requested_case: &str) -> TestResult {
             runtime.config.inventory_clock.is_some(),
         )?;
         assert_eq!(reference["portfolio_clocks"], expected["portfolio_clocks"]);
-        let selected = *expected_order_steps().last().ok_or("missing recovered selector")?;
+        let selected = *expected_order_steps()
+            .last()
+            .ok_or("missing recovered selector")?;
         let c = runtime.context(false)?;
         runtime.select_order(Some(selected), &c)?;
         assert_eq!(runtime.project_recovery_reference(), reference);
@@ -774,18 +857,28 @@ fn recover(requested_case: &str) -> TestResult {
     output(&reference)
 }
 
-
 fn ordinary(phase: &str, case: &str) -> TestResult {
     let config = Config::from_environment(|| Ok(()))?;
-    assert!(config.project_binding.is_none(), "ordinary host borrowed a parent ACK");
+    assert!(
+        config.project_binding.is_none(),
+        "ordinary host borrowed a parent ACK"
+    );
     let before_open = custody_bytes()?;
-    let mode = if phase == "ordinary-recover" { Mode::Offline } else { Mode::Control };
+    let mode = if phase == "ordinary-recover" {
+        Mode::Offline
+    } else {
+        Mode::Control
+    };
     assert_eq!(config.initialize, phase == "ordinary-open");
     assert_eq!(config.recovery.is_some(), phase == "ordinary-recover");
     let opened = Runtime::open(config, mode, SessionId::new(31_001), budget());
     if phase == "ordinary-recover" && case != "published" {
         assert!(opened.is_err(), "ordinary recovery accepted {case}");
-        assert_eq!(custody_bytes()?, before_open, "recovery recreated original custody");
+        assert_eq!(
+            custody_bytes()?,
+            before_open,
+            "recovery recreated original custody"
+        );
         return Ok(());
     }
     let mut runtime = opened?;
@@ -799,7 +892,10 @@ fn ordinary(phase: &str, case: &str) -> TestResult {
         }));
     }
     let retained: Value = serde_json::from_slice(&std::fs::read(std::env::var(INPUT)?)?)?;
-    assert_eq!(runtime.workforce_journal.to_hex(), retained["workforce_journal_id"]);
+    assert_eq!(
+        runtime.workforce_journal.to_hex(),
+        retained["workforce_journal_id"]
+    );
     assert_eq!(
         runtime.project_recovery_reference()["native_custody"],
         retained["actual"]["native_custody"]
@@ -807,13 +903,18 @@ fn ordinary(phase: &str, case: &str) -> TestResult {
     if phase == "ordinary-recover" {
         let reference = runtime.project_recovery_reference();
         assert_eq!(reference["recovery"], retained["actual"]["recovery"]);
-        assert_eq!(reference["portfolio_clocks"], retained["actual"]["portfolio_clocks"]);
+        assert_eq!(
+            reference["portfolio_clocks"],
+            retained["actual"]["portfolio_clocks"]
+        );
         check_portfolio_clocks(
             &reference,
             runtime.config.clock.is_some(),
             runtime.config.inventory_clock.is_some(),
         )?;
-        let selected = *expected_order_steps().last().ok_or("missing recovered selector")?;
+        let selected = *expected_order_steps()
+            .last()
+            .ok_or("missing recovered selector")?;
         let c = runtime.context(false)?;
         runtime.select_order(Some(selected), &c)?;
         let c = runtime.context(false)?;
@@ -822,13 +923,21 @@ fn ordinary(phase: &str, case: &str) -> TestResult {
         assert_eq!(view["original_goal_proven"], false);
         assert_eq!(view["automatic_redispatch"], false);
         assert_eq!(runtime.project_recovery_reference(), reference);
-        assert_eq!(custody_bytes()?, before_open, "ordinary recovery rewrote custody");
+        assert_eq!(
+            custody_bytes()?,
+            before_open,
+            "ordinary recovery rewrote custody"
+        );
         return output(&reference);
     }
     assert_eq!(phase, "ordinary-plan");
     assert!(runtime.original.is_none() && runtime.frontier.is_none());
     assert!(retained["actual"]["recovery"].is_null());
-    assert_eq!(custody_bytes()?, before_open, "pre-plan reopen rewrote native custody");
+    assert_eq!(
+        custody_bytes()?,
+        before_open,
+        "pre-plan reopen rewrote native custody"
+    );
     let c = runtime.context(false)?;
     let observed = runtime.observe(ObserveRequest::default(), &c)?.value;
     let assign_labor = std::env::var(ASSIGN_LABOR).as_deref() != Ok("0");
@@ -848,20 +957,26 @@ fn ordinary(phase: &str, case: &str) -> TestResult {
         request["enabled"] = json!(true);
     }
     if case == "existing_slot" {
-        let configured: Value = serde_json::from_str(
-            &std::env::var("DFMCP_SEMANTIC_WORK_ORDER_CONFIG")?,
+        let configured: Value =
+            serde_json::from_str(&std::env::var("DFMCP_SEMANTIC_WORK_ORDER_CONFIG")?)?;
+        let directory = Path::new(
+            configured["directory"]
+                .as_str()
+                .ok_or("missing order directory")?,
+        );
+        foreign_clock_file(
+            &directory.join(if runtime.config.inventory_clock.is_some() {
+                "portfolio-2-inventory-clock.journal"
+            } else {
+                "portfolio-2-clock.journal"
+            }),
         )?;
-        let directory = Path::new(configured["directory"].as_str().ok_or("missing order directory")?);
-        foreign_clock_file(&directory.join(if runtime.config.inventory_clock.is_some() {
-            "portfolio-2-inventory-clock.journal"
-        } else {
-            "portfolio-2-clock.journal"
-        }))?;
     }
     let before_plan = custody_bytes()?;
     let mut c = runtime.context(false)?;
     if case == "missing_context_authority" {
-        c.grants.retain(|grant| grant.capability != Capability::ControlClock);
+        c.grants
+            .retain(|grant| grant.capability != Capability::ControlClock);
     }
     let result = if assign_labor {
         runtime.plan_portfolio(PortfolioRequest::parse(&request.to_string())?, &c)
@@ -871,11 +986,21 @@ fn ordinary(phase: &str, case: &str) -> TestResult {
             &c,
         )
     };
-    if matches!(case, "missing_authority" | "missing_context_authority" | "existing_slot") {
+    if matches!(
+        case,
+        "missing_authority" | "missing_context_authority" | "existing_slot"
+    ) {
         assert!(result.is_err(), "ordinary publication accepted {case}");
-        assert!(!runtime.initialization_failed, "preflight wrote a partial original");
+        assert!(
+            !runtime.initialization_failed,
+            "preflight wrote a partial original"
+        );
         assert!(runtime.original.is_none() && runtime.frontier.is_none());
-        assert_eq!(custody_bytes()?, before_plan, "refusal wrote original custody");
+        assert_eq!(
+            custody_bytes()?,
+            before_plan,
+            "refusal wrote original custody"
+        );
         return output(&json!({"refused": case}));
     }
     result?;
@@ -887,14 +1012,26 @@ fn ordinary(phase: &str, case: &str) -> TestResult {
         runtime.config.inventory_clock.is_some(),
     )?;
     assert_eq!(
-        runtime.layout.as_ref().ok_or("missing ordinary layout")?
-            .order_steps().iter().map(|step| step.get()).collect::<Vec<_>>(),
+        runtime
+            .layout
+            .as_ref()
+            .ok_or("missing ordinary layout")?
+            .order_steps()
+            .iter()
+            .map(|step| step.get())
+            .collect::<Vec<_>>(),
         expected_order_steps()
     );
     for (path, bytes) in before_plan {
-        assert_eq!(std::fs::read(path)?, bytes, "publication changed pre-plan custody");
+        assert_eq!(
+            std::fs::read(path)?,
+            bytes,
+            "publication changed pre-plan custody"
+        );
     }
-    let selected = *expected_order_steps().last().ok_or("missing ordinary selector")?;
+    let selected = *expected_order_steps()
+        .last()
+        .ok_or("missing ordinary selector")?;
     let c = runtime.context(false)?;
     runtime.select_order(Some(selected), &c)?;
     assert_eq!(runtime.project_recovery_reference(), reference);
@@ -923,6 +1060,9 @@ fn recorded_project_publication_recovers_exact_original_without_reexecution() ->
         match phase.as_str() {
             "control" => control(&case)?,
             "recover" => recover(&case)?,
+            "watch-recover" | "watch-resume" | "watch-reject" => {
+                stock_watch_recovery::recover(&phase, &case)?
+            }
             "ordinary-open" | "ordinary-plan" | "ordinary-recover" => ordinary(&phase, &case)?,
             _ => return Err("unknown project publication phase".into()),
         }
@@ -956,3 +1096,36 @@ fn recorded_project_publication_recovers_exact_original_without_reexecution() ->
 
 #[path = "project_stock_clock_runtime_tests.rs"]
 mod stock_clock_guards;
+#[path = "project_stock_watch_runtime_tests.rs"]
+mod stock_watch_recovery;
+
+#[test]
+fn project_stock_watches_resume_original_goals_after_process_restart() -> TestResult {
+    if std::env::var(PHASE).is_ok() {
+        return recorded_project_publication_recovers_exact_original_without_reexecution();
+    }
+    let full = format!(
+        "{}::project_stock_watches_resume_original_goals_after_process_restart",
+        module_path!()
+    );
+    let (_, name) = full.split_once("::").ok_or("watch runtime test name")?;
+    let driver = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/stdio/project_publication_runtime_peer.py");
+    let result = Command::new("python3")
+        .arg("-B")
+        .arg(driver)
+        .arg(std::env::current_exe()?)
+        .arg(name)
+        .arg("--stock-watch-only")
+        .output()?;
+    assert!(
+        result.status.success(),
+        "stock-watch restart campaign: {}{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&result.stdout).contains("project-stock-watch-campaign:checked")
+    );
+    Ok(())
+}

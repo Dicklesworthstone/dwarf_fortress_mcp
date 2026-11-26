@@ -13,6 +13,27 @@ pub(super) struct StockTargetsNoWork {
 }
 
 impl StockTargetsNoWork {
+    pub(super) fn recovered(
+        request: StockTargetsRequest,
+        monitor: StockTargetsWatch,
+        cancelled: bool,
+    ) -> Result<Self> {
+        request.validate()?;
+        let binding = if request.assign_labor {
+            StockTargetsBinding::from_assessments_with_assignment(monitor.originals())?
+        } else {
+            StockTargetsBinding::from_assessments(monitor.originals())?
+        };
+        let assessment_witness = binding.witness()?;
+        Ok(Self {
+            binding,
+            assessment_witness,
+            request,
+            monitor,
+            cancelled,
+        })
+    }
+
     pub(super) fn new(
         assessments: Vec<StockTargetAssessment>,
         binding: StockTargetsBinding,
@@ -95,6 +116,7 @@ impl Runtime {
             "stable_samples_required":goal.request.stable_samples,
             "cancelled":goal.cancelled,
             "source_fenced":goal.monitor.fenced(),
+            "historical_achieved_at_tick":goal.monitor.achieved_at().map(GameTick::get),
             "consumed_tick_floor":goal.monitor.high_tick().get(),
             "continuation_request":self.stock_continuation_request_json(),
             "original_goal_proven":self.no_work_goal_proven(),

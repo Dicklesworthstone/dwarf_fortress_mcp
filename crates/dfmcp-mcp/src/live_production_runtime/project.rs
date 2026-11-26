@@ -156,7 +156,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn project_workshop_origin(&self, goal: &ProjectStockGoal) -> Result<Digest32> {
+    pub(super) fn project_workshop_origin(&self, goal: &ProjectStockGoal) -> Result<Digest32> {
         goal.validate()?;
         self.config.current()?;
         let binding = self.config.project_binding.ok_or_else(|| {
@@ -263,6 +263,9 @@ impl Runtime {
                     .map(|slot| slot.to_json())
                     .collect::<Vec<_>>()
             );
+        }
+        if let Some(watch) = self.project_stock_watch_checkpoint() {
+            reference["stock_watch"] = watch.to_json();
         }
         reference
     }

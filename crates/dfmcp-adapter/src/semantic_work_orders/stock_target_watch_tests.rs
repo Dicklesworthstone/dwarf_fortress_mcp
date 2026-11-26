@@ -298,6 +298,10 @@ fn checkpoint_recovery_retains_achievement_without_restoring_current_truth() -> 
     sample(&mut watch, 130, 8, Some(20))?;
     sample(&mut watch, 140, 9, Some(20))?;
     let bytes = watch.checkpoint_bytes();
+    let terms = StockTargetWatch::checkpoint_terms(&bytes)?;
+    assert_eq!(terms.achieved_at, Some(GameTick(140)));
+    assert!(!terms.expired);
+    assert!(!terms.fenced);
     let mut recovered = StockTargetWatch::recover(&bytes, &context)?;
     assert_eq!(recovered.achieved_at(), Some(GameTick(140)));
     assert!(recovered.latest().is_none());
@@ -332,6 +336,7 @@ fn checkpoint_recovery_retains_rejection_floors_and_requires_current_query_autho
     assert!(sample(&mut recovered, 170, 8, Some(20)).is_err());
     assert!(recovered.fenced());
     let fenced = recovered.checkpoint_bytes();
+    assert!(StockTargetWatch::checkpoint_terms(&fenced)?.fenced);
     assert!(StockTargetWatch::recover(&fenced, &context)?.fenced());
     assert!(StockTargetWatch::verify_checkpoint_continuity(&fenced, &bytes).is_err());
     for cause in 0..5 {

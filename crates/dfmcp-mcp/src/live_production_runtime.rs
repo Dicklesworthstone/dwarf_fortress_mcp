@@ -58,6 +58,7 @@ mod prerequisite_binding;
 mod project;
 mod project_goal;
 mod project_stock_clock;
+pub(crate) mod project_stock_watch;
 pub(crate) use project_stock_clock::StockWatchClockBasis;
 #[cfg(all(
     test,
@@ -296,6 +297,7 @@ pub(crate) struct Runtime {
     stock_target_no_work: Option<StockTargetNoWork>,
     stock_targets: Option<SharedStockTargets>,
     stock_targets_no_work: Option<StockTargetsNoWork>,
+    retained_project_stock_watch: Option<project_stock_watch::Checkpoint>,
     original: Option<PreparedPlan>,
     layout: Option<ProductionLayout>,
     seal: Option<PlanArchiveSeal>,
@@ -479,6 +481,7 @@ impl Runtime {
             stock_target_no_work: None,
             stock_targets: None,
             stock_targets_no_work: None,
+            retained_project_stock_watch: None,
             original: None,
             layout: None,
             seal: None,
@@ -831,6 +834,7 @@ impl Runtime {
                 ));
             }
         }
+        out.restore_project_stock_watch(&mut work)?;
         out.refresh_clock_view(&work.narrow(&clock_output)?)?;
         out.refresh_inventory_clock_view(&work.narrow(&inventory_clock_output)?)?;
         out.clock_invalidates_goal = out.clock.as_ref().is_some_and(ProductionClock::has_runs);
@@ -917,6 +921,16 @@ impl Runtime {
     }
     fn authority_tick_floor(&self) -> GameTick {
         self.observation_tick_floor
+            .max(
+                self.stock_target_no_work
+                    .as_ref()
+                    .map_or(GameTick(0), |goal| goal.monitor.high_tick()),
+            )
+            .max(
+                self.stock_targets_no_work
+                    .as_ref()
+                    .map_or(GameTick(0), |goal| goal.monitor.high_tick()),
+            )
             .max(
                 self.input_supply
                     .as_ref()
@@ -1415,7 +1429,10 @@ impl Runtime {
         c: &OperationContext,
     ) -> Result<View> {
         self.check(c, false)?;
-        if self.has_active_stock_watch() {
+        if self.has_active_stock_watch()
+            || (self.config.project_binding.is_some()
+                && (self.stock_target_no_work.is_some() || self.stock_targets_no_work.is_some()))
+        {
             if request != ObserveRequest::default() {
                 return Err(invalid(
                     "a retained no-work stock goal accepts only default observation",
@@ -1460,7 +1477,7 @@ impl Runtime {
             .include_production()
             .then(|| work.take(planning_inspection::CAPTURE_BYTES))
             .transpose()?;
-        let cursor = self.planning_inspection.next_cursor(&c)?;
+        let cursor = self.next_stock_watch_cursor(self.planning_inspection.next_cursor(&c)?)?;
         inventory_baseline::authorize_observe(&c, self.observation_tick_floor)?;
         let capsule = self.config.workforce.acquire(&work.take(16 * MIB)?)?;
         let projection = project_live_capsule(&capsule, self.anchor.fortress_id, cursor)?;
@@ -1984,6 +2001,7 @@ impl Runtime {
         self.original = Some(plan.clone());
         // The complete effect-bearing original now owns the immutable prior
         // watch witness. Earlier refusals retained the original monitor.
+        self.retained_project_stock_watch = self.project_stock_watch_checkpoint();
         self.stock_target_no_work = None;
         self.stock_targets_no_work = None;
         self.layout = Some(layout);

@@ -323,7 +323,7 @@
     "owner_bead": "df-native-stock-target-3m9",
     "adapter_type": "StockTargetWatch",
     "progress_type": "StockTargetWatchProgress",
-    "mode": "read_only_foreground_process_local",
+    "mode": "read_only_foreground_with_authenticated_project_recovery",
     "original_must_be_satisfied": true,
     "planning_census_stability_samples": 0,
     "fixed_deadline": true,
@@ -352,14 +352,16 @@
     "sample_byte_work": 204472320,
     "prepaid_output_byte_work": 268435456,
     "sample_history_durable": false,
-    "constructor_byte_work": 16777216
+    "constructor_byte_work": 16777216,
+    "durability_scope": "resource_project_parent_only",
+    "standalone_owner_process_local": true
   },
   "no_work_portfolio_watch": {
     "owner_bead": "df-native-stock-target-3m9",
     "adapter_type": "StockTargetsWatch",
     "progress_type": "StockTargetsWatchProgress",
     "target_count_type": "StockTargetsWatchCount",
-    "mode": "read_only_foreground_process_local",
+    "mode": "read_only_foreground_with_authenticated_project_recovery",
     "targets_min": 1,
     "targets_max": 4,
     "normalization": "distinct_recipe_ascending",
@@ -401,7 +403,6 @@
     "cancel_scope": "default or step",
     "replacement_uses_observation_bound_request": true,
     "restored_current_proof": false,
-    "restored_joint_achievement_or_unfinished_streak": false,
     "sample_history_durable": false,
     "new_order_or_labor_effect": false,
     "worker_prerequisite_checked": false,
@@ -432,7 +433,11 @@
       "tests/stdio/combined_stock_targets_runtime_peer.py",
       "docs/NATIVE_STOCK_TARGET.md",
       "docs/COMBINED_PRODUCTION_MCP.md"
-    ]
+    ],
+    "durability_scope": "resource_project_parent_only",
+    "standalone_owner_process_local": true,
+    "authenticated_project_restores_joint_achievement": true,
+    "restored_unfinished_streak": false
   },
   "no_work_goal_continuation": {
     "owner_bead": "df-native-stock-target-3m9",
@@ -445,7 +450,6 @@
     "request_bytes_max": 1024,
     "original_watch": "exact retained scalar or complete one-to-four-target portfolio",
     "unfinished_never_achieved_required": true,
-    "cancelled_fenced_expired_or_recovered_watch_refused": true,
     "original_targets_workers_assignment_and_timing_immutable": true,
     "fresh_complete_citizen_inventory_and_empty_paused_queue_required": true,
     "current_production_and_requested_labor_authority_required": true,
@@ -484,7 +488,10 @@
       "tests/stdio/combined_stock_target_runtime_peer.py",
       "tests/stdio/combined_stock_targets_runtime_peer.py",
       "tests/stdio/project_publication_runtime_peer.py"
-    ]
+    ],
+    "cancelled_fenced_expired_or_achieved_watch_refused": true,
+    "authenticated_project_watch_recovery_supported": true,
+    "operator_recovery_json_restores_watch": false
   },
   "no_work_watch_checkpoint": {
     "owner_bead": "df-native-stock-target-3m9",
@@ -521,6 +528,45 @@
     "partial_portfolio_recovery": false,
     "source_paths": [
       "crates/dfmcp-adapter/src/semantic_work_orders/stock_watch_checkpoint.rs"
+    ]
+  },
+  "no_work_project_recovery": {
+    "owner_bead": "df-native-stock-target-3m9",
+    "profile": "serve-gameplay-dev resource-project",
+    "checkpoint_schema": "dfmcp.project-stock-watch/1",
+    "parent_reference_field": "stock_watch",
+    "parent_reference_schema": "dfmcp.project-production-recovery/1",
+    "nested_checkpoint_max_bytes": 16384,
+    "adapter_checkpoint_max_bytes": 2048,
+    "first_ack_requires_control_and_plan": true,
+    "first_ack_requires_production_stage_without_original_or_intent": true,
+    "exact_request_and_original_targets_bound_before_ack": true,
+    "parent_journal_and_ack_authenticate_recovery": true,
+    "native_and_prerequisite_custody_validated_before_restore": true,
+    "external_operator_field": false,
+    "additional_private_sidecar": false,
+    "legacy_references_reconstruct_missing_watch": false,
+    "restored_current_sample": false,
+    "restored_unfinished_streak": false,
+    "historical_achievement_cancellation_expiry_fence_preserved": true,
+    "pending_intent_uses_dominating_authenticated_checkpoint": true,
+    "incomparable_histories_merged": false,
+    "parent_cancellation_dominates_uncancelled_child_checkpoint": true,
+    "parent_stop_retires_no_order_watch_without_native_io": true,
+    "retained_stock_clock_stop_and_reconciliation_preserved": true,
+    "positive_original_predecessor_history_rewritten_by_stop": false,
+    "new_native_protocol": false,
+    "new_public_tool": false,
+    "production_admission_added": false,
+    "execution_evidence": "independent_source_review_scoped_rustfmt_python_syntax_pass; 63_actual_adapter_component_tests_pass; new_parent_and_native_Runtime_tests_unexecuted; full_MCP_execution_unverified",
+    "source_paths": [
+      "crates/dfmcp-mcp/src/live_production_runtime/project_stock_watch.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/project_stock_watch_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/project_stock_watch_runtime_tests.rs",
+      "crates/dfmcp-mcp/src/native_resource_project/stock_watch_recovery_tests.rs",
+      "crates/dfmcp-mcp/src/native_resource_project/journal.rs",
+      "crates/dfmcp-mcp/src/native_resource_project/runtime.rs",
+      "docs/NATIVE_RESOURCE_PROJECT_MCP.md"
     ]
   }
 }

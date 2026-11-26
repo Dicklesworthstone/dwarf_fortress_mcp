@@ -35,6 +35,9 @@ pub(super) fn tick(reference: &Value) -> u64 {
 /// Recovery may acquire a newer valid descendant, never another original.
 /// Source generations of different native families are deliberately not joined.
 pub(super) fn same_original(before: &Value, after: &Value) -> Result<()> {
+    crate::live_production_runtime::project_stock_watch::verify_reference_continuity(
+        before, after,
+    )?;
     same_portfolio(before, after)?;
     for path in [
         "/native_custody/workforce_journal_id",
@@ -378,8 +381,7 @@ fn same_portfolio(before: &Value, after: &Value) -> Result<()> {
         (None, Some(_)) => {
             before.pointer("/recovery") == Some(&Value::Null)
                 && ["/clock", "/inventory_clock"].iter().all(|path| {
-                    optional_value(before, path).is_some()
-                        == optional_value(after, path).is_some()
+                    optional_value(before, path).is_some() == optional_value(after, path).is_some()
                 })
         }
         (Some(prior), Some(current)) => {
@@ -391,8 +393,7 @@ fn same_portfolio(before: &Value, after: &Value) -> Result<()> {
                     .all(|(before, after)| {
                         before.step_id == after.step_id
                             && before.clock_journal_id == after.clock_journal_id
-                            && before.inventory_clock_journal_id
-                                == after.inventory_clock_journal_id
+                            && before.inventory_clock_journal_id == after.inventory_clock_journal_id
                             && (!before.goal_history_present || after.goal_history_present)
                     })
                 && same_portfolio_clocks(prior.clocks.as_deref(), current.clocks.as_deref())
@@ -676,13 +677,7 @@ mod tests {
         }
     }
 
-
-    fn portfolio_with_clocks(
-        first: u32,
-        count: usize,
-        order: bool,
-        inventory: bool,
-    ) -> Value {
+    fn portfolio_with_clocks(first: u32, count: usize, order: bool, inventory: bool) -> Value {
         let mut reference = portfolio_reference(first, count);
         if !order && !inventory {
             return reference;
@@ -690,18 +685,23 @@ mod tests {
         let mut clocks = Vec::new();
         for index in 0..count {
             let step = first + index as u32;
-            let pin = |family: &str| json!({
-                "journal_id": Digest32::of_bytes(format!("original {family} {step}").as_bytes()).to_hex(),
-                "head": Digest32::of_bytes(format!("retained {family} head {step}").as_bytes()).to_hex(),
-                "authority_tick_floor": 120 + index as u64,
-                "high_source_sequence": 10 + index as u64,
-            });
+            let pin = |family: &str| {
+                json!({
+                    "journal_id": Digest32::of_bytes(format!("original {family} {step}").as_bytes()).to_hex(),
+                    "head": Digest32::of_bytes(format!("retained {family} head {step}").as_bytes()).to_hex(),
+                    "authority_tick_floor": 120 + index as u64,
+                    "high_source_sequence": 10 + index as u64,
+                })
+            };
             let clock = order.then(|| pin("clock"));
             let inventory_clock = inventory.then(|| pin("inventory_clock"));
-            reference["recovery"]["portfolio"][index]["clock_journal_id"] =
-                clock.as_ref().map_or(Value::Null, |pin| pin["journal_id"].clone());
+            reference["recovery"]["portfolio"][index]["clock_journal_id"] = clock
+                .as_ref()
+                .map_or(Value::Null, |pin| pin["journal_id"].clone());
             reference["recovery"]["portfolio"][index]["inventory_clock_journal_id"] =
-                inventory_clock.as_ref().map_or(Value::Null, |pin| pin["journal_id"].clone());
+                inventory_clock
+                    .as_ref()
+                    .map_or(Value::Null, |pin| pin["journal_id"].clone());
             clocks.push(json!({
                 "step_id": step, "clock": clock, "inventory_clock": inventory_clock,
             }));
@@ -731,17 +731,24 @@ mod tests {
                     let mut prior = portfolio_with_clocks(first, count, order, inventory);
                     let mut preplan = prior.clone();
                     preplan["recovery"] = Value::Null;
-                    preplan.as_object_mut().ok_or_else(portfolio_conflict)?
+                    preplan
+                        .as_object_mut()
+                        .ok_or_else(portfolio_conflict)?
                         .remove("portfolio_clocks");
                     same_original(&preplan, &prior)?;
                     for index in (0..count).rev() {
                         let mut after = prior.clone();
-                        for (family, enabled) in [("clock", order), ("inventory_clock", inventory)] {
+                        for (family, enabled) in [("clock", order), ("inventory_clock", inventory)]
+                        {
                             if !enabled {
                                 continue;
                             }
-                            after["portfolio_clocks"][index][family]["head"] =
-                                json!(Digest32::of_bytes(format!("descendant {family} {index}").as_bytes()).to_hex());
+                            after["portfolio_clocks"][index][family]["head"] = json!(
+                                Digest32::of_bytes(
+                                    format!("descendant {family} {index}").as_bytes()
+                                )
+                                .to_hex()
+                            );
                             after["portfolio_clocks"][index][family]["authority_tick_floor"] =
                                 json!(140 + index as u64);
                             after["portfolio_clocks"][index][family]["high_source_sequence"] =
@@ -774,16 +781,19 @@ mod tests {
                     mirror_first_pin(&mut after, index, family);
                     // Both global summaries still have the larger tick 150.
                     assert_eq!(tick(&before), tick(&after));
-                    assert!(same_original(&before, &after).is_err(), "{index}/{family}/{counter}");
+                    assert!(
+                        same_original(&before, &after).is_err(),
+                        "{index}/{family}/{counter}"
+                    );
                 }
             }
         }
         Ok(())
     }
 
-
     #[test]
-    fn portfolio_clock_floors_must_fit_the_retained_observation_and_execution_frontier() -> Result<()> {
+    fn portfolio_clock_floors_must_fit_the_retained_observation_and_execution_frontier()
+    -> Result<()> {
         let before = portfolio_with_clocks(1, 4, true, true);
         same_original(&before, &before)?;
         for index in 0..4 {
@@ -800,17 +810,23 @@ mod tests {
         let edits: [fn(&mut Value); 6] = [
             |v| v["observation_tick_floor"] = Value::Null,
             |v| v["observation_tick_floor"] = json!(151),
-            |v| v["observation_tick_floor"] =
-                json!(dfmcp_adapter::bounded_run::MAX_NATIVE_TICK + 1),
+            |v| {
+                v["observation_tick_floor"] = json!(dfmcp_adapter::bounded_run::MAX_NATIVE_TICK + 1)
+            },
             |v| v["recovery"]["frontier"]["authority_tick_floor"] = Value::Null,
             |v| v["recovery"]["frontier"]["authority_tick_floor"] = json!(149),
-            |v| v["recovery"]["frontier"]["authority_tick_floor"] =
-                json!(dfmcp_adapter::bounded_run::MAX_NATIVE_TICK + 1),
+            |v| {
+                v["recovery"]["frontier"]["authority_tick_floor"] =
+                    json!(dfmcp_adapter::bounded_run::MAX_NATIVE_TICK + 1)
+            },
         ];
         for (index, edit) in edits.into_iter().enumerate() {
             let mut invalid = before.clone();
             edit(&mut invalid);
-            assert!(same_original(&invalid, &invalid).is_err(), "global floor {index}");
+            assert!(
+                same_original(&invalid, &invalid).is_err(),
+                "global floor {index}"
+            );
         }
         for field in ["observation_tick_floor", "frontier"] {
             let mut invalid = before.clone();
@@ -825,7 +841,10 @@ mod tests {
                     .ok_or_else(portfolio_conflict)?
                     .remove(field);
             }
-            assert!(same_original(&invalid, &invalid).is_err(), "missing {field}");
+            assert!(
+                same_original(&invalid, &invalid).is_err(),
+                "missing {field}"
+            );
         }
         let mut descendant = before.clone();
         descendant["portfolio_clocks"][3]["inventory_clock"]["authority_tick_floor"] = json!(200);
@@ -896,8 +915,10 @@ mod tests {
             |v| v["portfolio_clocks"][2]["clock"]["head"] = json!("ab".repeat(31)),
             |v| v["portfolio_clocks"][2]["clock"]["head"] = json!("AB".repeat(32)),
             |v| v["portfolio_clocks"][2]["clock"]["head"] = json!("00".repeat(32)),
-            |v| v["portfolio_clocks"][2]["clock"]["authority_tick_floor"] =
-                json!(dfmcp_adapter::bounded_run::MAX_NATIVE_TICK + 1),
+            |v| {
+                v["portfolio_clocks"][2]["clock"]["authority_tick_floor"] =
+                    json!(dfmcp_adapter::bounded_run::MAX_NATIVE_TICK + 1)
+            },
             |v| v["portfolio_clocks"][2]["inventory_clock"]["high_source_sequence"] = Value::Null,
             |v| v["portfolio_clocks"][2]["inventory_clock"]["review_available"] = json!(true),
             |v| v["portfolio_clocks"][2]["inventory_clock"]["journal_id"] = json!(17),

@@ -1,5 +1,58 @@
 # Implementation Status
 
+## Unreleased — Resume original resource-project stock watches after restart
+
+Resource-project production children now retain complete scalar or portfolio
+no-order watch custody in the existing acknowledged parent journal. Recovery
+validates the exact request, original targets/timing, native custodians and
+prerequisite custody before reconstructing historical ownership. First adoption
+requires Control and Plan authority in the existing Production stage, before any
+original or publication intent. Missing or substituted custody cannot be replaced
+by an operator JSON claim or a new census.
+
+Reopened Wait/Observe gathers fresh complete samples under the original deadline;
+unfinished stability is never restored. Timely historical achievement,
+cancellation, expiry and source fences survive. Eligible unfinished watches can
+use explicit continuation after fresh stock loss with the original workers,
+targets and finite limits. Pending publication keeps the dominating comparable
+checkpoint; incomparable histories refuse. The checkpoint descriptor now exposes
+historical terminal flags so parent admission can reject a completed predecessor
+without constructing an active watch or synthetic grants.
+
+A durable parent cancellation also retires its no-order watch when a crash
+occurred before child cancellation. The stop-only path withdraws nested current
+proof and continuation guidance without native I/O, after independent retained
+clock opening and outside existing stock-clock safety dispatch. Positive
+originals and predecessor history remain untouched. Standalone combined sessions
+remain process-local; no new protocol, public tool or production admission exists.
+
+Regression sources cover canonical request custody, journal/ACK replay and
+tampering, private-file restart, scalar/vector native Runtime continuation,
+historical achievement, cancellation, source fencing and the parent-stop crash
+window. Independent source review, scoped latest-nightly Rust formatting, Python
+campaign syntax and whitespace checks pass. All 63 stock adapter component tests
+pass, including nine checkpoint regressions and the new historical-term
+assertions, with all fifteen recorded production/test inputs unchanged. This
+bounded actual-source component uses the real core/world/intent crates and exact
+required adapter helpers; it is separate from the earlier whole-adapter test run.
+The complete actual adapter production library also passes a metadata check
+using unchanged production manifests, without source extraction or substitutes.
+The eight checkpoint, seven parent-journal and one thirteen-case native Runtime
+campaign test sources remain uncompiled and unexecuted. An exact locked/offline
+MCP test metadata check stopped when rustc compiling asupersync 0.6.2 was killed
+with SIGKILL, before application diagnostics; all 26 recorded inputs stayed
+unchanged. Actual MCP facade execution and full MCP/native/live qualification
+are unestablished. The earlier replay profile's eight-test pass remains evidence
+only for its recorded, unchanged implementation.
+
+This increment also canonicalizes already-validated hexadecimal session aliases
+when capturing replay commitments. A source-authored actual-facade regression
+covers uppercase accepted handles, canonical entity URIs and exact re-export;
+the previously tested result-profile implementation is unchanged.
+
+Owners: `df-native-stock-target-3m9` and
+`df-replay-equality-campaign-test021-c7c` (broader acceptance remains open).
+
 ## Unreleased — Verify semantic read results in replay bundles
 
 New laboratory captures use replay.bundle/3 with a versioned commitment for each
