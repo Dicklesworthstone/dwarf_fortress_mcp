@@ -116,6 +116,7 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
     assert_eq!(opened["durable"]["resumed"], false);
     let first = id(&opened, "session_id")?;
 
+    let original_terrain = terrain(&first)?;
     // Designate a long excavation and let only part of it happen.
     let planned = parsed(&fortress_plan(
         Some(first.clone()),
@@ -132,6 +133,9 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
     let digest = id(&planned, "plan_digest")?;
     let committed = parsed(&fortress_commit(Some(first.clone()), digest))?;
     assert_eq!(committed["ok"], true, "{committed}");
+    let automatic = id(&committed["checkpoint"], "checkpoint_id")?;
+    assert_eq!(committed["checkpoint"]["durable"], true);
+    assert_eq!(committed["checkpoint"]["anchor"], opened["anchor"]);
     let waited = parsed(&fortress_wait(Some(first.clone()), Some(20)))?;
     assert_eq!(waited["ok"], true, "{waited}");
     let checkpoint = parsed(&fortress_checkpoint(
@@ -165,7 +169,7 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
     assert_eq!(resumed["ok"], true, "{resumed}");
     assert_eq!(resumed["durable"]["resumed"], true, "{resumed}");
     assert_eq!(resumed["scenario"], "starter_fortress");
-    assert_eq!(resumed["durable"]["restorable_checkpoints"], 1);
+    assert_eq!(resumed["durable"]["restorable_checkpoints"], 2);
     assert_eq!(
         resumed["durable"]["recovered_from_anchor"]["state_hash"],
         crash_anchor["state_hash"]
@@ -274,16 +278,18 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
     ))?;
     assert_eq!(now_available["ok"], true, "{now_available}");
     let committed = parsed(&fortress_commit(
-        Some(third_session),
+        Some(third_session.clone()),
         id(&now_available, "plan_digest")?,
     ))?;
     assert_eq!(committed["ok"], true, "{committed}");
+    let original = parsed(&fortress_restore(Some(third_session.clone()), automatic))?;
+    assert_eq!(original["ok"], true, "{original}");
+    assert_eq!(terrain(&third_session)?, original_terrain);
     Ok(())
 }
 
-/// One durable commit has two journal boundaries: the commit record (before
-/// any effect), then the atomic world and progress frontier. Crashing after each
-/// must recover honestly: never a verified step without its effect.
+/// A guarded commit publishes its original request, pre-action checkpoint and
+/// atomic world frontier in order. Checkpoint custody alone cannot prove dispatch.
 #[test]
 fn crashes_at_each_commit_boundary_recover_without_false_success() -> TestResult {
     let _serial = serialized();
@@ -292,7 +298,11 @@ fn crashes_at_each_commit_boundary_recover_without_false_success() -> TestResult
     let dig =
         r#"[{"action":{"kind":"designate_dig","min":[2,3,10],"max":[3,3,10],"mode":"mine"}}]"#;
     let mut outcomes = Vec::new();
-    for (case, budget) in [("after_commit_record", 1), ("after_atomic_frontier", 2)] {
+    for (case, budget) in [
+        ("after_commit_record", 1),
+        ("after_checkpoint", 2),
+        ("after_atomic_frontier", 3),
+    ] {
         let _ = std::fs::remove_dir_all(&dir.0);
         crate::server::simulate_durable_restart(Some(dir.0.clone()));
         let selector = format!("8803{budget}");
@@ -313,6 +323,7 @@ fn crashes_at_each_commit_boundary_recover_without_false_success() -> TestResult
         crate::server::simulate_durable_restart(Some(dir.0.clone()));
         let resumed = open_durable(&selector, None)?;
         assert_eq!(resumed["ok"], true, "{case}: {resumed}");
+        assert_eq!(resumed["durable"]["restorable_checkpoints"], u64::from(budget >= 2));
         let second = id(&resumed, "session_id")?;
         let designations = parsed(&fortress_query(
             Some(second.clone()),
@@ -353,6 +364,12 @@ fn crashes_at_each_commit_boundary_recover_without_false_success() -> TestResult
                 Some("not_dispatched".to_owned()),
                 Some("not_dispatched".to_owned())
             ),
+            (
+                "after_checkpoint",
+                false,
+                Some("not_dispatched".to_owned()),
+                Some("not_dispatched".to_owned())
+            ),
             // The step and its world reached disk together.
             (
                 "after_atomic_frontier",
@@ -372,7 +389,7 @@ fn immediate_verified_step_and_temporal_effect_recover_together() -> TestResult 
         "dfmcp-durable-mixed-frontier-{}",
         std::process::id()
     )));
-    for budget in [1, 2] {
+    for budget in [1, 2, 3] {
         let _ = std::fs::remove_dir_all(&dir.0);
         crate::server::simulate_durable_restart(Some(dir.0.clone()));
         let selector = format!("8898{budget}");
@@ -403,7 +420,7 @@ fn immediate_verified_step_and_temporal_effect_recover_together() -> TestResult 
             Some(r#"{"mode":"entities","kind":"dig_designation"}"#.to_owned()),
         ))?;
         let steps = &resumed["durable"]["recovered_commits"][0]["steps"];
-        if budget == 1 {
+        if budget < 3 {
             assert_eq!(observed["paused"], false, "{observed}");
             assert_eq!(designations["total"], 0, "{designations}");
             assert_eq!(steps[0]["state"], "not_dispatched", "{resumed}");
@@ -731,7 +748,7 @@ fn shared_members_cannot_bypass_an_unpublished_frontier_or_recover_twice() -> Te
     );
     let (a, b) = (id(&a, "session_id")?, id(&b, "session_id")?);
     let planned = plan_one_tile(&a)?;
-    crate::server::inject_durable_crash_after(1);
+    crate::server::inject_durable_crash_after(2);
     parsed(&fortress_commit(
         Some(a.clone()),
         id(&planned, "plan_digest")?,
@@ -884,7 +901,7 @@ fn legacy_world_ahead_of_its_step_record_remains_indeterminate() -> TestResult {
         let digest = dfmcp_core::Digest32::from_hex(&id(&planned, "plan_digest")?)
             .ok_or("invalid sealed digest")?;
         let step = u32::try_from(planned["steps"][0]["step"].as_u64().ok_or("step missing")?)?;
-        crate::server::inject_durable_crash_after(1);
+        crate::server::inject_durable_crash_after(2);
         parsed(&fortress_commit(Some(first.clone()), digest.to_hex()))?;
         let handle = crate::server::lookup_session_str(&first)?;
         let changed_world = handle

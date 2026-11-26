@@ -5628,7 +5628,13 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                             resource_output_ledger,
                         );
                     }
-                    match guard.adapter.commit(&pending.plan, &prepared, &commit_ctx) {
+                    let durable = sealed.is_some();
+                    match guard.adapter.commit_with_checkpoint_publication(
+                        &pending.plan,
+                        &prepared,
+                        &commit_ctx,
+                        |checkpoint, snapshot| publish_lab_checkpoint(durable, checkpoint, snapshot),
+                    ) {
                         Ok(receipt) => {
                             if sealed.is_some() {
                                 guard
@@ -5685,6 +5691,13 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                                 "session_id": format!("{}", guard.session_id),
                                 "plan_id": format!("{}", receipt.plan_id),
                                 "plan_digest": receipt.plan_digest.to_string(),
+                                "checkpoint": receipt.checkpoint.as_ref().map(|checkpoint| json!({
+                                    "checkpoint_id":checkpoint.checkpoint_id.to_string(),
+                                    "label":checkpoint.label, "durable":checkpoint.durable,
+                                    "content_digest":checkpoint.content_digest.to_string(),
+                                    "anchor":anchor_json(&checkpoint.anchor),
+                                    "resource_uri":format!("df://session/{}/checkpoint-{}", guard.session_id, checkpoint.checkpoint_id),
+                                })),
                                 "actions": receipt.actions.iter().map(|action| json!({
                                     "action_id": format!("{}", action.action_id),
                                     "step": action.step_id.get(),
@@ -7181,6 +7194,19 @@ fn drain_actions_at(
 // fortress.checkpoint
 // ============================================================================
 
+fn publish_lab_checkpoint(
+    durable: bool,
+    checkpoint: &dfmcp_adapter::CheckpointReceipt,
+    snapshot: &WorldSnapshot,
+) -> Result<bool> {
+    if durable {
+        with_durable_store(|store| {
+            store.persist_checkpoint(checkpoint.checkpoint_id, &checkpoint.label, snapshot)
+        })?;
+    }
+    Ok(durable)
+}
+
 /// Create a content-addressed, labeled recovery point.
 #[tool(
     description = "Create a labeled checkpoint for the open session: a content-addressed recovery point with an evidence record."
@@ -7213,35 +7239,11 @@ pub fn fortress_checkpoint(session_id: Option<String>, label: Option<String>) ->
             {
                 return dfmcp_error_payload("fortress.checkpoint", &error);
             }
-            match guard.adapter.checkpoint(&label, &ctx) {
+            let durable = guard.durable_scenario.is_some();
+            match guard.adapter.checkpoint_with_publication(&label, &ctx, |checkpoint, snapshot| {
+                publish_lab_checkpoint(durable, checkpoint, snapshot)
+            }) {
                 Ok(receipt) => {
-                    let (durable, durability_error) = if guard.durable_scenario.is_some() {
-                        let persisted = guard
-                            .adapter
-                            .checkpoint_snapshot(receipt.checkpoint_id)
-                            .cloned()
-                            .ok_or_else(|| {
-                                DfmcpError::new(
-                                    ErrorCode::InternalInvariantViolation,
-                                    "checkpoint vanished before it could be persisted",
-                                )
-                            })
-                            .and_then(|snapshot| {
-                                with_durable_store(|store| {
-                                    store.persist_checkpoint(
-                                        receipt.checkpoint_id,
-                                        &receipt.label,
-                                        &snapshot,
-                                    )
-                                })
-                            });
-                        match persisted {
-                            Ok(()) => (true, None),
-                            Err(error) => (false, Some(error.message)),
-                        }
-                    } else {
-                        (receipt.durable, None)
-                    };
                     json!({
                         "ok": true,
                         "session_id": format!("{}", guard.session_id),
@@ -7250,8 +7252,8 @@ pub fn fortress_checkpoint(session_id: Option<String>, label: Option<String>) ->
                         "checkpoint_catalog": format!("df://session/{}/checkpoints", guard.session_id),
                         "label": receipt.label,
                         "content_digest": receipt.content_digest.to_string(),
-                        "durable": durable,
-                        "durability_error": durability_error,
+                        "durable": receipt.durable,
+                        "durability_error": null,
                         "anchor": anchor_json(&receipt.anchor),
                     })
                     .to_string()

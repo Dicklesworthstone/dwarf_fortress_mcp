@@ -14,6 +14,21 @@ reserve endpoint previously survived only inside the originating process.
 Both kinds of evidence now have bounded durable custody when the fortress
 uses the operator-configured durable laboratory store.
 
+## Restoring a guarded action’s starting world
+
+In a durable laboratory session, a successful guarded `fortress.commit` returns
+a `checkpoint` containing the pre-action anchor, content digest, checkpoint ID,
+resource URI and durability flag. Use that ID with `fortress.restore` to return
+to the starting world in a new observation epoch. After a restart, the current
+session’s checkpoint catalog lists the same ID and its original label.
+
+The original goal, the recovery point and the world containing the action each
+have a journal boundary. A crash between the second and third can leave a
+restorable point without a dispatched action. Recovery uses the anchored action
+frontier to determine dispatch. When a checkpoint publication fails, the
+transaction discards staged laboratory effects. A manual checkpoint similarly
+appears in the catalog only after its requested publication succeeds.
+
 ## What a resumed wait can claim
 
 A recovered selected wait checks the unchanged original request, reconstructed

@@ -604,7 +604,7 @@ belongs to the operations snapshot; `canonical_anchor` and `parent_anchor` name
 the citizen observation used for subsequent planning. These are distinct
 source identities, even at the same tick. The source descriptor includes its
 digest, ready `diagnosis_request`, `inventory_request` and
-`inventory_totals_request` handles, and the fourteen supported query kinds.
+`inventory_totals_request` handles, and the supported query kinds.
 Use the descriptor's operations `anchor` for query
 `expected_anchor`, and the current citizen `observation.seal` for original Plan.
 Neither field substitutes for the other.
@@ -614,7 +614,7 @@ Call `fortress_query` with the same session ID and the JSON encoding of
 `request` string. No
 `order_step_id` is accepted before an original exists. Query uses only the
 retained capture, rechecking current read authority and source pins without
-native contact. It supports the same `production_diagnosis`, `inventory_plan`,
+native contact. It supports the same `production_diagnosis`, `inventory_plan`, `furniture_allocation`,
 `production_chain`, `production_chain_compare`,
 `entities`, `inspect`, `traverse`, `dependencies` and `aggregate` operations described below.
 `search` finds captured text; `spatial_entities`, `related_entities` and
@@ -1121,6 +1121,32 @@ full native recipe requirements, path access or labor-eligibility proof.
 The result explicitly carries `attribution="not_order_attributed"`. It neither
 identifies a proven causal blocker for the selected order nor changes the
 original goal's proof, deadline, plan or clock authority.
+
+### Assign captured furniture to room slots
+
+Use `furniture_allocation` before planning or after an original-goal Wait
+publishes a current operations source. Copy the complete
+`production_inspection_source.anchor` into the envelope's `expected_anchor`.
+In that envelope, supply the room's slot names, kinds and target coordinates.
+
+```json
+{
+  "kind": "furniture_allocation",
+  "slots": [
+    {"name": "bed", "kind": "bed", "target": [20, 22, 4]},
+    {"name": "chair", "kind": "chair", "target": [21, 22, 4]}
+  ]
+}
+```
+
+The server reads the world folder and site from the capture. A portable request
+can include those fields as additional identity checks. Each assigned slot
+receives a distinct eligible ground item on its target level. A successful
+response includes the item IDs, assignment evidence and a furniture plan for
+separate placement review. If the available furniture cannot cover every slot,
+the response names the shortage and omits the plan. Both outcomes describe the
+captured inventory. Placement, path access, and attribution to the original
+production order require separate evidence.
 
 ### Analyze shared inputs and compare declared production models
 

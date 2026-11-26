@@ -274,3 +274,39 @@ fn full_checkpoint_store_refuses_new_labels_but_allows_exact_metadata_recovery()
         Some("retained at capacity")
     );
 }
+
+#[test]
+fn failed_publication_does_not_consume_a_checkpoint_or_nonce() {
+    let mut adapter = MemoryAdapter::new(source(7, 3));
+    let mut control = adapter.clone();
+    let ctx = context(&adapter);
+    let before = adapter.transcript().clone();
+    let failed = adapter.checkpoint_with_publication("manual", &ctx, |_, _| {
+        Err(dfmcp_core::DfmcpError::new(ErrorCode::AdapterUnavailable, "store unavailable"))
+    });
+    assert!(matches!(failed, Err(error) if error.code == ErrorCode::AdapterUnavailable));
+    assert_eq!(adapter.transcript(), &before);
+    assert_eq!(adapter.checkpoint_count(), 0);
+    assert_eq!(
+        adapter.checkpoint("retry", &ctx).expect("retry"),
+        control.checkpoint("retry", &ctx).expect("control")
+    );
+}
+
+#[test]
+fn adopted_same_world_checkpoints_leave_a_free_identity_for_new_work() {
+    let world = source(7, 3);
+    let mut original = MemoryAdapter::new(world.clone());
+    let ctx = context(&original);
+    let first = original.checkpoint("one", &ctx).expect("first");
+    let second = original.checkpoint("two", &ctx).expect("second");
+    let mut resumed = MemoryAdapter::new(world.clone());
+    for checkpoint in [&first, &second] {
+        resumed.adopt_checkpoint_labeled(checkpoint.checkpoint_id, world.clone(), &checkpoint.label)
+            .expect("recover");
+    }
+    assert_eq!(
+        resumed.checkpoint("three", &ctx).expect("new after recovery"),
+        original.checkpoint("three", &ctx).expect("uninterrupted")
+    );
+}

@@ -1,5 +1,9 @@
 # Implementation Status
 
+## Unreleased — Laboratory recovery, furnished rooms and supply forecasting
+
+See [guarded recovery](IMPLEMENTATION_STATUS.d/2026-11-26-guarded-checkpoint-publication.md), [room access](IMPLEMENTATION_STATUS.d/2026-11-26-connected-dormitories.md), [dining capacity](IMPLEMENTATION_STATUS.d/2026-11-26-paired-dining.md), [supply forecasts](IMPLEMENTATION_STATUS.d/2026-11-26-supply-rounds.md) and [captured furniture](IMPLEMENTATION_STATUS.d/2026-11-26-production-furniture-allocation.md) for scope and evidence.
+
 ## Unreleased — Keep carpentry and furniture inventory with its original owner
 
 Fresh reference carpentry orders now retain the qualified stock ledger's identity

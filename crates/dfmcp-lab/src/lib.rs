@@ -727,46 +727,75 @@ impl MemoryAdapter {
         Ok(receipt)
     }
 
-    fn internal_checkpoint(&mut self, label: &str) -> Result<CheckpointReceipt> {
+    /// Expose the checkpoint in the catalog only after its publisher acknowledges it.
+    pub fn checkpoint_with_publication(
+        &mut self,
+        label: &str,
+        context: &OperationContext,
+        publish: impl FnOnce(&CheckpointReceipt, &WorldSnapshot) -> Result<bool>,
+    ) -> Result<CheckpointReceipt> {
+        self.check_anchor(context.anchor)?;
+        context.authorize(Capability::Checkpoint, RiskTier::Guarded, &[], None)?;
+        if label.is_empty() || label.len() > 256 || label.chars().any(char::is_control) {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "checkpoint label is empty, too long, or contains control characters",
+            ));
+        }
+        self.internal_checkpoint(label, publish)
+    }
+
+    fn internal_checkpoint(
+        &mut self,
+        label: &str,
+        publish: impl FnOnce(&CheckpointReceipt, &WorldSnapshot) -> Result<bool>,
+    ) -> Result<CheckpointReceipt> {
         if self.checkpoints.len() >= MAX_LAB_CHECKPOINTS {
             return Err(DfmcpError::new(
                 ErrorCode::BudgetExceeded,
                 "laboratory checkpoint store reached its explicit bound",
             ));
         }
-        let nonce = self.next_nonce()?;
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"dfmcp-lab-checkpoint-v1");
-        bytes.extend_from_slice(self.snapshot.state_hash.as_bytes());
-        bytes.extend_from_slice(&nonce.to_be_bytes());
-        let digest = Digest32::of_bytes(&bytes);
-        let checkpoint_id = CheckpointId::new(nonzero(digest.first_u128()));
-        if self.checkpoints.contains_key(&checkpoint_id) {
-            return Err(DfmcpError::new(
-                ErrorCode::Conflict,
-                "derived laboratory checkpoint identifier collided with existing content",
-            ));
+        // Recovery can import same-state checkpoints into a fresh nonce sequence.
+        // At most one occupied identifier per retained checkpoint needs skipping.
+        let mut next_nonce = self.nonce;
+        let mut checkpoint_id = None;
+        for _ in 0..=self.checkpoints.len() {
+            let nonce = next_nonce;
+            next_nonce = nonce.checked_add(1).ok_or_else(|| {
+                DfmcpError::new(ErrorCode::BudgetExceeded, "laboratory nonce space is exhausted")
+            })?;
+            let mut bytes = Vec::from(b"dfmcp-lab-checkpoint-v1".as_slice());
+            bytes.extend_from_slice(self.snapshot.state_hash.as_bytes());
+            bytes.extend_from_slice(&nonce.to_be_bytes());
+            let candidate = CheckpointId::new(nonzero(Digest32::of_bytes(&bytes).first_u128()));
+            if !self.checkpoints.contains_key(&candidate) {
+                checkpoint_id = Some(candidate);
+                break;
+            }
         }
-        self.checkpoints
-            .insert(checkpoint_id, self.snapshot.clone());
-        self.checkpoint_labels
-            .insert(checkpoint_id, label.to_owned());
+        let checkpoint_id = checkpoint_id.ok_or_else(|| {
+            DfmcpError::new(ErrorCode::Conflict, "no free checkpoint identity in bounded search")
+        })?;
         let evidence = evidence(
             self.snapshot.anchor(),
             EvidenceKind::Checkpoint,
             &format!("laboratory checkpoint {label}"),
         );
-        self.record_event(LabEvent::Checkpointed(checkpoint_id));
-        Ok(CheckpointReceipt {
+        let mut receipt = CheckpointReceipt {
             checkpoint_id,
             label: label.to_owned(),
             anchor: self.snapshot.anchor(),
             content_digest: self.snapshot.state_hash,
-            // This is a process-local snapshot clone. It is a useful recovery
-            // laboratory, but it cannot survive process or machine loss.
             durable: false,
             evidence: vec![evidence],
-        })
+        };
+        receipt.durable = publish(&receipt, &self.snapshot)?;
+        self.nonce = next_nonce;
+        self.checkpoints.insert(checkpoint_id, self.snapshot.clone());
+        self.checkpoint_labels.insert(checkpoint_id, label.to_owned());
+        self.record_event(LabEvent::Checkpointed(checkpoint_id));
+        Ok(receipt)
     }
 
     fn dependencies_verified(&self, plan_id: PlanId, step: &PlanStep) -> bool {
@@ -1103,6 +1132,151 @@ impl MemoryAdapter {
     }
 }
 
+impl MemoryAdapter {
+    /// Commit laboratory effects and publish a required pre-action checkpoint as one
+    /// visible operation. The publisher returns whether the checkpoint is durable.
+    /// An error rolls back staged game effects, action handles, and checkpoint custody.
+    pub fn commit_with_checkpoint_publication(
+        &mut self,
+        plan: &PreparedPlan,
+        prepared: &PrepareReceipt,
+        context: &OperationContext,
+        publish: impl FnOnce(&CheckpointReceipt, &WorldSnapshot) -> Result<bool>,
+    ) -> Result<CommitReceipt> {
+        plan.validate_structure()?;
+        let stored_plan = self.plans.get(&plan.id).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InvalidPlan,
+                "plan was not prepared by this adapter",
+            )
+        })?;
+        if stored_plan != plan {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "commit plan does not exactly match the prepared plan",
+            ));
+        }
+        if plan.steps.len() > context.budget.max_actions as usize {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "plan exceeds the commit action budget",
+            ));
+        }
+        for step in &plan.steps {
+            self.authorize_step(step, context)?;
+        }
+        if plan.requires_checkpoint {
+            context.authorize(Capability::Checkpoint, RiskTier::Guarded, &[], None)?;
+        }
+
+        // Authorization is deliberately rechecked before idempotent replay.
+        // A stable idempotency key is not a bearer token for a prior caller's
+        // authority, while an expired plan still retains its stable receipt.
+        if let Some(existing) = self.commits.get(&plan.id) {
+            if existing.plan_digest == plan.digest {
+                return Ok(existing.clone());
+            }
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "plan identifier was reused with a different digest",
+            ));
+        }
+        self.check_anchor(context.anchor)?;
+        let stored_receipt = self.prepared.get(&plan.id).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InvalidPlan,
+                "plan is missing its prepare receipt",
+            )
+        })?;
+        if stored_receipt != prepared
+            || prepared.plan_id != plan.id
+            || prepared.plan_digest != plan.digest
+            || prepared.revalidated_anchor != self.snapshot.anchor()
+            || Digest32::of_bytes(&prepared.adapter_token) != prepared.adapter_token_digest
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidPlan,
+                "prepare receipt is stale, forged, or inconsistent",
+            ));
+        }
+        if self.snapshot.tick >= prepared.expires_at_tick
+            || self.snapshot.tick >= plan.expires_at_tick
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidPlan,
+                "prepared plan expired before commit",
+            ));
+        }
+        let observation = PredicateEvidence::laboratory(&self.snapshot)?;
+        for step in &plan.steps {
+            if !predicates_established(&observation, &step.preconditions)? {
+                return Err(DfmcpError::new(
+                    ErrorCode::PreconditionsFailed,
+                    format!("step {} failed commit-time revalidation", step.id),
+                ));
+            }
+        }
+        let new_action_count = self
+            .actions
+            .len()
+            .checked_add(plan.steps.len())
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "laboratory action count overflowed",
+                )
+            })?;
+        if new_action_count > MAX_LAB_ACTIONS || self.commits.len() >= MAX_LAB_COMMITS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "laboratory action or commit store reached its explicit bound",
+            ));
+        }
+        if plan.requires_checkpoint && self.checkpoints.len() >= MAX_LAB_CHECKPOINTS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "laboratory checkpoint store reached its explicit bound",
+            ));
+        }
+
+        // The memory laboratory uses a clone as its transaction shadow. Any
+        // action, cursor, checkpoint, or journal failure restores every field.
+        let prior_state = self.clone();
+        let result = (|| {
+            let mut checkpoint = if plan.requires_checkpoint {
+                Some(self.internal_checkpoint(&format!("before-plan-{}", plan.id), |_, _| Ok(false))?)
+            } else {
+                None
+            };
+            let mut actions = Vec::with_capacity(plan.steps.len());
+            for step in &plan.steps {
+                let action_id = derived_action_id(plan.id, step.id);
+                actions.push(self.dispatch_step(plan.id, step, action_id)?);
+            }
+            // All game effects are still private under this transaction. Publish the
+            // pre-action recovery point before exposing any receipt or changed world.
+            if let Some(recovery_point) = checkpoint.as_mut() {
+                recovery_point.durable = publish(recovery_point, prior_state.snapshot())?;
+            }
+            self.record_event(LabEvent::Committed(plan.id));
+            let receipt = CommitReceipt {
+                plan_id: plan.id,
+                plan_digest: plan.digest,
+                actions,
+                checkpoint,
+                observed_anchor: self.snapshot.anchor(),
+                warnings: Vec::new(),
+            };
+            self.commits.insert(plan.id, receipt.clone());
+            Ok(receipt)
+        })();
+        if result.is_err() {
+            *self = prior_state;
+        }
+        result
+    }
+}
+
 impl GameAdapter for MemoryAdapter {
     fn identity(&self) -> AdapterIdentity {
         self.identity.clone()
@@ -1292,132 +1466,7 @@ impl GameAdapter for MemoryAdapter {
         prepared: &PrepareReceipt,
         context: &OperationContext,
     ) -> Result<CommitReceipt> {
-        plan.validate_structure()?;
-        let stored_plan = self.plans.get(&plan.id).ok_or_else(|| {
-            DfmcpError::new(
-                ErrorCode::InvalidPlan,
-                "plan was not prepared by this adapter",
-            )
-        })?;
-        if stored_plan != plan {
-            return Err(DfmcpError::new(
-                ErrorCode::Conflict,
-                "commit plan does not exactly match the prepared plan",
-            ));
-        }
-        if plan.steps.len() > context.budget.max_actions as usize {
-            return Err(DfmcpError::new(
-                ErrorCode::BudgetExceeded,
-                "plan exceeds the commit action budget",
-            ));
-        }
-        for step in &plan.steps {
-            self.authorize_step(step, context)?;
-        }
-        if plan.requires_checkpoint {
-            context.authorize(Capability::Checkpoint, RiskTier::Guarded, &[], None)?;
-        }
-
-        // Authorization is deliberately rechecked before idempotent replay.
-        // A stable idempotency key is not a bearer token for a prior caller's
-        // authority, while an expired plan still retains its stable receipt.
-        if let Some(existing) = self.commits.get(&plan.id) {
-            if existing.plan_digest == plan.digest {
-                return Ok(existing.clone());
-            }
-            return Err(DfmcpError::new(
-                ErrorCode::Conflict,
-                "plan identifier was reused with a different digest",
-            ));
-        }
-        self.check_anchor(context.anchor)?;
-        let stored_receipt = self.prepared.get(&plan.id).ok_or_else(|| {
-            DfmcpError::new(
-                ErrorCode::InvalidPlan,
-                "plan is missing its prepare receipt",
-            )
-        })?;
-        if stored_receipt != prepared
-            || prepared.plan_id != plan.id
-            || prepared.plan_digest != plan.digest
-            || prepared.revalidated_anchor != self.snapshot.anchor()
-            || Digest32::of_bytes(&prepared.adapter_token) != prepared.adapter_token_digest
-        {
-            return Err(DfmcpError::new(
-                ErrorCode::InvalidPlan,
-                "prepare receipt is stale, forged, or inconsistent",
-            ));
-        }
-        if self.snapshot.tick >= prepared.expires_at_tick
-            || self.snapshot.tick >= plan.expires_at_tick
-        {
-            return Err(DfmcpError::new(
-                ErrorCode::InvalidPlan,
-                "prepared plan expired before commit",
-            ));
-        }
-        let observation = PredicateEvidence::laboratory(&self.snapshot)?;
-        for step in &plan.steps {
-            if !predicates_established(&observation, &step.preconditions)? {
-                return Err(DfmcpError::new(
-                    ErrorCode::PreconditionsFailed,
-                    format!("step {} failed commit-time revalidation", step.id),
-                ));
-            }
-        }
-        let new_action_count = self
-            .actions
-            .len()
-            .checked_add(plan.steps.len())
-            .ok_or_else(|| {
-                DfmcpError::new(
-                    ErrorCode::BudgetExceeded,
-                    "laboratory action count overflowed",
-                )
-            })?;
-        if new_action_count > MAX_LAB_ACTIONS || self.commits.len() >= MAX_LAB_COMMITS {
-            return Err(DfmcpError::new(
-                ErrorCode::BudgetExceeded,
-                "laboratory action or commit store reached its explicit bound",
-            ));
-        }
-        if plan.requires_checkpoint && self.checkpoints.len() >= MAX_LAB_CHECKPOINTS {
-            return Err(DfmcpError::new(
-                ErrorCode::BudgetExceeded,
-                "laboratory checkpoint store reached its explicit bound",
-            ));
-        }
-
-        // The memory laboratory uses a clone as its transaction shadow. Any
-        // action, cursor, checkpoint, or journal failure restores every field.
-        let prior_state = self.clone();
-        let result = (|| {
-            let checkpoint = if plan.requires_checkpoint {
-                Some(self.internal_checkpoint(&format!("before-plan-{}", plan.id))?)
-            } else {
-                None
-            };
-            let mut actions = Vec::with_capacity(plan.steps.len());
-            for step in &plan.steps {
-                let action_id = derived_action_id(plan.id, step.id);
-                actions.push(self.dispatch_step(plan.id, step, action_id)?);
-            }
-            self.record_event(LabEvent::Committed(plan.id));
-            let receipt = CommitReceipt {
-                plan_id: plan.id,
-                plan_digest: plan.digest,
-                actions,
-                checkpoint,
-                observed_anchor: self.snapshot.anchor(),
-                warnings: Vec::new(),
-            };
-            self.commits.insert(plan.id, receipt.clone());
-            Ok(receipt)
-        })();
-        if result.is_err() {
-            *self = prior_state;
-        }
-        result
+        self.commit_with_checkpoint_publication(plan, prepared, context, |_, _| Ok(false))
     }
 
     fn poll_action(
@@ -1682,15 +1731,7 @@ impl GameAdapter for MemoryAdapter {
     }
 
     fn checkpoint(&mut self, label: &str, context: &OperationContext) -> Result<CheckpointReceipt> {
-        self.check_anchor(context.anchor)?;
-        context.authorize(Capability::Checkpoint, RiskTier::Guarded, &[], None)?;
-        if label.is_empty() || label.len() > 256 || label.chars().any(char::is_control) {
-            return Err(DfmcpError::new(
-                ErrorCode::InvalidRequest,
-                "checkpoint label is empty, too long, or contains control characters",
-            ));
-        }
-        self.internal_checkpoint(label)
+        self.checkpoint_with_publication(label, context, |_, _| Ok(false))
     }
 
     fn restore(
@@ -2194,6 +2235,46 @@ mod tests {
         plan.digest = plan.compute_digest();
         plan.id = plan.expected_id();
         plan.validate_structure()
+    }
+
+    #[test]
+    fn failed_guarded_checkpoint_rolls_back_effects_and_retries_the_same_recovery_point()
+        -> Result<(), DfmcpError>
+    {
+        let source = WorldSnapshot::new(
+            FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true,
+            WorldGraph::default(),
+        );
+        let ctx = context(&source, 1);
+        let mut intent = unpause_intent(&source, 41, None);
+        intent.constraints.push(Constraint::RequireCheckpoint);
+        let plan = StaticPlanner::default().prepare_laboratory(&source, &intent, &ctx)?;
+        let mut adapter = MemoryAdapter::new(source.clone());
+        let prepared = adapter.prepare(&plan, &ctx)?;
+        let before = adapter.transcript().clone();
+        let mut original_id = None;
+        let failed = adapter.commit_with_checkpoint_publication(&plan, &prepared, &ctx, |cp, world| {
+            assert_eq!(world, &source);
+            original_id = Some(cp.checkpoint_id);
+            Err(DfmcpError::new(ErrorCode::AdapterUnavailable, "injected storage failure"))
+        });
+        assert!(matches!(failed, Err(error) if error.code == ErrorCode::AdapterUnavailable));
+        assert_eq!(adapter.snapshot(), &source);
+        assert_eq!(adapter.transcript(), &before);
+        assert!(adapter.actions.is_empty() && adapter.commits.is_empty());
+        assert_eq!(adapter.checkpoint_count(), 0);
+        let receipt = adapter.commit_with_checkpoint_publication(&plan, &prepared, &ctx, |cp, world| {
+            assert_eq!(world, &source);
+            assert_eq!(Some(cp.checkpoint_id), original_id);
+            Ok(true)
+        })?;
+        assert!(receipt.checkpoint.as_ref().is_some_and(|cp| cp.durable));
+        assert!(!adapter.snapshot().paused);
+        let replay = adapter.commit_with_checkpoint_publication(&plan, &prepared, &ctx, |_, _| {
+            Err(DfmcpError::new(ErrorCode::Conflict, "unexpected duplicate publication"))
+        })?;
+        assert_eq!(receipt, replay);
+        Ok(())
     }
 
     #[test]

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — Recover guarded actions and provision furnished rooms
+
+- Durable laboratory commits return a restorable pre-action checkpoint for guarded plans. Failed checkpoint publication rolls back the staged laboratory action.
+- Connected rooms can route into a shared dormitory. Paired dining layouts supply up to eight tables and eight chairs from inventory and finite work orders.
+- Food and drink alerts report both stock exhaustion and the first missed ration using the metabolism clock.
+- The development production Query can assign source-pinned furniture to slots or report an inventory shortage.
+
 ## Unreleased — Preserve original inventory through production and installation
 
 - Bind carpentry orders, produced items and exact furniture placements to their
