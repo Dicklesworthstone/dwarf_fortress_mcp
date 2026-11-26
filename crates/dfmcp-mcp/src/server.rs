@@ -5605,6 +5605,9 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                         let digest = pending.plan.digest;
                         let intent = pending.plan.intent_id.get();
                         if let Err(error) = with_durable_store(|store| {
+                            if pending.plan.requires_checkpoint {
+                                store.admit_new_checkpoint(sealed.fortress_id)?;
+                            }
                             store.persist_objective_commit(
                                 sealed,
                                 digest,

@@ -97,7 +97,8 @@ class PreplanInspectionTests:
         self.assertFalse(source['baseline_reused_for_planning'])
         self.assertFalse(source['restored_from_history'])
         self.assertEqual(set(source['query_kinds']), {
-            'production_diagnosis', 'inventory_plan', 'entities', 'inspect',
+            'production_diagnosis', 'inventory_plan', 'furniture_allocation',
+            'production_chain', 'production_chain_compare', 'entities', 'inspect',
             'traverse', 'dependencies', 'aggregate', 'search', 'events',
             'spatial_entities', 'related_entities', 'ranked_entities'})
         self.assertEqual(source['inventory_totals_semantics'], 'observed_stock_not_usable_supply')

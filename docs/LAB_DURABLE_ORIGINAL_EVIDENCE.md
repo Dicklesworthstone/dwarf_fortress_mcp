@@ -22,6 +22,10 @@ resource URI and durability flag. Use that ID with `fortress.restore` to return
 to the starting world in a new observation epoch. After a restart, the current
 session’s checkpoint catalog lists the same ID and its original label.
 
+Each automatic or manual recovery point occupies one of the durable fortress’s
+256 checkpoint slots. A guarded commit checks for room before admitting its
+original goal or evicting any retained goal history.
+
 The original goal, the recovery point and the world containing the action each
 have a journal boundary. A crash between the second and third can leave a
 restorable point without a dispatched action. Recovery uses the anchored action

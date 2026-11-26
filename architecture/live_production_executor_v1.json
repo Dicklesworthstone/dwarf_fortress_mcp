@@ -724,6 +724,7 @@
       "query_kinds": [
         "production_diagnosis",
         "inventory_plan",
+        "furniture_allocation",
         "production_chain",
         "production_chain_compare",
         "entities",
@@ -908,6 +909,7 @@
       "query_kinds": [
         "production_diagnosis",
         "inventory_plan",
+        "furniture_allocation",
         "production_chain",
         "production_chain_compare",
         "entities",

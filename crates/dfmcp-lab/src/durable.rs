@@ -102,6 +102,16 @@ fn invalid(message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, message)
 }
 
+fn checkpoint_capacity(count: usize) -> Result<()> {
+    if count >= MAX_CHECKPOINTS_PER_FORTRESS {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "durable laboratory fortress reached its checkpoint bound",
+        ));
+    }
+    Ok(())
+}
+
 fn corrupt(message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(ErrorCode::CorruptLedger, message).retryable(false)
 }
@@ -2395,6 +2405,13 @@ impl DurableLabStore {
         self.index.heads.get(&fortress_id)
     }
 
+    /// Preflight an original goal that will need a new checkpoint, before
+    /// admitting the goal or evicting any prior objective history.
+    pub fn admit_new_checkpoint(&self, fortress_id: FortressId) -> Result<()> {
+        self.ensure_writable()?;
+        checkpoint_capacity(self.index.checkpoints.get(&fortress_id).map_or(0, BTreeMap::len))
+    }
+
     /// Every durable checkpoint of a fortress, in identifier order.
     pub fn checkpoints(&self, fortress_id: FortressId) -> impl Iterator<Item = &DurableCheckpoint> {
         self.index
@@ -2817,12 +2834,7 @@ impl Index {
                     }
                     return Ok(());
                 }
-                if book.len() >= MAX_CHECKPOINTS_PER_FORTRESS {
-                    return Err(DfmcpError::new(
-                        ErrorCode::BudgetExceeded,
-                        "durable laboratory fortress reached its checkpoint bound",
-                    ));
-                }
+                checkpoint_capacity(book.len())?;
                 book.insert(checkpoint.checkpoint_id, checkpoint);
             }
             Record::Commit(commit) => {
@@ -3252,6 +3264,32 @@ mod tests {
             .ok_or_else(|| corrupt("checkpoint missing after reopen"))?;
         assert_eq!(row.label, "original");
         assert_eq!(reopened.load_snapshot(row.state_hash)?, source);
+        Ok(())
+    }
+
+    #[test]
+    fn guarded_admission_observes_the_same_checkpoint_limit_as_publication() -> Result<()> {
+        let dir = TempDir::new("checkpoint-capacity");
+        let mut store = DurableLabStore::open(&dir.0)?;
+        let source = snapshot(7, 1);
+        let fortress = source.fortress_id;
+        for id in 1..=MAX_CHECKPOINTS_PER_FORTRESS {
+            store.admit_new_checkpoint(fortress)?;
+            store.index.apply(Record::Checkpoint(DurableCheckpoint {
+                checkpoint_id: CheckpointId::new(id as u128),
+                fortress_id: fortress,
+                state_hash: source.state_hash,
+                label: "original".to_owned(),
+            }))?;
+        }
+        assert!(matches!(store.admit_new_checkpoint(fortress),
+            Err(error) if error.code == ErrorCode::BudgetExceeded));
+        assert!(matches!(
+            store.persist_checkpoint(CheckpointId::new(1000), "overflow", &source),
+            Err(error) if error.code == ErrorCode::BudgetExceeded
+        ));
+        assert_eq!(store.report().records, 0);
+        store.admit_new_checkpoint(FortressId::new(8))?;
         Ok(())
     }
 
