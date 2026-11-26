@@ -108,6 +108,9 @@
             },
             {
               "$ref": "#/$defs/dormitory"
+            },
+            {
+              "$ref": "#/$defs/dining_pairs"
             }
           ]
         },
@@ -250,6 +253,34 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 8,
+          "default": 4
+        }
+      }
+    },
+    "dining_pairs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template",
+        "origin",
+        "table_count"
+      ],
+      "properties": {
+        "template": {
+          "const": "dining_pairs"
+        },
+        "origin": {
+          "$ref": "#/$defs/coordinate"
+        },
+        "table_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
           "default": 4
         }
       }

@@ -36,6 +36,7 @@ pub struct BlueprintLayout {
     access_point: Option<MapCoord>,
     reserved_crossing: Option<MapCuboid>,
     dormitory_beds: Vec<MapCoord>,
+    dining_pairs: Vec<(MapCoord, MapCoord)>,
 }
 
 impl BlueprintLayout {
@@ -73,6 +74,12 @@ impl BlueprintLayout {
         &self.dormitory_beds
     }
 
+    /// Chair and table positions, in service order, with an open aisle north of each pair.
+    #[must_use]
+    pub fn dining_pairs(&self) -> &[(MapCoord, MapCoord)] {
+        &self.dining_pairs
+    }
+
     pub fn generate(origin: MapCoord, template: BlueprintTemplate) -> Result<Self> {
         let mut layout = Self {
             summary: String::new(),
@@ -81,6 +88,7 @@ impl BlueprintLayout {
             access_point: None,
             reserved_crossing: None,
             dormitory_beds: Vec::new(),
+            dining_pairs: Vec::new(),
         };
         match template {
             BlueprintTemplate::BedroomCluster {
@@ -114,6 +122,31 @@ impl BlueprintLayout {
                 }
                 layout.access_point = Some(origin);
                 layout.summary = format!("excavate shared sleeping space for {bed_count} beds");
+            }
+            BlueprintTemplate::DiningPairs {
+                table_count,
+                columns,
+            } => {
+                if !(1..=8).contains(&table_count) || !(1..=4).contains(&columns) {
+                    return Err(bounds("paired dining requires 1..8 tables and 1..4 columns"));
+                }
+                let width = 3 * table_count.min(columns) + 1;
+                let height = 2 * table_count.div_ceil(columns) + 1;
+                layout.push(
+                    rectangle(origin, width, height)?,
+                    DigMode::Mine,
+                    ExcavationRole::Room,
+                )?;
+                for index in 0..table_count {
+                    let chair = offset(
+                        origin,
+                        3 * i64::from(index % columns) + 1,
+                        2 * i64::from(index / columns) + 1,
+                    )?;
+                    layout.dining_pairs.push((chair, offset(chair, 1, 0)?));
+                }
+                layout.access_point = Some(origin);
+                layout.summary = format!("excavate dining space for {table_count} table-chair pairs");
             }
             BlueprintTemplate::DiningHall { width, height } => {
                 layout.push(

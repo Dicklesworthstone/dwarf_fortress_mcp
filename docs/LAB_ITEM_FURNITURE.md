@@ -58,6 +58,19 @@ For a dining room, use this layout inside the same wrapper:
 ```
 
 It installs one table and one adjacent chair on distinct interior tiles.
+For a dining room sized by seating capacity, use this layout inside
+`provisioned_room` or its `connected_room` wrapper:
+
+```json
+{"template":"dining_pairs","origin":[2,6,10],"table_count":3,"columns":2}
+```
+
+`table_count` requests one to eight chair/table pairs. `columns` accepts one
+to four pairs per row and defaults to four. The planner leaves a floor aisle
+beside each row and uses exact loose items before manufacturing the shortfall.
+The original goal requires the installed chair and table at each selected
+pair, including the last pair of a partial row.
+
 Bedroom clusters install one bed per room. Doors remain available through
 explicit `place_furniture` actions; the room compiler does not add them.
 

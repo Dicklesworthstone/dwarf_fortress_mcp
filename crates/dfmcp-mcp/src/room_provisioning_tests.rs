@@ -396,6 +396,27 @@ fn completed_room_goal_rejects_item_and_building_generation_replacement() -> Res
 }
 
 #[test]
+fn dining_pairs_reuse_inventory_and_install_the_complete_original_count() -> Result<()> {
+    let request = ProvisionedRoomRequest::parse_current(
+        &json!({"template":"provisioned_room","layout":{
+            "template":"dining_pairs","origin":[2,6,10],"table_count":3,"columns":2
+        }})
+        .to_string(),
+    )?;
+    let request = ProvisionedRoomRequest::parse(&request.canonical_json())?;
+    let source = produce(source()?, "TABLE", 1)?;
+    let (intent, analysis) = request.compile(IntentId::new(984), &source, "")?;
+    assert_eq!(analysis["inventory"][0]["new_items_required"], 2);
+    assert_eq!(analysis["inventory"][1]["new_items_required"], 3);
+    assert_eq!(analysis["allocation"].as_array().map(Vec::len), Some(6));
+    assert_eq!(request.semantic_goal_truth(&source)?, PredicateTruth::False);
+    let (completed, _) = execute(source, &intent)?;
+    assert_eq!(request.semantic_goal_truth(&completed)?, PredicateTruth::True);
+    assert_eq!(material(&completed)?, 14);
+    Ok(())
+}
+
+#[test]
 fn dining_reuses_exact_table_and_produces_only_the_missing_chair() -> Result<()> {
     let source = produce(source()?, "TABLE", 1)?;
     let table = effects::loose_furniture_items(&source, FurnitureKind::Table)?

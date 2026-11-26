@@ -32,6 +32,10 @@ pub enum BlueprintTemplate {
         bed_count: u8,
         columns: u8,
     },
+    DiningPairs {
+        table_count: u8,
+        columns: u8,
+    },
     DiningHall {
         width: u8,
         height: u8,
@@ -267,6 +271,9 @@ impl BlueprintPlanner {
         let furniture = match &template {
             BlueprintTemplate::BedroomCluster { .. } => vec!["Bed"],
             BlueprintTemplate::DiningHall { .. } => vec!["Table", "Chair"],
+            BlueprintTemplate::DiningPairs { table_count, .. } => {
+                ["Chair", "Table"].repeat(usize::from(*table_count))
+            }
             BlueprintTemplate::Dormitory { bed_count, .. } => vec!["Bed"; usize::from(*bed_count)],
             _ => Vec::new(),
         };
@@ -292,6 +299,8 @@ impl BlueprintPlanner {
                 let shift = i32::try_from(offset).map_err(|_| invalid("furniture offset"))?;
                 let location = if let Some(&bed) = layout.dormitory_beds().get(offset) {
                     bed
+                } else if let Some(&(chair, table)) = layout.dining_pairs().get(offset / 2) {
+                    if *name == "Chair" { chair } else { table }
                 } else if legacy {
                     MapCoord {
                         x: if centre.x + shift <= part.area.max.x {
@@ -509,6 +518,47 @@ mod tests {
             tick: GameTick(100),
             state_hash: Digest32::ZERO,
         }
+    }
+
+    #[test]
+    fn every_dining_pair_has_distinct_interior_tiles_and_a_connected_aisle() -> Result<()> {
+        let origin = MapCoord::new(2, 6, 10);
+        for table_count in 1..=8 {
+            for columns in 1..=4 {
+                let layout = BlueprintPlanner.layout(
+                    origin,
+                    BlueprintTemplate::DiningPairs {
+                        table_count,
+                        columns,
+                    },
+                )?;
+                let area = layout.excavations()[0].area;
+                let occupied: std::collections::BTreeSet<_> = layout
+                    .dining_pairs()
+                    .iter()
+                    .flat_map(|&(chair, table)| [chair, table])
+                    .collect();
+                assert_eq!(occupied.len(), usize::from(table_count) * 2);
+                for &(chair, table) in layout.dining_pairs() {
+                    assert_eq!(table, MapCoord::new(chair.x + 1, chair.y, chair.z));
+                    assert!(area.contains(chair) && area.contains(table));
+                    assert!((origin.x..=table.x).all(|x| {
+                        !occupied.contains(&MapCoord::new(x, table.y - 1, table.z))
+                    }));
+                    assert!((origin.y..table.y).all(|y| {
+                        !occupied.contains(&MapCoord::new(origin.x, y, table.z))
+                    }));
+                }
+            }
+        }
+        for (table_count, columns) in [(0, 4), (9, 4), (1, 0), (1, 5)] {
+            assert!(
+                BlueprintPlanner
+                    .layout(origin, BlueprintTemplate::DiningPairs { table_count, columns })
+                    .is_err()
+            );
+        }
+        Ok(())
     }
 
     #[test]
