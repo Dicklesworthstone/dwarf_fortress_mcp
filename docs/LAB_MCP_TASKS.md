@@ -412,7 +412,9 @@ quiescence. The supervisor and stdio server share a caller-owned Asupersync life
 worker is detached.
 
 Transport-owned cancellation is recorded as two ordered
-`task_cancel_phase` engine events in a `dfmcp.replay.bundle/2` transcript.
+`task_cancel_phase` engine events. New captures use a
+`dfmcp.replay.bundle/3` transcript; the event shape and evidence contract remain
+identical to the original version 2 format.
 Each event identifies the exact original plan and the `request` or
 `finalize` phase. Recording holds the same engine ownership as the drain and
 retains failed phases, including any partial effects. Both before and after
@@ -452,11 +454,19 @@ is rederived over the same normalized material; invalid certificate identities
 remain distinguishable. Withdrawal proof verification and comparison are
 internal replay evidence, not renewed pursuit or authority.
 
-Tool-only sessions retain exactly the existing `dfmcp.replay.bundle/1`
-encoding and digest domain. Version 2 has a separate digest domain and adds
-request counters to tool entries. Passive observation Task cancellation has no
-engine effects and adds no drain events. Replay reproduces engine transitions,
-not process-local Task identities, Task notifications or native game behavior.
+Archived `dfmcp.replay.bundle/1` and `/2` transcripts retain their original
+comparison rules, encoding and digest domains. Replaying either generation
+re-exports that same generation, without inventing semantic result commitments.
+New tool-only and Task-event captures use `/3`, which retains request counters
+and adds explicit per-tool result commitments. Eligible delivered query rows,
+coverage, observations and plan reviews are compared even when their world
+anchor is unchanged. Unsupported result types are explicitly counted as
+outcome-only. The entire Agent Turn packet, including Task discovery and
+process-local handles, is outside that result profile. See
+[`LAB_REPLAY_RESULTS.md`](LAB_REPLAY_RESULTS.md) for its precise coverage.
+Passive observation Task cancellation still has no engine effects and adds no
+drain events. Replay reproduces engine transitions; it does not reconstruct
+process-local Task identities, Task notifications or native game behavior.
 
 ## Capacity and retention
 
@@ -532,8 +542,10 @@ The Task replay regressions cover exact export/replay/re-export equality,
 each upstream cancellation entry, preservation of a different active plan and
 pending review, verified withdrawal history, failed and partially applied phases, passive observers,
 before-effect tampering refusal, output evidence divergence, closed input
-validation and truncated or incomplete recording. The schema script checks
-both generations and field-mutation shapes; it is not an execution test.
+validation and truncated or incomplete recording. The semantic replay
+regressions also preserve exact version 1 and version 2 re-export and localize
+changed read results at an unchanged world anchor. The schema script checks
+all three generations and field-mutation shapes; it is not an execution test.
 
 ## Foreground stop of a selected original plan
 

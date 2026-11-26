@@ -1,5 +1,35 @@
 # Implementation Status
 
+## Unreleased — Verify semantic read results in replay bundles
+
+New laboratory captures use replay.bundle/3 with a versioned commitment for each
+tool's declared result profile. Stateless query rows, ordering, projections,
+coverage, ordinary continuations, plan reviews, entity explanations, diagnostics
+and structured errors can now diverge even when the world anchor and success code
+stay unchanged. Replay reports the earliest result mismatch and explicitly lists
+every outcome-only entry, including unsupported stateful/opaque result shapes.
+
+The bounded profile uses explicit canonical object ordering and exact typed
+owner/telemetry exceptions; user data is never recursively stripped. Agent Turn
+presentation and process-local Task/query monitoring are outside this profile.
+Legacy /1 and /2 transcripts preserve their schema, hash domain, original header
+and canonical re-export encoding. Task drain witness semantics remain unchanged.
+Malformed commitments and unknown profiles are refused before session allocation.
+
+Eight final actual-source result-profile tests pass in a stub-free component
+harness with real dfmcp-core and the exact locked serde_json dependency subset.
+The production module hash stayed stable. Python schema validation accepts the
+three generations and rejects all 37 mutation cases. Scoped formatting,
+whitespace checks and independent source review pass. Actual-facade query
+divergence, legacy-header/Task replay and all-scenario regression sources were
+added or strengthened; their execution and the enhanced real-stdio demonstration
+remain unverified because the full MCP dependency build was killed under resource
+pressure. This is not full MCP qualification or completion of all fourteen
+determinism capture domains.
+
+Owner: `df-replay-equality-campaign-test021-c7c` (broader campaign remains open).
+Coverage and usage: [LAB_REPLAY_RESULTS.md](docs/LAB_REPLAY_RESULTS.md).
+
 ## Unreleased — Preserve original no-work stock history for recovery
 
 Scalar and portfolio stock watches now expose bounded canonical checkpoints for

@@ -51,7 +51,9 @@ def main():
     accepted = mutated(lambda b: b.update(replayable=False, not_replayable_reason="shared fortress"))
     assert validator.is_valid(accepted)
     v2_rejected = check_task_bundle_schema(golden)
-    print(f"replay bundle schemas: v1 golden valid, {len(rejected)} legacy and {v2_rejected} Task-event mutations rejected")
+    v3_rejected = check_semantic_bundle_schema(golden)
+    print(f"replay bundle schemas: v1 golden valid, {len(rejected)} legacy, "
+          f"{v2_rejected} Task-event and {v3_rejected} semantic-profile mutations rejected")
 
 
 def check_task_bundle_schema(golden):
@@ -132,6 +134,94 @@ def check_task_bundle_schema(golden):
     ]:
         value = changed(edit)
         assert v2_digest(value["calls"]) != bundle["calls_digest"]
+    return len(mutations)
+
+
+def check_semantic_bundle_schema(golden):
+    """Validate the explicit profile contract; these fixtures are not execution evidence."""
+    schema = json.loads((ROOT / "schemas/replay.bundle.v3.schema.json").read_text())
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema)
+    bundle = copy.deepcopy(golden)
+    bundle["schema"] = "dfmcp.replay.bundle/3"
+    payload_profile = "dfmcp.replay.tool-payload/1"
+    outcome_profile = "dfmcp.replay.outcome-anchor/1"
+    for index, call in enumerate(bundle["calls"]):
+        call["next_request_after"] = str(index + 1)
+        call["result_commitment"] = {
+            "profile": outcome_profile, "digest": None, "reason": "tool_not_in_profile",
+        }
+    bundle["calls"][-1]["result_commitment"] = {
+        "profile": payload_profile, "digest": "ab" * 32, "reason": None,
+    }
+
+    def v3_digest(calls):
+        compact = json.dumps(calls, separators=(",", ":"), ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(b"dfmcp-replay-bundle-calls/3\0" + compact.encode()).hexdigest()
+
+    bundle["calls_digest"] = v3_digest(bundle["calls"])
+    assert validator.is_valid(bundle), list(validator.iter_errors(bundle))
+    assert bundle["calls_digest"] != calls_digest(bundle["calls"])
+    for version, path in [
+        ("dfmcp.replay.bundle/1", "replay.bundle.schema.json"),
+        ("dfmcp.replay.bundle/2", "replay.bundle.v2.schema.json"),
+    ]:
+        legacy = Draft202012Validator(json.loads((ROOT / "schemas" / path).read_text()))
+        assert not legacy.is_valid(bundle), f"{version} must reject semantic entries"
+        changed = copy.deepcopy(bundle)
+        changed["schema"] = version
+        assert not validator.is_valid(changed), "v3 cannot reinterpret legacy envelopes"
+
+    def changed(edit):
+        value = copy.deepcopy(bundle)
+        edit(value)
+        return value
+
+    mutations = [
+        changed(lambda b: b["calls"][-1].pop("result_commitment")),
+        changed(lambda b: b["calls"][-1].pop("next_request_after")),
+        changed(lambda b: b["calls"][-1].update(result_commitment=None)),
+        changed(lambda b: b["calls"][-1]["result_commitment"].update(profile="dfmcp.replay.tool-payload/2")),
+        changed(lambda b: b["calls"][-1]["result_commitment"].update(digest="AB" * 32)),
+        changed(lambda b: b["calls"][-1]["result_commitment"].update(digest="ab" * 31)),
+        changed(lambda b: b["calls"][-1]["result_commitment"].update(digest=None)),
+        changed(lambda b: b["calls"][-1]["result_commitment"].update(reason="tool_not_in_profile")),
+        changed(lambda b: b["calls"][-1]["result_commitment"].update(extra=True)),
+        changed(lambda b: b["calls"][0]["result_commitment"].update(digest="ab" * 32)),
+        changed(lambda b: b["calls"][0]["result_commitment"].update(reason=None)),
+        changed(lambda b: b["calls"][0]["result_commitment"].update(reason="invented exclusion")),
+        changed(lambda b: b["calls"][0]["result_commitment"].pop("digest")),
+        changed(lambda b: b.update(extra=True)),
+    ]
+    for index, value in enumerate(mutations):
+        assert not validator.is_valid(value), f"semantic profile mutation {index} accepted"
+
+    # The versioned result domain and canonical object order are independently
+    # exercised by replay_result.rs's same structured-error known-material test.
+    material = {
+        "tool": "fortress.query", "result": {
+            "ok": False, "error": {
+                "code": "invalid_request", "message": "bad filter", "details": {"b": 2, "a": 1},
+            },
+        },
+    }
+    compact = json.dumps(material, separators=(",", ":"), ensure_ascii=False, sort_keys=True)
+    digest = hashlib.sha256(b"dfmcp-replay-tool-payload/1\0" + compact.encode()).hexdigest()
+    alternate = json.loads('{"result":{"error":{"details":{"a":1,"b":2},'
+                           '"message":"bad filter","code":"invalid_request"},"ok":false},'
+                           '"tool":"fortress.query"}')
+    alternative_bytes = json.dumps(alternate, separators=(",", ":"), sort_keys=True).encode()
+    assert hashlib.sha256(b"dfmcp-replay-tool-payload/1\0" + alternative_bytes).hexdigest() == digest
+    material["result"]["error"]["details"]["b"] = 3
+    changed_bytes = json.dumps(material, separators=(",", ":"), sort_keys=True).encode()
+    assert hashlib.sha256(b"dfmcp-replay-tool-payload/1\0" + changed_bytes).hexdigest() != digest
+    for edit in [
+        lambda b: b["calls"][-1]["result_commitment"].update(digest="cd" * 32),
+        lambda b: b["calls"][0]["result_commitment"].update(reason="query_mode_not_in_profile"),
+    ]:
+        value = changed(edit)
+        assert validator.is_valid(value)
+        assert v3_digest(value["calls"]) != bundle["calls_digest"], "coverage is part of the transcript seal"
     return len(mutations)
 
 

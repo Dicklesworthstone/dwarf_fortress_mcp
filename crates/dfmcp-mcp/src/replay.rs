@@ -1,10 +1,11 @@
 //! Deterministic replay bundles for laboratory sessions.
 //!
 //! Every tool call is recorded with its exact arguments, outcome and canonical
-//! anchor. Tool-only logs retain the unchanged dfmcp.replay.bundle/1 encoding.
-//! Application-owned Task drain phases select /2, adding exact input/output
-//! witnesses and normalized cancellation evidence. Neither format reconstructs
-//! Tasks or reaches a native adapter.
+//! anchor. New /3 logs additionally compare versioned semantic tool payloads
+//! with explicit coverage for unsupported results. Application-owned Task drain
+//! phases retain /2's exact witnesses and normalized cancellation evidence.
+//! Legacy /1 and /2 transcripts keep their original comparison and re-export
+//! encoding. No format reconstructs Tasks or reaches a native adapter.
 //!
 //! Shared or durable sessions depend on inputs outside their own call log and
 //! remain nonreplayable. The replayer validates the entire transcript before
@@ -13,6 +14,8 @@
 use dfmcp_core::{Digest32, StateAnchor};
 use serde_json::{Value, json};
 
+#[path = "replay_result.rs"]
+mod result;
 #[path = "replay_validation.rs"]
 mod validation;
 
@@ -20,10 +23,42 @@ mod validation;
 pub const BUNDLE_SCHEMA: &str = "dfmcp.replay.bundle/1";
 /// Schema identifier of a bundle containing original-plan Task drains.
 pub const TASK_BUNDLE_SCHEMA: &str = "dfmcp.replay.bundle/2";
+/// Schema identifier of new captures with explicit semantic result coverage.
+pub const SEMANTIC_BUNDLE_SCHEMA: &str = "dfmcp.replay.bundle/3";
 /// Most entries one session records; later entries mark the log truncated.
 pub const MAX_RECORDED_CALLS: usize = 4_096;
 /// Largest bundle the replayer accepts.
 pub const MAX_BUNDLE_BYTES: usize = 32 * 1024 * 1024;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum BundleGeneration {
+    ToolsV1,
+    TasksV2,
+    #[default]
+    SemanticV3,
+}
+
+impl BundleGeneration {
+    fn schema(self) -> &'static str {
+        match self {
+            Self::ToolsV1 => BUNDLE_SCHEMA,
+            Self::TasksV2 => TASK_BUNDLE_SCHEMA,
+            Self::SemanticV3 => SEMANTIC_BUNDLE_SCHEMA,
+        }
+    }
+
+    fn has_request_frontier(self) -> bool {
+        self != Self::ToolsV1
+    }
+
+    fn digest(self, calls: &Value) -> String {
+        match self {
+            Self::ToolsV1 => calls_digest(calls),
+            Self::TasksV2 => task_calls_digest(calls),
+            Self::SemanticV3 => semantic_calls_digest(calls),
+        }
+    }
+}
 
 /// One recorded tool call.
 #[derive(Clone, Debug)]
@@ -33,8 +68,10 @@ pub(crate) struct RecordedCall {
     ok: bool,
     error_code: Option<String>,
     anchor_after: Option<StateAnchor>,
-    /// Serialized only in /2, preserving every existing /1 byte.
+    /// Serialized in /2 and /3, preserving every existing /1 byte.
     next_request_after: u128,
+    /// Serialized only in /3; fixed-size commitment with an explicit profile.
+    result_commitment: Value,
 }
 
 /// An application-owned engine transition, not a public fortress tool.
@@ -60,6 +97,10 @@ enum RecordedEntry {
 pub(crate) struct ReplayLog {
     calls: Vec<RecordedEntry>,
     truncated: bool,
+    /// Replaying a legacy archive pins its writer to that original generation.
+    generation: BundleGeneration,
+    /// Original server version and note of a replayed /1 or /2 archive.
+    legacy_header: Option<(String, String)>,
     /// Why the log cannot be replayed from its own contents, if it cannot.
     not_replayable: Option<&'static str>,
 }
@@ -77,10 +118,12 @@ impl ReplayLog {
         budget: dfmcp_core::WorkBudget,
         started: std::time::Instant,
     ) -> dfmcp_core::Result<()> {
-        let exhausted = || dfmcp_core::DfmcpError::new(
-            dfmcp_core::ErrorCode::BudgetExceeded,
-            "complete replay source exceeds the negotiated record, byte or wall budget",
-        );
+        let exhausted = || {
+            dfmcp_core::DfmcpError::new(
+                dfmcp_core::ErrorCode::BudgetExceeded,
+                "complete replay source exceeds the negotiated record, byte or wall budget",
+            )
+        };
         if self.calls.len() > budget.max_entities as usize {
             return Err(exhausted());
         }
@@ -109,6 +152,9 @@ impl ReplayLog {
             wall: std::time::Duration::from_millis(budget.max_wall_millis),
             started,
         };
+        if let Some(header) = &self.legacy_header {
+            serde_json::to_writer(&mut limit, header).map_err(|_| exhausted())?;
+        }
         for entry in &self.calls {
             match entry {
                 RecordedEntry::Tool(call) => serde_json::to_writer(&mut limit, &call.arguments),
@@ -136,7 +182,10 @@ impl ReplayLog {
     pub(crate) fn record_task_drain(&mut self, event: RecordedTaskDrain) {
         let predecessor = self.calls.last().map(|entry| match entry {
             RecordedEntry::Tool(call) => (
-                call.anchor_after.as_ref().map(anchor_json).unwrap_or(Value::Null),
+                call.anchor_after
+                    .as_ref()
+                    .map(anchor_json)
+                    .unwrap_or(Value::Null),
                 json!(call.next_request_after.to_string()),
             ),
             RecordedEntry::TaskDrain(event) => (
@@ -155,6 +204,9 @@ impl ReplayLog {
             );
         }
         if self.has_capacity() {
+            if self.generation == BundleGeneration::ToolsV1 {
+                self.generation = BundleGeneration::TasksV2;
+            }
             self.calls.push(RecordedEntry::TaskDrain(event));
         }
     }
@@ -202,6 +254,7 @@ pub(crate) fn record(
             receipt["previous_budget"]["max_output_tokens"].clone();
         arguments["admitted_max_output_tokens"] = receipt["budget"]["max_output_tokens"].clone();
     }
+    let result_commitment = result::commitment(tool, &arguments, payload, &target);
     let Ok(mut guard) = session.lock() else {
         return;
     };
@@ -242,10 +295,11 @@ pub(crate) fn record(
         error_code,
         anchor_after,
         next_request_after,
+        result_commitment,
     }));
 }
 
-fn calls_json(log: &ReplayLog, task_events: bool) -> Value {
+fn calls_json(log: &ReplayLog) -> Value {
     Value::Array(
         log.calls
             .iter()
@@ -260,8 +314,11 @@ fn calls_json(log: &ReplayLog, task_events: bool) -> Value {
                         "error_code": call.error_code,
                         "anchor_after": call.anchor_after.as_ref().map(anchor_json),
                     });
-                    if task_events {
+                    if log.generation.has_request_frontier() {
                         value["next_request_after"] = json!(call.next_request_after.to_string());
+                    }
+                    if log.generation == BundleGeneration::SemanticV3 {
+                        value["result_commitment"] = call.result_commitment.clone();
                     }
                     value
                 }
@@ -295,19 +352,34 @@ fn task_calls_digest(calls: &Value) -> String {
     Digest32::of_bytes(&bytes).to_hex()
 }
 
-/// Export a session's log without changing legacy tool-only bundle bytes.
+fn semantic_calls_digest(calls: &Value) -> String {
+    let mut bytes = b"dfmcp-replay-bundle-calls/3\0".to_vec();
+    if result::canonical_json(calls, &mut bytes).is_err() {
+        // An unencodable transcript cannot produce a valid replay seal.
+        return String::new();
+    }
+    Digest32::of_bytes(&bytes).to_hex()
+}
+
+/// Export new semantic captures or the exact generation of a replayed archive.
 pub(crate) fn bundle_json(log: &ReplayLog) -> Value {
-    let task_events = log.calls.iter().any(|entry| matches!(entry, RecordedEntry::TaskDrain(_)));
-    let calls = calls_json(log, task_events);
+    let calls = calls_json(log);
     json!({
-        "schema": if task_events { TASK_BUNDLE_SCHEMA } else { BUNDLE_SCHEMA },
-        "server_version": env!("CARGO_PKG_VERSION"),
+        "schema": log.generation.schema(),
+        "server_version": log.legacy_header.as_ref().map(|header| header.0.as_str())
+            .unwrap_or(env!("CARGO_PKG_VERSION")),
         "replayable": log.not_replayable.is_none(),
         "not_replayable_reason": log.not_replayable,
         "truncated": log.truncated,
-        "calls_digest": if task_events { task_calls_digest(&calls) } else { calls_digest(&calls) },
+        "calls_digest": log.generation.digest(&calls),
         "calls": calls,
-        "note": "replay with `dwarf-fortress-mcp replay <bundle.json>`; every call is re-executed in a fresh laboratory session and compared by outcome and resulting canonical anchor"
+        "note": if let Some(header) = &log.legacy_header {
+            header.1.as_str()
+        } else if log.generation == BundleGeneration::SemanticV3 {
+            "replay with `dwarf-fortress-mcp replay <bundle.json>`; fresh laboratory execution compares outcomes, canonical anchors, request frontiers and each tool's declared result profile; outcome-only entries do not claim payload equality"
+        } else {
+            "replay with `dwarf-fortress-mcp replay <bundle.json>`; every call is re-executed in a fresh laboratory session and compared by outcome and resulting canonical anchor"
+        }
     })
 }
 
@@ -319,11 +391,22 @@ fn opt_watch_ids(args: &Value) -> Result<Option<Vec<String>>, String> {
     let Some(value) = args.get("watch_ids").filter(|value| !value.is_null()) else {
         return Ok(None);
     };
-    let handles = value.as_array().filter(|handles| !handles.is_empty() && handles.len() <= 8)
-        .ok_or_else(|| "recorded watch_ids must be a nonempty set of at most eight strings".to_owned())?;
-    handles.iter().map(|handle| handle.as_str().map(str::to_owned)
-        .ok_or_else(|| "recorded watch_ids contains a non-string handle".to_owned()))
-        .collect::<Result<Vec<_>, _>>().map(Some)
+    let handles = value
+        .as_array()
+        .filter(|handles| !handles.is_empty() && handles.len() <= 8)
+        .ok_or_else(|| {
+            "recorded watch_ids must be a nonempty set of at most eight strings".to_owned()
+        })?;
+    handles
+        .iter()
+        .map(|handle| {
+            handle
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "recorded watch_ids contains a non-string handle".to_owned())
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
 }
 
 // Keep semantically invalid, well-typed selections intact: refused calls are
@@ -468,24 +551,22 @@ fn divergence(seq: usize, tool: &str, field: &str, expected: &Value, observed: &
 #[must_use]
 pub fn replay_bundle(bundle: &Value) -> Value {
     let refuse = |reason: String| json!({"ok": false, "replayed": 0, "error": reason});
-    let task_events = match validation::validate(bundle) {
-        Ok(task_events) => task_events,
+    let generation = match validation::validate(bundle) {
+        Ok(generation) => generation,
         Err(reason) => return refuse(reason),
     };
     if bundle["replayable"] != true {
         return refuse(format!(
             "bundle is not replayable: {}",
-            bundle["not_replayable_reason"].as_str().unwrap_or("unspecified")
+            bundle["not_replayable_reason"]
+                .as_str()
+                .unwrap_or("unspecified")
         ));
     }
     let Some(calls) = bundle["calls"].as_array() else {
         return refuse("bundle has no calls array".to_owned());
     };
-    let observed_digest = if task_events {
-        task_calls_digest(&bundle["calls"])
-    } else {
-        calls_digest(&bundle["calls"])
-    };
+    let observed_digest = generation.digest(&bundle["calls"]);
     if observed_digest != bundle["calls_digest"].as_str().unwrap_or_default() {
         return refuse("bundle calls do not match calls_digest".to_owned());
     }
@@ -508,6 +589,25 @@ pub fn replay_bundle(bundle: &Value) -> Value {
         let (ok, error_code, created) = outcome(&payload);
         if seq == 0 {
             session = created;
+            // The first call is already recorded by the facade. Its stored
+            // commitment is harmless in a legacy log: the pinned writer omits
+            // all newer fields, preserving original archive bytes.
+            if let Some(id) = session.as_deref() {
+                if let Ok(handle) = crate::server::lookup_session_str(id) {
+                    if let Ok(mut guard) = handle.lock() {
+                        guard.replay.generation = generation;
+                        if generation != BundleGeneration::SemanticV3 {
+                            guard.replay.legacy_header = Some((
+                                bundle["server_version"]
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .to_owned(),
+                                bundle["note"].as_str().unwrap_or_default().to_owned(),
+                            ));
+                        }
+                    }
+                }
+            }
         }
         for (field, observed) in [("ok", json!(ok)), ("error_code", json!(error_code))] {
             if observed != call[field] {
@@ -538,8 +638,10 @@ pub fn replay_bundle(bundle: &Value) -> Value {
             .and_then(|id| crate::server::lookup_session_str(id).ok())
             .and_then(|s| {
                 s.lock().ok().map(|g| {
-                    (anchor_json(&g.adapter.snapshot().anchor()),
-                        json!(crate::server::read_context(&g).request_id.get().to_string()))
+                    (
+                        anchor_json(&g.adapter.snapshot().anchor()),
+                        json!(crate::server::read_context(&g).request_id.get().to_string()),
+                    )
                 })
             });
         let (anchor_after, next_request_after) = observed.unwrap_or((Value::Null, Value::Null));
@@ -549,11 +651,25 @@ pub fn replay_bundle(bundle: &Value) -> Value {
                 "first_divergence": divergence(seq, tool, "anchor_after", &call["anchor_after"], &anchor_after),
             });
         }
-        if task_events && next_request_after != call["next_request_after"] {
+        if generation.has_request_frontier() && next_request_after != call["next_request_after"] {
             return json!({
                 "ok": false, "replayed": seq + 1,
                 "first_divergence": divergence(seq, tool, "next_request_after", &call["next_request_after"], &next_request_after),
             });
+        }
+        if generation == BundleGeneration::SemanticV3 {
+            let observed = result::commitment(
+                tool,
+                &call["arguments"],
+                &payload,
+                session.as_deref().unwrap_or_default(),
+            );
+            if observed != call["result_commitment"] {
+                return json!({
+                    "ok": false, "replayed": seq + 1,
+                    "first_divergence": divergence(seq, tool, "result_commitment", &call["result_commitment"], &observed),
+                });
+            }
         }
     }
     json!({
@@ -561,7 +677,40 @@ pub fn replay_bundle(bundle: &Value) -> Value {
         "replayed": calls.len(),
         "first_divergence": null,
         "replay_session_id": session,
-        "note": "every call reproduced its recorded outcome and canonical anchor",
+        "verification": verification(calls, generation),
+        "note": if generation == BundleGeneration::SemanticV3 {
+            "every call reproduced its outcome, anchor, request frontier and declared result commitment; see verification for semantic coverage"
+        } else {
+            "legacy archive reproduced outcomes and canonical anchors without semantic tool-result commitments"
+        },
+    })
+}
+
+fn verification(calls: &[Value], generation: BundleGeneration) -> Value {
+    let semantic = generation == BundleGeneration::SemanticV3;
+    let mut semantic_result_calls = 0usize;
+    let mut task_drain_events = 0usize;
+    let mut excluded_results = Vec::new();
+    for (seq, call) in calls.iter().enumerate() {
+        if call["event"] == "task_cancel_phase" {
+            task_drain_events += 1;
+        } else if semantic && call["result_commitment"]["profile"] == result::PAYLOAD_PROFILE {
+            semantic_result_calls += 1;
+        } else {
+            excluded_results.push(json!({
+                "seq":seq, "tool":call["tool"],
+                "reason":if semantic { call["result_commitment"]["reason"].clone() }
+                    else { json!("legacy_bundle_without_result_commitment") },
+            }));
+        }
+    }
+    json!({
+        "mode":if semantic { "semantic_tool_results" } else { "outcome_and_anchor" },
+        "result_profile":semantic.then_some(result::PAYLOAD_PROFILE),
+        "semantic_result_calls":semantic_result_calls,
+        "outcome_only_calls":excluded_results.len(),
+        "task_drain_events":task_drain_events,
+        "excluded_results":excluded_results,
     })
 }
 
@@ -573,7 +722,10 @@ fn replay_task_drain(seq: usize, call: &Value, session_id: &str) -> Option<Value
         return Some(json!({"ok":false,"replayed":seq,"error":"missing original plan selector"}));
     };
     let observed = match task_session::replay::checked_drain(
-        session_id, requested, call["arguments"]["phase"] == "finalize", &call["before"],
+        session_id,
+        requested,
+        call["arguments"]["phase"] == "finalize",
+        &call["before"],
     ) {
         Ok(task_session::replay::CheckedPhase::InputDivergence(before)) => {
             return Some(json!({
@@ -582,7 +734,11 @@ fn replay_task_drain(seq: usize, call: &Value, session_id: &str) -> Option<Value
                 "event_effects_attempted":false,
             }));
         }
-        Ok(task_session::replay::CheckedPhase::Executed { result, after, evidence_digest }) => json!({
+        Ok(task_session::replay::CheckedPhase::Executed {
+            result,
+            after,
+            evidence_digest,
+        }) => json!({
             "ok":result.is_ok(),
             "error_code":result.as_ref().err().map(|error| error.code.as_str()),
             "after":after,
@@ -613,6 +769,10 @@ fn replay_task_drain(seq: usize, call: &Value, session_id: &str) -> Option<Value
 #[cfg(test)]
 #[path = "replay_task_tests.rs"]
 mod task_tests;
+
+#[cfg(test)]
+#[path = "replay_semantic_tests.rs"]
+mod semantic_tests;
 
 #[cfg(test)]
 mod tests {
@@ -673,7 +833,7 @@ mod tests {
         parsed(&f::fortress_observe(Some(session.clone())))?;
 
         let bundle = crate::server::replay_bundle_for(&session)?;
-        assert_eq!(bundle["schema"], BUNDLE_SCHEMA);
+        assert_eq!(bundle["schema"], SEMANTIC_BUNDLE_SCHEMA);
         assert_eq!(bundle["replayable"], true);
         assert_eq!(bundle["calls"].as_array().map(Vec::len), Some(8));
 
@@ -695,14 +855,17 @@ mod tests {
                     "/../../",
                     "schemas/examples/replay_bundle_v1.json"
                 ),
-                serde_json::to_string_pretty(&bundle)? + "\n",
+                serde_json::to_string_pretty(&semantic_tests::legacy(
+                    &bundle,
+                    BundleGeneration::ToolsV1,
+                )?)? + "\n",
             )?;
         }
 
         // Changing a recorded wait localizes the divergence to that call.
         let mut tampered = bundle.clone();
         tampered["calls"][4]["arguments"]["max_game_ticks"] = json!(99);
-        tampered["calls_digest"] = json!(calls_digest(&tampered["calls"]));
+        tampered["calls_digest"] = json!(semantic_calls_digest(&tampered["calls"]));
         let report = replay_bundle(&tampered);
         assert_eq!(report["ok"], false);
         assert_eq!(report["first_divergence"]["seq"], 4, "{report}");
@@ -725,6 +888,12 @@ mod tests {
         let report = replay_bundle(&golden);
         assert_eq!(report["ok"], true, "golden replay diverged: {report}");
         assert_eq!(report["first_divergence"], Value::Null);
+        assert_eq!(report["verification"]["mode"], "outcome_and_anchor");
+        assert_eq!(report["verification"]["semantic_result_calls"], 0);
+        let replayed = report["replay_session_id"]
+            .as_str()
+            .ok_or("replay session")?;
+        assert_eq!(crate::server::replay_bundle_for(replayed)?, golden);
         Ok(())
     }
 
@@ -891,11 +1060,19 @@ mod tests {
             parsed(&f::fortress_observe(s()))?;
 
             let bundle = crate::server::replay_bundle_for(&session)?;
+            assert_eq!(bundle["schema"], SEMANTIC_BUNDLE_SCHEMA);
             assert_eq!(bundle["replayable"], true, "{scenario}");
             let calls = bundle["calls"].as_array().map_or(0, Vec::len);
             assert!(calls >= 18, "{scenario}: {calls} calls");
             let report = replay_bundle(&bundle);
             assert_eq!(report["ok"], true, "{scenario}: {report}");
+            assert_eq!(report["verification"]["mode"], "semantic_tool_results");
+            assert!(
+                report["verification"]["semantic_result_calls"]
+                    .as_u64()
+                    .is_some_and(|count| count >= 8),
+                "{scenario}: expected semantic query/review/observation/explanation/doctor coverage: {report}"
+            );
             assert_eq!(report["replayed"], calls);
             let replayed = report["replay_session_id"]
                 .as_str()

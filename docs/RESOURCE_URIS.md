@@ -81,8 +81,10 @@ historical continuity and cannot supply fresh mutation preconditions.
 Replay resource reads leave the call log untouched. For a `dfmcp.replay.page/1`
 response, follow `next`, concatenate `part` values in byte-offset order,
 and check `total_bytes` and the SHA-256 `digest` of the UTF-8 bytes. The
-result is the original `dfmcp.replay.bundle/1` or `/2` document accepted by
-the replay CLI. The same read authority is required for each page. A changed
+result is the exact `dfmcp.replay.bundle/3` document for new recordings, or the
+original `/1` or `/2` document for replayed legacy archives. All are accepted by
+the replay CLI. Version 3 adds [explicit semantic result coverage](LAB_REPLAY_RESULTS.md).
+The same read authority is required for each page. A changed
 transcript gives `cursor_gap` and requires a fresh read of `replay`.
 The full source still has to fit the session's record, byte and time budgets.
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Compare read payloads during deterministic replay
+
+- Record new replay.bundle/3 transcripts with semantic tool-result commitments,
+  catching changed rows, ordering, coverage and review details at unchanged anchors.
+- Report exact comparison coverage and explicit outcome-only exclusions; preserve
+  legacy /1 and /2 headers, encodings and Task drain witnesses.
+- Bound canonical result hashing and normalize only declared operational and
+  presentation paths without rewriting similarly named user fields.
+- Extend the export demonstration with separately resealed query and wait
+  mutations. Eight actual-source profile tests and 37 schema rejection cases
+  pass; full MCP/facade execution remains unverified.
+
 ## Unreleased — Retain original stock-watch lifecycle across recovery
 
 - Add canonical scalar and portfolio checkpoints with immutable target/timing

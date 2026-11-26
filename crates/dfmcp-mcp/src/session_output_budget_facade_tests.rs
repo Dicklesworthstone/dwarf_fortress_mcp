@@ -302,7 +302,8 @@ fn reordered_output_budget_transitions_cannot_claim_replay_equality() -> TestRes
     calls.swap(1, 2);
     calls[1]["seq"] = json!(1);
     calls[2]["seq"] = json!(2);
-    let mut bytes = b"dfmcp-replay-bundle-calls/1\0".to_vec();
+    assert_eq!(bundle["schema"], crate::replay::SEMANTIC_BUNDLE_SCHEMA);
+    let mut bytes = b"dfmcp-replay-bundle-calls/3\0".to_vec();
     bytes.extend_from_slice(bundle["calls"].to_string().as_bytes());
     bundle["calls_digest"] = json!(dfmcp_core::Digest32::of_bytes(&bytes).to_hex());
     let report = crate::replay::replay_bundle(&bundle);

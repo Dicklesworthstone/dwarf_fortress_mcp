@@ -56,7 +56,9 @@ fn commit(session: &str, areas: &[(i32, i32)]) -> TestResult<(String, Vec<Action
 }
 
 fn rehash(bundle: &mut Value) {
-    bundle["calls_digest"] = json!(if bundle["schema"] == TASK_BUNDLE_SCHEMA {
+    bundle["calls_digest"] = json!(if bundle["schema"] == SEMANTIC_BUNDLE_SCHEMA {
+        semantic_calls_digest(&bundle["calls"])
+    } else if bundle["schema"] == TASK_BUNDLE_SCHEMA {
         task_calls_digest(&bundle["calls"])
     } else {
         calls_digest(&bundle["calls"])
@@ -65,7 +67,7 @@ fn rehash(bundle: &mut Value) {
 
 fn exact_roundtrip(session: &str) -> TestResult<Value> {
     let bundle = crate::server::replay_bundle_for(session)?;
-    assert_eq!(bundle["schema"], TASK_BUNDLE_SCHEMA);
+    assert_eq!(bundle["schema"], SEMANTIC_BUNDLE_SCHEMA);
     assert_eq!(bundle["replayable"], true, "{bundle}");
     let report = replay_bundle(&bundle);
     assert_eq!(report["ok"], true, "{report}");
@@ -185,7 +187,7 @@ fn passive_observer_cancellation_leaves_legacy_engine_transcript_unchanged() -> 
     store.request_cancellation(&id)?;
     let after = crate::server::replay_bundle_for(&session)?;
     assert_eq!(before, after);
-    assert_eq!(after["schema"], BUNDLE_SCHEMA);
+    assert_eq!(after["schema"], SEMANTIC_BUNDLE_SCHEMA);
     assert_eq!(replay_bundle(&after)["ok"], true);
     Ok(())
 }

@@ -628,12 +628,19 @@ candidates and grant no dispatch or original-goal authority. See
 Every tool call of a laboratory session is recorded with its exact arguments,
 outcome and resulting canonical anchor. `df://session/{id}/replay`
 (requires `observe`) exports a bounded transcript with a `calls_digest`.
-Tool-only sessions retain the existing `dfmcp.replay.bundle/1` bytes.
-Transport-owned original-plan Task cancellation selects
-`dfmcp.replay.bundle/2`: both request and finalization phases are recorded
-under engine ownership, with exact original selectors, before/after witnesses
-and result evidence, including failed or partially applied phases. Version 2
-also binds each tool's next request counter and uses its own digest domain.
+New sessions record `dfmcp.replay.bundle/3`. Each tool entry binds its next
+request counter and an explicit result commitment. Eligible read and plan
+payloads compare rows, ordering, projections, coverage, reviews and structured
+errors even when the canonical world anchor stays unchanged. Unsupported result
+shapes explicitly retain outcome/anchor comparison; the report lists them.
+See [semantic result coverage](LAB_REPLAY_RESULTS.md) for the exact profile.
+
+Original-plan Task cancellation retains the version-two engine-event contract:
+request and finalization phases record exact original selectors, before/after
+witnesses and result evidence, including failed or partially applied phases.
+Archived version-one tool transcripts and version-two Task transcripts remain
+readable and re-export in their original encoding and digest domain. They are
+reported as legacy outcome/anchor verification, without invented result hashes.
 
 `dwarf-fortress-mcp replay bundle.json` validates the entire transcript
 before opening one fresh private session, then re-executes it through the
@@ -647,16 +654,16 @@ the outcome and complete normalized result evidence. No recorded witness
 grants authority or replaces an original action. See
 [`LAB_MCP_TASKS.md`](LAB_MCP_TASKS.md) for the precise owner normalization.
 
-Each format has a separate `dfmcp-replay-bundle-calls/1` or
-`dfmcp-replay-bundle-calls/2` SHA-256 domain, followed by a NUL byte and compact
+Each format has a separate `dfmcp-replay-bundle-calls/1`, `/2` or `/3`
+SHA-256 domain, followed by a NUL byte and compact
 canonical JSON of the entries. A digest mismatch, unknown event or phase,
 malformed later entry, truncated log, or shared/durable open is refused before
 replay allocation. The bounds remain 4,096 entries and 32 MiB. Shared or durable
 sessions depend on state outside their own log and remain
 `replayable: false`; missing recording order also refuses equality.
 Replay does not recreate Task identities, notifications or native game
-behavior. `scripts/lab_replay_roundtrip.py` demonstrates tool-only recording,
-exact replay and tamper localization over real stdio; the Rust Task replay
+behavior. `scripts/lab_replay_roundtrip.py` demonstrates recording, exact replay,
+changed read-result detection and wait tamper localization over real stdio; the Rust Task replay
 regressions exercise both cancellation phases and partial failure.
 
 ## Typed observation profiles and complete records

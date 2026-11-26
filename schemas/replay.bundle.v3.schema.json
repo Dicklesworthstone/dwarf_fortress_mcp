@@ -1,0 +1,407 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dfmcp.local/schemas/replay.bundle.v3.schema.json",
+  "title": "dfmcp.replay.bundle/3",
+  "description": "A bounded private laboratory engine transcript with explicit semantic tool-result coverage. Every tool entry retains outcome, canonical anchor and request frontier, and adds a closed result_commitment. Eligible results use dfmcp.replay.tool-payload/1; unsupported results explicitly use dfmcp.replay.outcome-anchor/1 and do not claim payload equality. The replayer recomputes the whole commitment, including its profile, so an edited weaker profile cannot silently disable comparison. Task drain entries preserve the unchanged /2 engine event contract, without reconstructing Task identities/lifecycle. calls_digest = SHA-256(\"dfmcp-replay-bundle-calls/3\\0\" || compact canonical JSON of calls). The complete envelope, entry shapes and commitment profiles are validated before opening a fresh session. Readers retain /1 and /2 comparison semantics and exact legacy re-export; new captures use /3. No transcript or result digest grants authority or proves native effects.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "server_version",
+    "replayable",
+    "not_replayable_reason",
+    "truncated",
+    "calls_digest",
+    "calls",
+    "note"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dfmcp.replay.bundle/3"
+    },
+    "server_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "replayable": {
+      "type": "boolean"
+    },
+    "not_replayable_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 256
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "calls_digest": {
+      "$ref": "#/$defs/hex32"
+    },
+    "note": {
+      "type": "string"
+    },
+    "calls": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/call"
+          },
+          {
+            "$ref": "#/$defs/task_drain"
+          }
+        ]
+      },
+      "minItems": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "replayable": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "not_replayable_reason": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "replayable": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "not_replayable_reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "hex32": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "decimal_id": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,19})$"
+    },
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fortress_id",
+        "epoch",
+        "sequence",
+        "game_tick",
+        "state_hash"
+      ],
+      "properties": {
+        "fortress_id": {
+          "$ref": "#/$defs/decimal_id"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "game_tick": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "state_hash": {
+          "$ref": "#/$defs/hex32"
+        }
+      }
+    },
+    "call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "tool",
+        "arguments",
+        "ok",
+        "error_code",
+        "anchor_after",
+        "next_request_after",
+        "result_commitment"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool": {
+          "enum": [
+            "fortress.open_session",
+            "fortress.observe",
+            "fortress.query",
+            "fortress.plan",
+            "fortress.commit",
+            "fortress.wait",
+            "fortress.cancel",
+            "fortress.checkpoint",
+            "fortress.restore",
+            "fortress.explain",
+            "fortress.doctor"
+          ]
+        },
+        "arguments": {
+          "type": "object",
+          "not": {
+            "required": [
+              "session_id"
+            ]
+          }
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "error_code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "anchor_after": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/anchor"
+            }
+          ]
+        },
+        "next_request_after": {
+          "$ref": "#/$defs/counter"
+        },
+        "result_commitment": {
+          "$ref": "#/$defs/result_commitment"
+        }
+      }
+    },
+    "counter": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 39,
+      "pattern": "^(0|[1-9][0-9]{0,38})$",
+      "description": "Canonical decimal u128 request counter; reader additionally enforces the exact u128 maximum."
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_wall_millis",
+        "max_game_ticks",
+        "max_entities",
+        "max_bytes",
+        "max_output_tokens",
+        "max_actions"
+      ],
+      "properties": {
+        "max_wall_millis": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_game_ticks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_entities": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_actions": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "frontier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anchor",
+        "next_request_id",
+        "authority_digest",
+        "original_actions_digest",
+        "budget"
+      ],
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/anchor"
+        },
+        "next_request_id": {
+          "$ref": "#/$defs/counter"
+        },
+        "authority_digest": {
+          "$ref": "#/$defs/hex32",
+          "description": "SHA-256 of dfmcp-task-replay-authority/1 NUL followed by the ordered current grants, risks, scopes, expiries and remaining uses in compact canonical JSON."
+        },
+        "original_actions_digest": {
+          "$ref": "#/$defs/hex32",
+          "description": "SHA-256 of dfmcp-task-replay-original-actions/1 NUL and complete retained original selector, receipt/evidence/physical-work/lease census (at most 64 actions), or exact unavailable-custody diagnostic."
+        },
+        "budget": {
+          "$ref": "#/$defs/budget"
+        }
+      }
+    },
+    "task_drain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "event",
+        "arguments",
+        "before",
+        "after",
+        "ok",
+        "error_code",
+        "evidence_digest"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "event": {
+          "const": "task_cancel_phase"
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "plan_digest",
+            "phase"
+          ],
+          "properties": {
+            "plan_digest": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/hex32"
+                },
+                {
+                  "not": {
+                    "const": "0000000000000000000000000000000000000000000000000000000000000000"
+                  }
+                }
+              ]
+            },
+            "phase": {
+              "enum": [
+                "request",
+                "finalize"
+              ]
+            }
+          }
+        },
+        "before": {
+          "$ref": "#/$defs/frontier"
+        },
+        "after": {
+          "$ref": "#/$defs/frontier"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "error_code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "evidence_digest": {
+          "$ref": "#/$defs/hex32",
+          "description": "SHA-256 of dfmcp-task-replay-evidence/1 NUL and the full typed drain outcome. Five documented direct current-owner paths are normalized. A nested withdrawal proof additionally requires exact verified retained source, terminal census and quiet-frontier custody before its owner/requester inputs are normalized and resealed. A valid local finalization certificate is then rederived from the same normalized material; invalid identities stay distinguishable. Error records retain failure code and message; after witnesses retain partial effects."
+        }
+      }
+    },
+    "result_commitment": {
+      "description": "dfmcp.replay.tool-payload/1 hashes SHA-256(\"dfmcp-replay-tool-payload/1\\0\" || compact canonical JSON of {tool,result:<normalized final rendered root tool payload>}). Every object is sorted by key; array order and primitive JSON values are retained. Eligible tools are observe, plan, doctor, numeric entity explain, and query summary/entities/observation/terrain/path/search/structured. Other tools and query modes are explicit outcome-only. Opaque structured result continuation strings, nonempty retained query work catalogs, and non-null observation objective withdrawals are outcome-only. The profile excludes the entire root agent_turn presentation packet. It tags unsigned values only at /query_budget/max_wall_millis, /output_budget/full_estimate_tokens, and doctor /active_sessions_count; missing fields, malformed values, semantic truncation tiers, coverage, source accounting and negotiated limits remain distinguishable. Only the known full/compact_turn tier pair is tagged as tool_payload_intact, because it changes presentation without changing tool data. Entries under output_budget.minimal_truncated whose dotted path begins agent_turn. are outside this profile; an emptied map produced by removing those entries is omitted. Other omission metadata remains committed. Exact current-owner strings are tagged only at /session_id and observe /objectives/*/owner_session_id and /objectives/*/continuation_request/arguments/session_id. For query result mode entities, only /rows/*/resource_uri with the exact df://session/<current-owner>/entity- prefix is normalized; the entire identity/generation/anchor suffix remains committed. Non-owner values at these paths are retained as tagged literal values; arbitrary nested user fields are not rewritten. Accepted source payloads are JSON objects of at most 1048576 UTF-8 bytes, 65536 value nodes and depth 64. This profile verifies delivered data and error details within its declared scope, not Agent Turn fidelity, opaque process handles, or omitted result content.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "profile",
+            "digest",
+            "reason"
+          ],
+          "properties": {
+            "profile": {
+              "const": "dfmcp.replay.tool-payload/1"
+            },
+            "digest": {
+              "$ref": "#/$defs/hex32"
+            },
+            "reason": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "profile",
+            "digest",
+            "reason"
+          ],
+          "properties": {
+            "profile": {
+              "const": "dfmcp.replay.outcome-anchor/1"
+            },
+            "digest": {
+              "type": "null"
+            },
+            "reason": {
+              "enum": [
+                "tool_not_in_profile",
+                "query_mode_not_in_profile",
+                "opaque_query_continuation",
+                "session_bound_objective_evidence",
+                "process_local_query_work",
+                "explanation_not_entity",
+                "payload_outside_bounds",
+                "malformed_payload"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
