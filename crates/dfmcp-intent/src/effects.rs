@@ -42,6 +42,8 @@ mod excavation_occupancy;
 mod furniture;
 #[path = "effects_harvest.rs"]
 mod harvest;
+#[path = "effects_inventory.rs"]
+mod inventory;
 #[path = "effects_occupancy.rs"]
 mod occupancy;
 #[path = "effects_provisions.rs"]
@@ -97,6 +99,7 @@ pub use furniture::{
 
 pub use compensation::default_compensation_with_evidence;
 pub(crate) use compensation::{setters_overlap, source_bound_compensation};
+pub use inventory::{INVENTORY_LEDGER_FIELD, INVENTORY_LEDGER_GENERATION_FIELD};
 
 /// Validate the original identity and material custody behind a terminal action.
 ///
@@ -1179,12 +1182,7 @@ fn apply_effect_inner(
                     Value::Text(STATUS_ACTIVE.to_owned()),
                 ),
             ];
-            if carpentry::recipe(job_token).is_some() {
-                fields.push((
-                    WORK_ORDER_PRODUCTION_MODEL_FIELD.to_owned(),
-                    Value::Text(CARPENTRY_PRODUCTION_MODEL.to_owned()),
-                ));
-            }
+            fields.extend(carpentry::dispatch_fields(snapshot, job_token)?);
             fields.extend(provisions::dispatch_fields(snapshot, job_token)?);
             create_entity(
                 snapshot,
@@ -1660,6 +1658,8 @@ impl EffectTimeline {
                         precondition("work order requires an eligible known job token before reference progress")
                     })?;
                     validate_condition_text(job)?;
+                    budget.charge(64)?;
+                    carpentry::validate_active_inventory(snapshot, record)?;
                     let work = field_u64(record, "work_ticks", snapshot.tick)?;
                     let remaining = field_u64(record, AMOUNT_REMAINING_FIELD, snapshot.tick)?;
                     if work >= WORK_ORDER_TICKS_PER_UNIT || remaining == 0 {
@@ -1698,6 +1698,11 @@ impl EffectTimeline {
                         return Err(precondition(
                             "active building has noncanonical progress counters",
                         ));
+                    }
+                    if furniture::has_placement_fields(record) {
+                        let depth = usize::BITS - snapshot.graph.entities.len().leading_zeros();
+                        budget.charge(128 + u64::from(depth) * 8)?;
+                        furniture::validate_active_inventory(snapshot, record)?;
                     }
                     if occupied_buildings.is_none() {
                         occupied_buildings =
@@ -1831,6 +1836,11 @@ impl EffectTimeline {
             order.id,
             conditions,
             order.product,
+            if carpentry::recipe(&order.job).is_some() {
+                Some(carpentry::inventory_owner(snapshot, entity(snapshot, order.id)?)?.id)
+            } else {
+                self.ledger
+            },
         ))
     }
 
@@ -2493,6 +2503,7 @@ fn production_gate(
     id: EntityId,
     conditions: &[WorkOrderCondition],
     product: Option<(&str, u64)>,
+    inventory: Option<EntityId>,
 ) -> ProductionGate {
     if conditions.is_empty() {
         return ProductionGate::Ready {
@@ -2506,7 +2517,7 @@ fn production_gate(
             "work-order condition domain exceeds the 65536-entity reference bound".to_owned(),
         );
     }
-    let ledger = stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id));
+    let ledger = inventory.and_then(|id| snapshot.graph.entities.get(&id));
     let mut unit_limit = u64::MAX;
     for condition in conditions {
         match condition {
@@ -2647,6 +2658,7 @@ fn advance_ready_work_order(
         budget,
     )?;
     if let Some((stock_field, per_unit)) = order.product
+        && carpentry::recipe(&order.job).is_none()
         && let Some(ledger) = timeline.ledger
     {
         let held = field_u64(entity(snapshot, ledger)?, stock_field, snapshot.tick)?;

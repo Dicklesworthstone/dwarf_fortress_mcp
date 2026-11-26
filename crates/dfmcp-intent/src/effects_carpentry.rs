@@ -23,6 +23,50 @@ pub(super) fn recipe(job: &str) -> Option<Recipe> {
     })
 }
 
+pub(super) fn dispatch_fields(snapshot: &WorldSnapshot, job: &str) -> Result<Vec<(String, Value)>> {
+    if recipe(job).is_none() {
+        return Ok(Vec::new());
+    }
+    let owner = inventory::LedgerBinding::capture(snapshot)?;
+    let mut fields = vec![(
+        WORK_ORDER_PRODUCTION_MODEL_FIELD.to_owned(),
+        Value::Text(CARPENTRY_PRODUCTION_MODEL.to_owned()),
+    )];
+    fields.extend(owner.fields());
+    Ok(fields)
+}
+
+pub(super) fn inventory_owner(
+    snapshot: &WorldSnapshot,
+    order: &EntityRecord,
+) -> Result<inventory::LedgerBinding> {
+    let owner = inventory::LedgerBinding::read(order, snapshot.tick)?
+        .ok_or_else(|| precondition("original carpentry inventory custody is not established"))?;
+    owner.ledger(snapshot)?;
+    Ok(owner)
+}
+
+/// Refuse a lost or replaced positive custodian before any timeline event.
+/// Fully unbound historical orders remain blocked, without inventing ownership.
+pub(super) fn validate_active_inventory(
+    snapshot: &WorldSnapshot,
+    order: &EntityRecord,
+) -> Result<()> {
+    let Some(owner) = inventory::LedgerBinding::read(order, snapshot.tick)? else {
+        return Ok(());
+    };
+    if field_text(order, "job_token", snapshot.tick)
+        .and_then(recipe)
+        .is_none()
+    {
+        return Err(precondition(
+            "inventory custody is not on a supported carpentry order",
+        ));
+    }
+    owner.ledger(snapshot)?;
+    Ok(())
+}
+
 /// Missing inventory is unknown even when the intended baseline would be zero.
 /// Require the producer to establish both the input and output counts, and the
 /// original order to opt into the material-backed generation explicitly.
@@ -46,12 +90,12 @@ pub(super) fn blocker(snapshot: &WorldSnapshot, order: &TimelineOrder) -> Result
             "carpentry requires its original order generation and canonical finite total",
         ));
     }
-    let Some(ledger) = stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id))
-    else {
+    let Some(owner) = inventory::LedgerBinding::read(record, snapshot.tick)? else {
         return Ok(Some(
-            "carpentry input and output stock ledger is not established".to_owned(),
+            "original carpentry inventory custody is not established; historical orders cannot select a new stock ledger".to_owned(),
         ));
     };
+    let ledger = owner.ledger(snapshot)?;
     for field in [STOCK_WOOD_FIELD, recipe.stock_field] {
         if !matches!(
             field_value(ledger, field, snapshot.tick),
@@ -70,9 +114,9 @@ pub(super) fn blocker(snapshot: &WorldSnapshot, order: &TimelineOrder) -> Result
     Ok(None)
 }
 
-/// Consume one log and publish one exact new item. The timeline separately
-/// increments the eligible aggregate output stock and finishes the order unit;
-/// all three changes belong to its caller's single transaction shadow.
+/// Consume one log, credit the original owner's stock and publish one exact new
+/// item with the same custody. The timeline finishes the order unit; all changes
+/// belong to its caller's single transaction shadow.
 pub(super) fn complete(
     snapshot: &mut WorldSnapshot,
     order: &TimelineOrder,
@@ -106,53 +150,57 @@ pub(super) fn complete(
             "carpentry output identity already exists; refuse to recreate or consume material twice",
         ));
     }
-    let ledger = stock_ledger(snapshot).ok_or_else(|| {
-        precondition("carpentry input and output stock ledger is not established")
-    })?;
-    let logs = field_u64(entity(snapshot, ledger)?, STOCK_WOOD_FIELD, snapshot.tick)?;
+    let owner = inventory_owner(snapshot, record)?;
+    let ledger = owner.ledger(snapshot)?;
+    let logs = field_u64(ledger, STOCK_WOOD_FIELD, snapshot.tick)?;
     let logs_after = logs
         .checked_sub(1)
         .ok_or_else(|| precondition("carpentry completion has no available WOOD log"))?;
     // Refuse an impossible output before consuming input or creating its item.
-    field_u64(entity(snapshot, ledger)?, recipe.stock_field, snapshot.tick)?
+    let produced = field_u64(ledger, recipe.stock_field, snapshot.tick)?
         .checked_add(1)
         .ok_or_else(|| advance_budget_error("carpentry would overflow its output stock counter"))?;
     write_fields(
         snapshot,
-        ledger,
-        vec![(STOCK_WOOD_FIELD.to_owned(), Value::U64(logs_after))],
+        owner.id,
+        vec![
+            (STOCK_WOOD_FIELD.to_owned(), Value::U64(logs_after)),
+            (recipe.stock_field.to_owned(), Value::U64(produced)),
+        ],
     )?;
+    let mut fields = vec![
+        (
+            "item_token".to_owned(),
+            Value::Text(recipe.item_token.to_owned()),
+        ),
+        ("material_token".to_owned(), Value::Text("WOOD".to_owned())),
+        (
+            "material_tokens".to_owned(),
+            Value::List(vec![Value::Text("WOOD".to_owned())]),
+        ),
+        ("stack_size".to_owned(), Value::U64(1)),
+        (
+            FURNITURE_INVENTORY_STATE_FIELD.to_owned(),
+            Value::Text("loose".to_owned()),
+        ),
+        (FURNITURE_ALLOCATED_TO_FIELD.to_owned(), Value::Null),
+        ("source_order".to_owned(), Value::Entity(order.id)),
+        (
+            "production_ordinal".to_owned(),
+            Value::U64(u64::from(ordinal)),
+        ),
+        (
+            WORK_ORDER_PRODUCTION_MODEL_FIELD.to_owned(),
+            Value::Text(CARPENTRY_PRODUCTION_MODEL.to_owned()),
+        ),
+    ];
+    fields.extend(owner.fields());
     create_entity(
         snapshot,
         output,
         EntityKind::Item,
         format!("wooden {}", recipe.item_token.to_ascii_lowercase()),
-        vec![
-            (
-                "item_token".to_owned(),
-                Value::Text(recipe.item_token.to_owned()),
-            ),
-            ("material_token".to_owned(), Value::Text("WOOD".to_owned())),
-            (
-                "material_tokens".to_owned(),
-                Value::List(vec![Value::Text("WOOD".to_owned())]),
-            ),
-            ("stack_size".to_owned(), Value::U64(1)),
-            (
-                FURNITURE_INVENTORY_STATE_FIELD.to_owned(),
-                Value::Text("loose".to_owned()),
-            ),
-            (FURNITURE_ALLOCATED_TO_FIELD.to_owned(), Value::Null),
-            ("source_order".to_owned(), Value::Entity(order.id)),
-            (
-                "production_ordinal".to_owned(),
-                Value::U64(u64::from(ordinal)),
-            ),
-            (
-                WORK_ORDER_PRODUCTION_MODEL_FIELD.to_owned(),
-                Value::Text(CARPENTRY_PRODUCTION_MODEL.to_owned()),
-            ),
-        ],
+        fields,
     )?;
     Ok(true)
 }

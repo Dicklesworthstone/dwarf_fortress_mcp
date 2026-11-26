@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Preserve original inventory through production and installation
+
+- Bind carpentry orders, produced items and exact furniture placements to their
+  original ledger identity and generation.
+- Use that owner for production conditions, material debits, output credits and
+  one-time cancellation refunds, including after canonical snapshot recovery.
+- Keep valid originals usable when a lower-ID ledger appears; reject missing,
+  substituted or unqualified custody before any inventory or timeline mutation.
+- Check loose inventory per owner and preserve completed/cancelled historical
+  inspection without assigning new ownership to unbound legacy items.
+- Pass all 442 actual intent tests, including nine new regression groups;
+  retain the existing action, postcondition and archive encodings.
+
 ## Unreleased — Recover original resource-project stock goals
 
 - Restore scalar and portfolio no-order watches from authenticated parent journal

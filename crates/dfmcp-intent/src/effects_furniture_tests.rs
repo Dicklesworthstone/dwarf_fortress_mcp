@@ -185,6 +185,295 @@ fn physical(snapshot: &WorldSnapshot) -> WorldGraph {
     graph
 }
 
+fn additional_inventory(
+    snapshot: &mut WorldSnapshot,
+    id: EntityId,
+    beds: Option<u64>,
+) -> Result<()> {
+    let mut fields = vec![
+        (STOCK_DRINK_FIELD, Value::U64(100)),
+        (STOCK_FOOD_FIELD, Value::U64(100)),
+        (METABOLISM_TICKS_FIELD, Value::U64(0)),
+        (STOCK_WOOD_FIELD, Value::U64(10)),
+    ];
+    if let Some(beds) = beds {
+        fields.push((STOCK_BED_FIELD, Value::U64(beds)));
+    }
+    put(
+        snapshot,
+        id,
+        EntityKind::Other(STOCK_LEDGER_KIND.to_owned()),
+        fields,
+    )
+}
+
+fn forget_inventory_binding(snapshot: &mut WorldSnapshot, ids: &[EntityId]) -> Result<()> {
+    for id in ids {
+        let record = record_mut(snapshot, *id)?;
+        record.fields.remove(INVENTORY_LEDGER_FIELD);
+        record.fields.remove(INVENTORY_LEDGER_GENERATION_FIELD);
+    }
+    snapshot.refresh_hash();
+    Ok(())
+}
+
+#[test]
+fn original_furniture_inventory_survives_an_unrelated_default_ledger() -> Result<()> {
+    let mut snapshot = world()?;
+    let item = produce(&mut snapshot, FurnitureKind::Bed, 1, "supply")?[0];
+    let unrelated = EntityId::new(31);
+    // No BED field on the new default: this cannot establish any furniture
+    // supply, but it also cannot invalidate the original owner's real item.
+    additional_inventory(&mut snapshot, unrelated, None)?;
+    let action = place(FurnitureKind::Bed, item, TARGET);
+    apply(&mut snapshot, &action, "place")?;
+    assert_eq!(count(&snapshot, STOCK_BED_FIELD)?, 0);
+    let building = created_entity_id("place", 0);
+    assert_eq!(
+        field_value(
+            entity(&snapshot, building)?,
+            INVENTORY_LEDGER_FIELD,
+            snapshot.tick
+        ),
+        Some(&Value::Entity(LEDGER))
+    );
+    let mut snapshot = WorldSnapshot::from_canonical_bytes(&snapshot.canonical_bytes())?;
+    advance(&mut snapshot, 100)?;
+    assert!(cancel_effect(&mut snapshot, &action, "place")?);
+    assert_eq!(count(&snapshot, STOCK_BED_FIELD)?, 1);
+    assert!(
+        !entity(&snapshot, unrelated)?
+            .fields
+            .contains_key(STOCK_BED_FIELD)
+    );
+    let before = snapshot.clone();
+    assert!(!cancel_effect(&mut snapshot, &action, "place")?);
+    assert_eq!(snapshot, before);
+    apply(&mut snapshot, &action, "reuse")?;
+    advance(&mut snapshot, BUILD_TICKS)?;
+    assert_eq!(count(&snapshot, STOCK_BED_FIELD)?, 0);
+    validate_furniture_completion(
+        &snapshot,
+        created_entity_id("reuse", 0),
+        FurnitureKind::Bed,
+        item,
+        TARGET,
+    )?;
+    Ok(())
+}
+
+#[test]
+fn inventory_replacement_refuses_placement_progress_and_refund_without_writes() -> Result<()> {
+    for phase in 0..3 {
+        for variant in 0..4 {
+            let mut snapshot = world()?;
+            let item = produce(&mut snapshot, FurnitureKind::Bed, 1, "supply")?[0];
+            let action = place(FurnitureKind::Bed, item, TARGET);
+            if phase != 0 {
+                apply(&mut snapshot, &action, "place")?;
+                advance(&mut snapshot, 100)?;
+            }
+            match variant {
+                0 => record_mut(&mut snapshot, LEDGER)?.generation = 2,
+                1 => {
+                    let mut replacement = snapshot
+                        .graph
+                        .entities
+                        .remove(&LEDGER)
+                        .ok_or_else(|| precondition("fixture ledger missing"))?;
+                    replacement.id = EntityId::new(92);
+                    snapshot.graph.entities.insert(replacement.id, replacement);
+                }
+                2 => record_mut(&mut snapshot, LEDGER)?.kind = EntityKind::Item,
+                _ => record_mut(&mut snapshot, LEDGER)?.id = EntityId::new(92),
+            }
+            if phase == 1 {
+                snapshot.tick = GameTick(snapshot.tick.0 + 10);
+            }
+            snapshot.refresh_hash();
+            let before = snapshot.clone();
+            let result = match phase {
+                0 => apply_effect(&mut snapshot, &action, "place"),
+                1 => advance_effects(&mut snapshot, 10),
+                _ => cancel_effect(&mut snapshot, &action, "place"),
+            };
+            assert!(result.is_err(), "phase {phase}, variant {variant}");
+            assert_eq!(
+                snapshot, before,
+                "phase {phase}, variant {variant} wrote before refusal"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn furniture_inventory_pairs_require_agreement_and_qualified_evidence() -> Result<()> {
+    for target in 0..3 {
+        for variant in 0..6 {
+            let mut snapshot = world()?;
+            let item = produce(&mut snapshot, FurnitureKind::Bed, 1, "supply")?[0];
+            let action = place(FurnitureKind::Bed, item, TARGET);
+            apply(&mut snapshot, &action, "place")?;
+            let id = [
+                created_entity_id("supply", 0),
+                item,
+                created_entity_id("place", 0),
+            ][target];
+            let tick = snapshot.tick;
+            let next_tick = GameTick(tick.0 + 1);
+            let record = record_mut(&mut snapshot, id)?;
+            match variant {
+                0 => {
+                    record.fields.remove(INVENTORY_LEDGER_GENERATION_FIELD);
+                }
+                1 => {
+                    record.fields.remove(INVENTORY_LEDGER_FIELD);
+                    record.fields.remove(INVENTORY_LEDGER_GENERATION_FIELD);
+                }
+                2 => {
+                    record.fields.insert(
+                        INVENTORY_LEDGER_GENERATION_FIELD.to_owned(),
+                        known(Value::U64(2), tick),
+                    );
+                }
+                _ => {
+                    let fact = record
+                        .fields
+                        .get_mut(INVENTORY_LEDGER_FIELD)
+                        .ok_or_else(|| precondition("fixture binding missing"))?;
+                    match variant {
+                        3 => fact.observed_at = next_tick,
+                        4 => {
+                            fact.presence =
+                                Some(FactPresence::Unknown("unavailable owner".to_owned()))
+                        }
+                        _ => fact.source = FactSource::AgentAssertion("claimed owner".to_owned()),
+                    }
+                }
+            }
+            snapshot.refresh_hash();
+            let before = snapshot.clone();
+            assert!(
+                cancel_effect(&mut snapshot, &action, "place").is_err(),
+                "target {target}, variant {variant}"
+            );
+            assert_eq!(snapshot, before);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn legacy_furniture_history_remains_inspectable_without_inventing_stock_custody() -> Result<()> {
+    let (mut completed, installation) = installed(FurnitureKind::Bed)?;
+    completed.graph.entities.remove(&LEDGER);
+    completed.refresh_hash();
+    // Installed physical ownership is historical provenance, not a fresh stock
+    // credit: even retained modern bindings need not resurrect a removed ledger.
+    assert_eq!(
+        inspect_complete_furniture(&completed, installation.building)?,
+        installation
+    );
+    forget_inventory_binding(
+        &mut completed,
+        &[
+            created_entity_id("supply", 0),
+            installation.item,
+            installation.building,
+        ],
+    )?;
+    assert_eq!(
+        inspect_complete_furniture(&completed, installation.building)?,
+        installation
+    );
+    let action = place(FurnitureKind::Bed, installation.item, TARGET);
+    let before = completed.clone();
+    assert!(!cancel_effect(&mut completed, &action, "place")?);
+    assert_eq!(completed, before);
+
+    let mut released = world()?;
+    let item = produce(&mut released, FurnitureKind::Bed, 1, "supply")?[0];
+    let action = place(FurnitureKind::Bed, item, TARGET);
+    apply(&mut released, &action, "place")?;
+    assert!(cancel_effect(&mut released, &action, "place")?);
+    forget_inventory_binding(
+        &mut released,
+        &[
+            created_entity_id("supply", 0),
+            item,
+            created_entity_id("place", 0),
+        ],
+    )?;
+    released.graph.entities.remove(&LEDGER);
+    released.refresh_hash();
+    let before = released.clone();
+    assert!(!cancel_effect(&mut released, &action, "place")?);
+    assert!(loose_furniture_items(&released, FurnitureKind::Bed)?.is_empty());
+    assert!(apply_effect(&mut released, &action, "new owner").is_err());
+    assert_eq!(released, before);
+
+    let mut held = world()?;
+    let item = produce(&mut held, FurnitureKind::Bed, 1, "supply")?[0];
+    let action = place(FurnitureKind::Bed, item, TARGET);
+    apply(&mut held, &action, "place")?;
+    forget_inventory_binding(
+        &mut held,
+        &[
+            created_entity_id("supply", 0),
+            item,
+            created_entity_id("place", 0),
+        ],
+    )?;
+    let before = held.clone();
+    assert!(cancel_effect(&mut held, &action, "place").is_err());
+    assert_eq!(held, before);
+    held.tick = GameTick(held.tick.0 + 10);
+    held.refresh_hash();
+    let before = held.clone();
+    assert!(advance_effects(&mut held, 10).is_err());
+    assert_eq!(held, before);
+    Ok(())
+}
+
+#[test]
+fn exact_furniture_census_and_refunds_keep_separate_inventory_owners() -> Result<()> {
+    let mut snapshot = world()?;
+    let original = produce(&mut snapshot, FurnitureKind::Bed, 2, "old supply")?;
+    let newer = EntityId::new(31);
+    additional_inventory(&mut snapshot, newer, Some(0))?;
+    let recent = produce(&mut snapshot, FurnitureKind::Bed, 1, "new supply")?[0];
+    assert_eq!(
+        loose_furniture_items(&snapshot, FurnitureKind::Bed)?.len(),
+        3
+    );
+    let old_action = place(FurnitureKind::Bed, original[0], TARGET);
+    let new_action = place(
+        FurnitureKind::Bed,
+        recent,
+        MapCoord::new(TARGET.x + 1, TARGET.y, TARGET.z),
+    );
+    apply(&mut snapshot, &old_action, "old owner")?;
+    apply(&mut snapshot, &new_action, "new owner")?;
+    assert_eq!(count(&snapshot, STOCK_BED_FIELD)?, 1);
+    assert_eq!(
+        field_u64(entity(&snapshot, newer)?, STOCK_BED_FIELD, snapshot.tick)?,
+        0
+    );
+    assert!(cancel_effect(&mut snapshot, &old_action, "old owner")?);
+    assert!(cancel_effect(&mut snapshot, &new_action, "new owner")?);
+    assert_eq!(count(&snapshot, STOCK_BED_FIELD)?, 2);
+    assert_eq!(
+        field_u64(entity(&snapshot, newer)?, STOCK_BED_FIELD, snapshot.tick)?,
+        1
+    );
+    assert_eq!(
+        loose_furniture_items(&snapshot, FurnitureKind::Bed)?.len(),
+        3
+    );
+    Ok(())
+}
+
 fn installed(kind: FurnitureKind) -> Result<(WorldSnapshot, FurnitureInstallation)> {
     let mut snapshot = world()?;
     let item = produce(&mut snapshot, kind, 1, "supply")?[0];

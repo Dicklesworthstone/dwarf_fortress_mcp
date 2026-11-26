@@ -33,11 +33,26 @@ timestamps still reflect the actual calls.
 Metabolism consumes drink and food; furniture is not assigned a consumption
 rate.
 
+Each new carpentry order records its inventory owner in `inventory_ledger` and
+`inventory_ledger_generation`. Dispatch selects the current canonical stock
+ledger once. Every subsequent wood debit, furniture credit and stock-based
+work-order condition uses that original entity and generation. Each produced
+item retains the same pair. Adding a different ledger with a lower ID cannot
+redirect an existing order or make it spend that new ledger's stock.
+
+The recorded owner must still exist with its original kind, identity and
+generation before active production can advance. Reusing the same entity ID
+for a newer generation does not restore the old custody. Missing, partial,
+stale or malformed ownership evidence cannot authorize spending or output;
+the adapter publishes no partial requested advance on refusal.
+
 Only source-qualified, explicit counts establish stock. Missing or stale wood,
 an absent output count, or unavailable labor does not mean zero or permission to
 proceed. Work-order conditions, material checks, cancellation, and original
 deadlines continue to apply. Existing abstract furniture orders without the
 new `carpentry/1` production marker do not retroactively manufacture items.
+Earlier material-backed orders without either inventory-owner field remain
+blocked; recovery does not assign them a ledger from the current census.
 
 ## Plan a complete furnishing supply
 
@@ -120,18 +135,21 @@ workshops could support additional parallelism.
 
 ## Persistence and limits
 
-Manufactured item identity and stock live in the canonical world, so the normal
-snapshot, checkpoint and durable-world machinery retains them. Saved original
-requests preserve their complete quotas and compiler identity. Replaying a
+Manufactured item identity, original inventory ownership and stock live in the
+canonical world, so the normal snapshot, checkpoint and durable-world machinery
+retains them. Saved original requests preserve their complete quotas and compiler
+identity. Replaying a
 forecast does not alter the real world; reopening a durable world does not
 create another set of outputs.
 
-This feature manufactures loose inventory. Existing laboratory furniture
-construction remains an abstract construction model and does not select or
-consume these item records. Native item allocation still requires independently
-qualified native observations; a laboratory item cannot authorize native
-placement. Room assignment, native hauling and real construction completion
-are separate boundaries.
+This feature manufactures loose inventory. The distinct
+[`place_furniture` action](LAB_ITEM_FURNITURE.md) allocates an exact eligible
+item, debits its original ledger and preserves that owner through construction
+or cancellation. The legacy laboratory `build` action retains its abstract
+interpretation and does not select these manufactured item records. Native
+item allocation still requires independently qualified native observations;
+a laboratory item cannot authorize native placement. Room assignment, native
+hauling and real construction completion are separate boundaries.
 
 Ownership: `df-lab-conditional-production-c4p` and
 `df-dfhack-bridge-plane-c-pic.4` track the broader production and execution work.

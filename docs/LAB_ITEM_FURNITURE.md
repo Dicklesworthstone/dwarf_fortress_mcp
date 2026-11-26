@@ -144,22 +144,33 @@ because current occupancy and inventory depend on complete domain scans.
 New `carpentry/1` output is a generation-one singleton item with its original
 work-order identity, completed production ordinal, closed item token and WOOD
 material. It starts with explicit `inventory_state="loose"` and
-`allocated_to=null`. The aggregate furniture stock includes this item.
+`allocated_to=null`. The item and its original work order also retain matching
+`inventory_ledger` and `inventory_ledger_generation` fields. That ledger's
+aggregate furniture stock includes the item.
 
 At dispatch, the reference model validates the original producer and item,
 the complete attachment census, a qualified stock count and an observed,
 unoccupied floor tile. In the same transaction it:
 
-1. Decrements the appropriate loose furniture stock by one.
+1. Decrements the appropriate loose furniture stock in the item's original
+   ledger by one.
 2. Creates the key-derived planned building with `placement_model="furniture/1"`,
-   exact `source_item`, source generation and single-tile footprint.
+   exact `source_item`, source generation, original inventory-owner pair and
+   single-tile footprint.
 3. Marks that same item `allocated` with a reciprocal building reference.
 
+Loose-item inspection checks the complete eligible census against each
+recorded owner's stock separately. It does not compare all items with whichever
+ledger currently has the lowest ID. A new lower-ID ledger cannot take over an
+existing item's allocation, construction or refund. The item's producer,
+item record and active placement must agree on the original ownership pair.
+
 Construction uses the existing reference construction duration. Each advance
-revalidates reciprocal custody and occupancy. Completion changes the item to
-`installed` at the building's observed position. It does not consume another
-stock unit. No hauling route, worker construction capacity or room ownership
-is inferred by this model.
+revalidates reciprocal custody, the original inventory owner's identity and
+generation, and occupancy. Completion changes the item to `installed` at the
+building's observed position. It does not consume another stock unit. No
+hauling route, worker construction capacity or room ownership is inferred by
+this model.
 
 The default proof includes the complete building, exact kind and footprint,
 placement model, source item and generation, and the installed item's identity,
@@ -178,17 +189,23 @@ preserve the original exact placement proof bytes.
 ## Cancellation, conflicts and recovery
 
 Cancelling unfinished construction returns the same item to loose inventory,
-clears its backlink and refunds one stock unit. The building retains a
-cancelled/released historical record; that record no longer occupies its tile.
-Repeated cancellation has no further effect, including after another action
-has reused the item. Completed furniture is not undone or refunded by cancel.
+clears its backlink and refunds one stock unit to the exact ledger and
+generation recorded by the placement. A missing owner, a different ledger
+kind or a replacement using the same ID with a newer generation refuses the
+refund; another ledger's available count cannot substitute. The building
+retains a cancelled/released historical record; that record no longer occupies
+its tile. Repeated cancellation has no further effect, including after another
+action has reused the item. Completed furniture is not undone or refunded by
+cancel.
 
 An item already allocated or installed cannot serve a second building.
 Unknown, stale, malformed or contradictory custody refuses the operation.
 Unqualified occupancy, a taken tile, identity collision, arithmetic overflow
 or an exhausted bound also refuses. The adapter publishes no partial world on
-failure. Durable snapshots retain allocation and item identity, and original
-plan archives preserve the typed action and original key across restart.
+failure. Durable snapshots retain allocation, item identity and original
+inventory ownership. Original plan archives preserve the typed action and
+original key across restart. Recovery never selects a replacement inventory
+owner for already recorded work.
 
 Inventory and occupancy inspection admit at most 65,536 canonical entities.
 Construction scans consume the bounded effect-advancement work allowance.
@@ -202,10 +219,19 @@ placement is a distinct action tag appended to the existing canonical and
 archive codecs.
 
 Historical carpentry items without both custody fields are ineligible for
-placement. They are not silently upgraded to loose inventory. Partial or
-unqualified custody is an explicit refusal. Aggregate stock may contain those
-legacy items, so the eligible item census is a lower bound on stock rather
-than a substitute for the stock ledger.
+placement. Loose items also require their original inventory-owner pair;
+older unbound items are not silently assigned the current ledger. Partial,
+malformed or unqualified custody is an explicit refusal. Aggregate stock may
+contain those legacy items, so the eligible item census remains a lower bound
+on each owner's stock rather than a substitute for the stock ledger.
+
+Historical complete and cancelled placements remain inspectable when their
+earlier records lack inventory-owner fields. Terminal inspection and repeated
+cancellation do not recreate a missing ledger or issue another refund.
+Existing sealed completion predicates and action bytes stay unchanged. An
+unfinished unbound placement cannot advance or refund stock, and an unfinished
+unbound carpentry order cannot resume production. These operations require
+recorded original ownership; absence is not a migration instruction.
 
 Native semantic routing explicitly refuses this laboratory action. Canonical
 laboratory item custody does not establish native DF item identity or eligibility.

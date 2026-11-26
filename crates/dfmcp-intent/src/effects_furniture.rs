@@ -36,6 +36,7 @@ struct Placement {
     location: MapCoord,
     progress: u64,
     phase: PlacementPhase,
+    ledger: Option<inventory::LedgerBinding>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -93,7 +94,11 @@ fn require_value(
     Ok(())
 }
 
-fn reference_item(snapshot: &WorldSnapshot, id: EntityId, kind: FurnitureKind) -> Result<()> {
+fn reference_item(
+    snapshot: &WorldSnapshot,
+    id: EntityId,
+    kind: FurnitureKind,
+) -> Result<Option<inventory::LedgerBinding>> {
     let item = entity(snapshot, id)?;
     if item.kind != EntityKind::Item || item.generation != 1 {
         return Err(precondition(
@@ -157,7 +162,13 @@ fn reference_item(snapshot: &WorldSnapshot, id: EntityId, kind: FurnitureKind) -
             "furniture is not an established completed unit of its original producer",
         ));
     }
-    Ok(())
+    let owner = inventory::LedgerBinding::read(item, snapshot.tick)?;
+    if owner != inventory::LedgerBinding::read(order, snapshot.tick)? {
+        return Err(precondition(
+            "furniture inventory custody differs from its original producer",
+        ));
+    }
+    Ok(owner)
 }
 
 pub(super) fn has_placement_fields(record: &EntityRecord) -> bool {
@@ -244,6 +255,7 @@ fn placement(snapshot: &WorldSnapshot, id: EntityId) -> Result<Placement> {
         location,
         progress,
         phase,
+        ledger: inventory::LedgerBinding::read(building, snapshot.tick)?,
     })
 }
 
@@ -252,7 +264,17 @@ fn binding_values(snapshot: &WorldSnapshot, placement: Placement) -> Result<()> 
         // Its released item may have been used by a later, independent action.
         return Ok(());
     }
-    reference_item(snapshot, placement.item, placement.kind)?;
+    let owner = reference_item(snapshot, placement.item, placement.kind)?;
+    if owner != placement.ledger {
+        return Err(precondition(
+            "furniture placement inventory custody differs from its exact item",
+        ));
+    }
+    if placement.phase == PlacementPhase::Active {
+        owner
+            .ok_or_else(|| precondition("active furniture has no original inventory custodian"))?
+            .ledger(snapshot)?;
+    }
     let item = entity(snapshot, placement.item)?;
     require_value(
         item,
@@ -280,6 +302,18 @@ fn binding_values(snapshot: &WorldSnapshot, placement: Placement) -> Result<()> 
             &Value::Coord(placement.location),
             snapshot.tick,
         )?;
+    }
+    Ok(())
+}
+
+/// Validate positive held custody before any timeline work. Complete and
+/// cancelled history remains inspectable without recreating its former ledger.
+pub(super) fn validate_active_inventory(
+    snapshot: &WorldSnapshot,
+    record: &EntityRecord,
+) -> Result<()> {
+    if has_placement_fields(record) {
+        binding_values(snapshot, placement(snapshot, record.id)?)?;
     }
     Ok(())
 }
@@ -443,6 +477,7 @@ pub fn loose_furniture_items(
     bounded_domain(snapshot)?;
     let attached = attachments(snapshot)?;
     let mut loose = Vec::new();
+    let mut counts = BTreeMap::<EntityId, (inventory::LedgerBinding, u64)>::new();
     for record in snapshot.graph.entities.values() {
         if record.kind != EntityKind::Item {
             continue;
@@ -452,7 +487,7 @@ pub fn loose_furniture_items(
         if token != kind.item_token() {
             continue;
         }
-        reference_item(snapshot, record.id, kind)?;
+        let owner = reference_item(snapshot, record.id, kind)?;
         if !record.fields.contains_key(FURNITURE_INVENTORY_STATE_FIELD)
             && !record.fields.contains_key(FURNITURE_ALLOCATED_TO_FIELD)
         {
@@ -471,6 +506,19 @@ pub fn loose_furniture_items(
                         "loose furniture still has a building attachment",
                     ));
                 }
+                // Old unbound inventory remains historical aggregate stock; it
+                // cannot acquire a new custodian merely by being inspected.
+                let Some(owner) = owner else {
+                    continue;
+                };
+                owner.ledger(snapshot)?;
+                let count = counts.entry(owner.id).or_insert((owner, 0));
+                if count.0 != owner {
+                    return Err(precondition(
+                        "loose furniture disagrees on its ledger generation",
+                    ));
+                }
+                count.1 += 1;
                 loose.push(record.id);
             }
             Some(ALLOCATED | INSTALLED) => {
@@ -486,17 +534,17 @@ pub fn loose_furniture_items(
             _ => return Err(precondition("furniture custody is unknown or noncanonical")),
         }
     }
-    let ledger = stock_ledger(snapshot)
-        .ok_or_else(|| precondition("furniture stock ledger is not established"))?;
-    let held = field_u64(
-        entity(snapshot, ledger)?,
-        furniture_stock_field(kind),
-        snapshot.tick,
-    )?;
-    if held < loose.len() as u64 {
-        return Err(precondition(
-            "furniture stock is below its established loose-item census",
-        ));
+    for (owner, count) in counts.values() {
+        let held = field_u64(
+            owner.ledger(snapshot)?,
+            furniture_stock_field(kind),
+            snapshot.tick,
+        )?;
+        if held < *count {
+            return Err(precondition(
+                "furniture stock is below its original owner's established loose-item census",
+            ));
+        }
     }
     Ok(loose)
 }
@@ -678,47 +726,49 @@ pub(super) fn place(
         ));
     }
     validate_furniture_location(snapshot, location)?;
-    let ledger = stock_ledger(snapshot)
-        .ok_or_else(|| precondition("furniture stock ledger is not established"))?;
+    let owner = reference_item(snapshot, item, kind)?
+        .ok_or_else(|| precondition("loose furniture has no original inventory custodian"))?;
     let stock_field = furniture_stock_field(kind);
-    let held = field_u64(entity(snapshot, ledger)?, stock_field, snapshot.tick)?;
+    let held = field_u64(owner.ledger(snapshot)?, stock_field, snapshot.tick)?;
     let remaining = held
         .checked_sub(1)
         .ok_or_else(|| precondition("furniture placement has no available stock"))?;
+    let mut fields = vec![
+        ("building_kind".to_owned(), Value::Text(kind_label(kind))),
+        ("position".to_owned(), Value::Coord(location)),
+        ("footprint_min".to_owned(), Value::Coord(location)),
+        ("footprint_max".to_owned(), Value::Coord(location)),
+        (
+            "material_tokens".to_owned(),
+            Value::List(vec![Value::Text("WOOD".to_owned())]),
+        ),
+        (
+            CONSTRUCTION_STAGE_FIELD.to_owned(),
+            Value::Text(STAGE_PLANNED.to_owned()),
+        ),
+        ("progress_ticks".to_owned(), Value::U64(0)),
+        ("required_ticks".to_owned(), Value::U64(BUILD_TICKS)),
+        (
+            FURNITURE_PLACEMENT_MODEL_FIELD.to_owned(),
+            Value::Text(FURNITURE_PLACEMENT_MODEL.to_owned()),
+        ),
+        (FURNITURE_SOURCE_ITEM_FIELD.to_owned(), Value::Entity(item)),
+        (
+            FURNITURE_SOURCE_ITEM_GENERATION_FIELD.to_owned(),
+            Value::U64(1),
+        ),
+        (
+            FURNITURE_ATTACHMENT_STATE_FIELD.to_owned(),
+            Value::Text(ATTACHED.to_owned()),
+        ),
+    ];
+    fields.extend(owner.fields());
     create_entity(
         snapshot,
         building,
         EntityKind::Building,
         kind_label(kind),
-        vec![
-            ("building_kind".to_owned(), Value::Text(kind_label(kind))),
-            ("position".to_owned(), Value::Coord(location)),
-            ("footprint_min".to_owned(), Value::Coord(location)),
-            ("footprint_max".to_owned(), Value::Coord(location)),
-            (
-                "material_tokens".to_owned(),
-                Value::List(vec![Value::Text("WOOD".to_owned())]),
-            ),
-            (
-                CONSTRUCTION_STAGE_FIELD.to_owned(),
-                Value::Text(STAGE_PLANNED.to_owned()),
-            ),
-            ("progress_ticks".to_owned(), Value::U64(0)),
-            ("required_ticks".to_owned(), Value::U64(BUILD_TICKS)),
-            (
-                FURNITURE_PLACEMENT_MODEL_FIELD.to_owned(),
-                Value::Text(FURNITURE_PLACEMENT_MODEL.to_owned()),
-            ),
-            (FURNITURE_SOURCE_ITEM_FIELD.to_owned(), Value::Entity(item)),
-            (
-                FURNITURE_SOURCE_ITEM_GENERATION_FIELD.to_owned(),
-                Value::U64(1),
-            ),
-            (
-                FURNITURE_ATTACHMENT_STATE_FIELD.to_owned(),
-                Value::Text(ATTACHED.to_owned()),
-            ),
-        ],
+        fields,
     )?;
     write_fields(
         snapshot,
@@ -736,7 +786,7 @@ pub(super) fn place(
     )?;
     write_fields(
         snapshot,
-        ledger,
+        owner.id,
         vec![(stock_field.to_owned(), Value::U64(remaining))],
     )?;
     Ok(true)
@@ -765,10 +815,11 @@ pub(super) fn cancel(
     // The exact attachment is still allocated. Refuse stock contradiction or
     // overflow before returning this same item to the available inventory.
     let _loose = loose_furniture_items(snapshot, kind)?;
-    let ledger = stock_ledger(snapshot)
-        .ok_or_else(|| precondition("furniture stock ledger is not established"))?;
+    let owner = actual
+        .ledger
+        .ok_or_else(|| precondition("furniture refund has no original inventory custodian"))?;
     let stock_field = furniture_stock_field(kind);
-    let refunded = field_u64(entity(snapshot, ledger)?, stock_field, snapshot.tick)?
+    let refunded = field_u64(owner.ledger(snapshot)?, stock_field, snapshot.tick)?
         .checked_add(1)
         .ok_or_else(|| advance_budget_error("furniture cancellation would overflow stock"))?;
     write_fields(
@@ -798,7 +849,7 @@ pub(super) fn cancel(
     )?;
     write_fields(
         snapshot,
-        ledger,
+        owner.id,
         vec![(stock_field.to_owned(), Value::U64(refunded))],
     )?;
     Ok(true)

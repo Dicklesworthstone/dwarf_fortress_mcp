@@ -593,3 +593,233 @@ fn cancellation_preserves_produced_items_and_spent_logs() -> Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn original_inventory_owns_conditions_and_output_after_a_new_default_ledger() -> Result<()> {
+    let mut snapshot = world()?;
+    snapshot
+        .graph
+        .entities
+        .get_mut(&LEDGER)
+        .ok_or_else(|| precondition("fixture ledger missing"))?
+        .generation = 7;
+    let id = order(
+        &mut snapshot,
+        "owned beds",
+        "CONSTRUCT_BED",
+        3,
+        vec![
+            WorkOrderCondition::ItemCountBelow {
+                item_token: "BED".to_owned(),
+                threshold: 2,
+            },
+            WorkOrderCondition::MaterialAvailable {
+                material_token: "WOOD".to_owned(),
+                minimum: 1,
+            },
+        ],
+    )?;
+    advance(&mut snapshot, 25)?;
+    let unrelated = EntityId::new(31);
+    put(
+        &mut snapshot,
+        unrelated,
+        EntityKind::Other(STOCK_LEDGER_KIND.to_owned()),
+        vec![
+            (STOCK_DRINK_FIELD, Value::U64(100)),
+            (STOCK_FOOD_FIELD, Value::U64(100)),
+            (METABOLISM_TICKS_FIELD, Value::U64(0)),
+            (STOCK_WOOD_FIELD, Value::U64(0)),
+            (STOCK_BED_FIELD, Value::U64(99)),
+        ],
+    )?;
+    assert_eq!(stock_ledger(&snapshot), Some(unrelated));
+    let mut split = WorldSnapshot::from_canonical_bytes(&snapshot.canonical_bytes())?;
+    advance(&mut snapshot, 75)?;
+    advance(&mut split, 25)?;
+    advance(&mut split, 50)?;
+    assert_eq!(physical(&snapshot), physical(&split));
+    assert_eq!(count(&snapshot, LEDGER, STOCK_WOOD_FIELD)?, 8);
+    assert_eq!(count(&snapshot, LEDGER, STOCK_BED_FIELD)?, 2);
+    assert_eq!(count(&snapshot, unrelated, STOCK_WOOD_FIELD)?, 0);
+    assert_eq!(count(&snapshot, unrelated, STOCK_BED_FIELD)?, 99);
+    assert_eq!(count(&snapshot, id, AMOUNT_REMAINING_FIELD)?, 1);
+    assert_eq!(item_count(&snapshot), 2);
+    for owned in [id, produced_item_id(id, 1), produced_item_id(id, 2)] {
+        assert_eq!(
+            field_value(
+                entity(&snapshot, owned)?,
+                INVENTORY_LEDGER_FIELD,
+                snapshot.tick
+            ),
+            Some(&Value::Entity(LEDGER))
+        );
+        assert_eq!(
+            count(&snapshot, owned, INVENTORY_LEDGER_GENERATION_FIELD)?,
+            7
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn changed_inventory_custody_refuses_before_carpentry_and_unrelated_work() -> Result<()> {
+    for variant in 0..9 {
+        let mut snapshot = world()?;
+        let id = order(&mut snapshot, "owned beds", "CONSTRUCT_BED", 2, Vec::new())?;
+        advance(&mut snapshot, 25)?;
+        order(&mut snapshot, "unrelated", "CUT_GEMS", 1, Vec::new())?;
+        match variant {
+            0 => {
+                snapshot
+                    .graph
+                    .entities
+                    .get_mut(&LEDGER)
+                    .ok_or_else(|| precondition("fixture ledger missing"))?
+                    .generation = 2
+            }
+            1 => {
+                let mut replacement = snapshot
+                    .graph
+                    .entities
+                    .remove(&LEDGER)
+                    .ok_or_else(|| precondition("fixture ledger missing"))?;
+                replacement.id = EntityId::new(92);
+                snapshot.graph.entities.insert(replacement.id, replacement);
+            }
+            2 => {
+                snapshot
+                    .graph
+                    .entities
+                    .get_mut(&LEDGER)
+                    .ok_or_else(|| precondition("fixture ledger missing"))?
+                    .kind = EntityKind::Item
+            }
+            3 => {
+                snapshot
+                    .graph
+                    .entities
+                    .get_mut(&LEDGER)
+                    .ok_or_else(|| precondition("fixture ledger missing"))?
+                    .id = EntityId::new(92)
+            }
+            4 => {
+                snapshot
+                    .graph
+                    .entities
+                    .get_mut(&id)
+                    .ok_or_else(|| precondition("fixture order missing"))?
+                    .fields
+                    .remove(INVENTORY_LEDGER_GENERATION_FIELD);
+            }
+            5..=7 => {
+                let fact = snapshot
+                    .graph
+                    .entities
+                    .get_mut(&id)
+                    .ok_or_else(|| precondition("fixture order missing"))?
+                    .fields
+                    .get_mut(INVENTORY_LEDGER_FIELD)
+                    .ok_or_else(|| precondition("fixture custody missing"))?;
+                match variant {
+                    5 => fact.observed_at = GameTick(snapshot.tick.0 + 1),
+                    6 => fact.presence = Some(FactPresence::Unknown("lost custody".to_owned())),
+                    _ => fact.source = FactSource::AgentAssertion("new owner".to_owned()),
+                }
+            }
+            _ => set(
+                &mut snapshot,
+                id,
+                INVENTORY_LEDGER_GENERATION_FIELD,
+                Value::U64(0),
+            )?,
+        }
+        snapshot.tick = GameTick(snapshot.tick.0 + 25);
+        snapshot.refresh_hash();
+        let before = snapshot.clone();
+        assert!(
+            advance_effects(&mut snapshot, 25).is_err(),
+            "variant {variant}"
+        );
+        assert_eq!(snapshot, before, "variant {variant} mutated before refusal");
+    }
+    Ok(())
+}
+
+#[test]
+fn unbound_historical_carpentry_stays_blocked_without_inventing_inventory() -> Result<()> {
+    let mut snapshot = world()?;
+    let id = order(&mut snapshot, "legacy", "CONSTRUCT_BED", 1, Vec::new())?;
+    let record = snapshot
+        .graph
+        .entities
+        .get_mut(&id)
+        .ok_or_else(|| precondition("fixture order missing"))?;
+    record.fields.remove(INVENTORY_LEDGER_FIELD);
+    record.fields.remove(INVENTORY_LEDGER_GENERATION_FIELD);
+    snapshot.refresh_hash();
+    advance(&mut snapshot, 100)?;
+    assert_eq!(count(&snapshot, id, AMOUNT_REMAINING_FIELD)?, 1);
+    assert_eq!(count(&snapshot, id, "work_ticks")?, 0);
+    assert_eq!(count(&snapshot, LEDGER, STOCK_WOOD_FIELD)?, 10);
+    assert_eq!(item_count(&snapshot), 0);
+    assert!(
+        field_text(entity(&snapshot, id)?, BLOCKED_BY_FIELD, snapshot.tick)
+            .is_some_and(|reason| reason.contains("custody"))
+    );
+    assert!(cancel_effect(
+        &mut snapshot,
+        &Action::CreateWorkOrder {
+            name: "legacy".to_owned(),
+            job_token: "CONSTRUCT_BED".to_owned(),
+            amount: 1,
+            conditions: Vec::new(),
+        },
+        "legacy"
+    )?);
+    advance(&mut snapshot, 100)?;
+    assert_eq!(item_count(&snapshot), 0);
+    Ok(())
+}
+
+#[test]
+fn fresh_carpentry_refuses_unavailable_or_noncanonical_inventory_owners() -> Result<()> {
+    for variant in 0..4 {
+        let mut snapshot = world()?;
+        match variant {
+            0 => {
+                snapshot.graph.entities.remove(&LEDGER);
+            }
+            1 => {
+                snapshot
+                    .graph
+                    .entities
+                    .get_mut(&LEDGER)
+                    .ok_or_else(|| precondition("fixture ledger missing"))?
+                    .generation = 0
+            }
+            2 => {
+                snapshot
+                    .graph
+                    .entities
+                    .get_mut(&LEDGER)
+                    .ok_or_else(|| precondition("fixture ledger missing"))?
+                    .id = EntityId::new(92)
+            }
+            _ => {
+                let mut record = snapshot
+                    .graph
+                    .entities
+                    .remove(&LEDGER)
+                    .ok_or_else(|| precondition("fixture ledger missing"))?;
+                record.id = EntityId::NIL;
+                snapshot.graph.entities.insert(EntityId::NIL, record);
+            }
+        }
+        snapshot.refresh_hash();
+        let before = snapshot.clone();
+        assert!(order(&mut snapshot, "bed", "CONSTRUCT_BED", 1, Vec::new()).is_err());
+        assert_eq!(snapshot, before);
+    }
+    Ok(())
+}

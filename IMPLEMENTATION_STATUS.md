@@ -1,5 +1,33 @@
 # Implementation Status
 
+## Unreleased — Keep carpentry and furniture inventory with its original owner
+
+Fresh reference carpentry orders now retain the qualified stock ledger's identity
+and generation. Their stock conditions, WOOD consumption and output credits use
+that owner directly; each manufactured item and exact furniture placement carries
+the same binding. Placement debits and cancellation refunds therefore cannot move
+to a replacement ledger, while an unrelated lower-ID ledger cannot steal or block
+valid original work. Loose-item counts are checked separately against each
+original owner's stock.
+
+Active retained custody is checked before timeline events. Missing or replaced
+custodians, generation substitution, partial bindings and unqualified ownership
+refuse without inventory or unrelated physical progress. Historical completed and
+cancelled installations remain inspectable without recreating a former ledger;
+repeated cancellation stays inert. Unbound historical carpentry remains blocked,
+and unbound loose items cannot acquire new material ownership. Existing action,
+postcondition, planner and archive encodings are unchanged.
+
+All 442 actual intent tests pass: 286 unit and 156 integration tests, zero failures
+or ignored tests, including nine new regression groups. The 34 focused carpentry
+and furniture cases are included in that total. All 188 inventoried source and
+manifest inputs remained unchanged. Latest-nightly scoped formatting, whitespace
+checks and independent source/caller review pass. These are reference-engine
+results; full MCP/native/live qualification remains separate.
+
+Owners: `df-lab-conditional-production-c4p` and
+`df-lab-workshop-materials-6p8` (broader acceptance remains in progress).
+
 ## Unreleased — Resume original resource-project stock watches after restart
 
 Resource-project production children now retain complete scalar or portfolio
