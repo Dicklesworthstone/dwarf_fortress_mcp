@@ -30,12 +30,18 @@ fn put(
 }
 
 fn world() -> Result<WorldSnapshot> {
+    let mut graph = WorldGraph::default();
+    let workshop_floor = ChunkCoord { x: 0, y: 0, z: 1 };
+    graph.chunks.insert(
+        workshop_floor,
+        uniform_chunk(workshop_floor, tile_codes::FLOOR),
+    );
     let mut snapshot = WorldSnapshot::new(
         FortressId::new(9),
         GameTick(1_000),
         ObservationCursor::ORIGIN,
         false,
-        WorldGraph::default(),
+        graph,
     );
     for (id, brews) in [(CITIZEN, false), (BREWER, true)] {
         put(
@@ -823,12 +829,23 @@ fn timeline_budgets_and_clock_arithmetic_refuse_without_publishing_partial_event
 }
 
 fn production_workshop(snapshot: &mut WorldSnapshot, id: EntityId, kind: &str) -> Result<()> {
+    let position = MapCoord::new(
+        i32::try_from(id.get().checked_sub(50).ok_or_else(|| {
+            precondition("test workshop identity precedes its physical site range")
+        })?)
+        .map_err(|_| precondition("test workshop site exceeds its coordinate range"))?,
+        1,
+        1,
+    );
     put(
         snapshot,
         id,
         EntityKind::Building,
         vec![
             ("building_kind", Value::Text(kind.to_owned())),
+            ("position", Value::Coord(position)),
+            ("footprint_min", Value::Coord(position)),
+            ("footprint_max", Value::Coord(position)),
             (
                 CONSTRUCTION_STAGE_FIELD,
                 Value::Text(STAGE_COMPLETE.to_owned()),

@@ -1,5 +1,36 @@
 # Implementation Status
 
+## Unreleased — Revalidate active construction before physical progress
+
+Active construction now reuses the timeline's complete qualified building census
+before any physical event. Its current position must lie inside its bounded
+footprint, every footprint cell must be observed FLOOR and no other live
+building may intersect it. Generic and material-backed construction therefore
+cannot complete or consume held wood after a restored or externally changed
+site becomes invalid. Refusal preserves unrelated production and material
+custody; explicit cancellation still releases the held allocation.
+
+The floor check uses the existing bounded laboratory terrain reader. Mismatched
+chunk coordinates, invalid dimensions, empty or excessive runs and incomplete
+coverage cannot establish open floor. Terrain reads and full overlap scans are
+charged before work. Valid cancelled-site reuse, adjacent buildings, separate
+levels and original action/archive encodings remain supported.
+
+Six new progress regressions cover terrain corruption, overlap lifecycles,
+qualified geometry, valid reuse, exact work bounds and material/production
+atomicity with a successful positive control. All 797 intent/world tests pass
+(433 intent and 364 world, zero ignored), including all 26 new regressions
+across these three construction/excavation increments. The current-nightly
+locked/offline actual-source core run retained all 181 source/manifests unchanged.
+Independent review, scoped formatting and whitespace checks pass. Actual MCP
+laboratory seeds were inspected and already supply valid floor and footprints.
+Full workspace, MCP, native/live and compatibility qualification remain
+unestablished; repository verification is blocked by the missing br executable
+and the local toolchain does not include Clippy.
+
+Owners: `df-lab-workshop-materials-6p8`, `df-lab-shared-workforce-8n4`
+and `df-lab-connected-room-access-7c2` (in progress).
+
 ## Unreleased — Keep excavation and construction spatially compatible
 
 Reference excavation now checks changed cells against complete current building

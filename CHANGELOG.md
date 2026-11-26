@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Validate recovered construction before completion
+
+- Recheck active building positions, complete footprints, observed floor and
+  neighboring occupancy before any timeline event or material consumption.
+- Preserve held materials and unrelated work on refusal; retain cancellation,
+  adjacent construction and separate-level progress.
+- Reuse bounded terrain reads that reject malformed map chunks and precharge
+  their worst-case RLE work along with complete overlap scans.
+- Add six progress regressions with material-custody positive controls. All
+  797 intent/world tests pass, including 26 new tests across the three spatial
+  execution fixes, with zero failures or ignored tests.
+
 ## Unreleased — Exclude terrain-changing work from occupied construction
 
 - Refuse excavation beneath buildings at dispatch and before timeline progress;

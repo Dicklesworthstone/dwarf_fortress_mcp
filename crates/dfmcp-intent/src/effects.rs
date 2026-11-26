@@ -1699,6 +1699,17 @@ impl EffectTimeline {
                             "active building has noncanonical progress counters",
                         ));
                     }
+                    if occupied_buildings.is_none() {
+                        occupied_buildings =
+                            Some(excavation_occupancy::capture_buildings(snapshot, budget)?);
+                    }
+                    let buildings = occupied_buildings.as_ref().ok_or_else(|| {
+                        DfmcpError::new(
+                            ErrorCode::InternalInvariantViolation,
+                            "construction occupancy census was not retained",
+                        )
+                    })?;
+                    occupancy::validate_progress(snapshot, record, buildings, budget)?;
                     timeline.buildings.push(record.id);
                 }
                 EntityKind::Other(kind)
@@ -2710,6 +2721,10 @@ mod tests;
 #[cfg(test)]
 #[path = "effects_construction_occupancy_tests.rs"]
 mod construction_occupancy_tests;
+
+#[cfg(test)]
+#[path = "effects_construction_progress_tests.rs"]
+mod construction_progress_tests;
 
 #[cfg(test)]
 #[path = "effects_excavation_occupancy_tests.rs"]

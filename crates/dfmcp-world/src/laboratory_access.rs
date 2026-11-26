@@ -352,6 +352,18 @@ impl Grid {
     }
 }
 
+/// Read current laboratory terrain from a bounded, well-formed canonical chunk.
+/// The stored coordinate must match its map key, dimensions must be 16 by 16,
+/// and at most 256 nonempty runs must cover exactly 256 tiles. Malformed or
+/// missing chunks return `None`; explicit UNKNOWN tile codes remain unchanged.
+///
+/// This performs at most 256 run visits and allocates nothing. It establishes
+/// only current chunk geometry, not mutation authority or native provenance.
+#[must_use]
+pub fn laboratory_bounded_tile_code(snapshot: &WorldSnapshot, at: MapCoord) -> Option<u32> {
+    bounded_tile_code(snapshot, at)
+}
+
 fn bounded_tile_code(snapshot: &WorldSnapshot, at: MapCoord) -> Option<u32> {
     use crate::terrain::{TERRAIN_CHUNK_EDGE, TERRAIN_CHUNK_TILES, tile_slot};
     let slot = tile_slot(at);

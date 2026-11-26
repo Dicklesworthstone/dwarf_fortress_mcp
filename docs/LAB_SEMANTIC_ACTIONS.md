@@ -57,6 +57,14 @@ bounded to 65,536 region tiles and 65,536 footprints, with charged scans and
 allocation work. Disjoint regions skip the grid after the complete census.
 These runtime exclusions do not change archived action or planner generations.
 
+Before any timeline event, active construction also revalidates its qualified
+position inside its current footprint, observed FLOOR across that footprint
+and separation from every other live building. The shared census is captured
+once; full overlap scans and bounded terrain reads are charged before work.
+Malformed chunk identity, dimensions, RLE runs or coverage cannot establish
+open floor. A refused site leaves held materials and unrelated production
+untouched. Explicit cancellation still releases the original material hold.
+
 Before publishing a new terminal proof, ordinary `build` and
 `create_work_order` actions also require the original typed entity at generation
 one and eligible, nonfuture evidence for its immutable parameters. Building
