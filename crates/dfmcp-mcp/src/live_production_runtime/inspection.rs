@@ -2,6 +2,7 @@
 //! of a successfully published original goal. Query itself performs no native
 //! contact, reprojection, or new proof-authority issuance.
 use super::*;
+use dfmcp_adapter::operations_analysis::OperationsStateView;
 use dfmcp_adapter::semantic_work_orders::WorkOrderGoalProjection;
 use dfmcp_core::{DfmcpError, ErrorCode, StepId};
 use dfmcp_world::WorldSnapshot;
@@ -17,7 +18,7 @@ mod production_chain;
 #[path = "../semantic_query_core.rs"]
 mod structured;
 // Shared pure query engines use the same typed filter decoder and exact source
-// anchor. Stateful watches and effect-bearing artifacts remain outside this API.
+// anchor. Allocation artifacts carry no placement authority.
 use structured as core_query;
 #[allow(clippy::duplicate_mod)]
 #[path = "../event_query.rs"]
@@ -40,6 +41,7 @@ const MAX_QUERY_TOKENS: u32 = 4_096;
 pub(super) const QUERY_KINDS: &[&str] = &[
     "production_diagnosis",
     "inventory_plan",
+    "furniture_allocation",
     "production_chain",
     "production_chain_compare",
     "entities",
@@ -93,11 +95,41 @@ impl InspectionRequest {
                 "unsupported production inspection schema or query kind",
             ));
         }
+        if envelope.query["kind"] == "furniture_allocation" && envelope.expected_anchor.is_none() {
+            return Err(invalid("furniture allocation requires the captured operations anchor"));
+        }
         let mut value = json!({"schema":envelope.schema,"query":envelope.query});
         if let Some(anchor) = envelope.expected_anchor {
             value["expected_anchor"] = anchor;
         }
         Ok(Self(value))
+    }
+
+    fn execute(
+        mut self,
+        source: &impl OperationsStateView,
+        context: &OperationContext,
+    ) -> Result<Value> {
+        if self.0["query"]["kind"] == "furniture_allocation" {
+            // Bind room coordinates and item choices to the captured fortress.
+            // Explicit identities from a portable request remain preconditions
+            // and are independently checked by the shared allocator.
+            let observation = source.operations_observation()
+                .ok_or_else(|| denied("furniture allocation requires a complete operations capture"))?;
+            let query = self.0["query"].as_object_mut()
+                .ok_or_else(|| invalid("invalid furniture allocation query"))?;
+            query.entry("world_folder").or_insert_with(|| json!(observation.jobs.world_folder));
+            query.entry("site").or_insert_with(|| json!(observation.jobs.site_id));
+        }
+        if production_chain::handles(&self.0) {
+            production_chain::execute(source, context, &self.0)
+        } else if production::handles(&self.0) {
+            production::execute(source, context, &self.0)
+        } else {
+            let snapshot = source.operations_snapshot()
+                .ok_or_else(|| denied("production inspection projection absent"))?;
+            execute_structured(snapshot, context, &self.0)
+        }
     }
 }
 
@@ -338,17 +370,12 @@ impl Runtime {
         query_context.anchor = source.projection.anchor();
         query_context.budget.max_output_tokens =
             query_context.budget.max_output_tokens.min(MAX_QUERY_TOKENS);
-        let mut payload = if production_chain::handles(&request.0) {
-            production_chain::execute(&source.projection, &query_context, &request.0)?
-        } else if production::handles(&request.0) {
-            production::execute(&source.projection, &query_context, &request.0)?
-        } else {
-            execute_structured(snapshot, &query_context, &request.0)?
-        };
+        let mut payload = request.execute(&source.projection, &query_context)?;
         payload["inspection_scope"] = json!("captured_operations");
         payload["attribution"] = json!("not_order_attributed");
         payload["source_digest"] = json!(source.projection.source_digest().to_hex());
         payload["order_step_id"] = json!(source.step.get());
+        payload["original_goal_evidence"] = json!(false);
         payload["mutation_authority"] = json!(false);
         payload["commit_compatible"] = json!(false);
 
@@ -418,13 +445,7 @@ impl Runtime {
         query_context.anchor = snapshot.anchor();
         query_context.budget.max_output_tokens =
             query_context.budget.max_output_tokens.min(MAX_QUERY_TOKENS);
-        let mut payload = if production_chain::handles(&request.0) {
-            production_chain::execute(source, &query_context, &request.0)?
-        } else if production::handles(&request.0) {
-            production::execute(source, &query_context, &request.0)?
-        } else {
-            execute_structured(snapshot, &query_context, &request.0)?
-        };
+        let mut payload = request.execute(source, &query_context)?;
         payload["inspection_scope"] = json!("preplan_captured_operations");
         payload["observation_phase"] = json!("before_plan");
         payload["attribution"] = json!("not_order_attributed");
@@ -453,7 +474,8 @@ mod tests {
     #[test]
     fn inspection_envelope_is_closed_and_cannot_select_effects() {
         for kind in QUERY_KINDS {
-            let request = json!({"schema":"dfmcp.query/1","query":{"kind":kind}});
+            let request = json!({"schema":"dfmcp.query/1","expected_anchor":{"tick":1},
+                "query":{"kind":kind}});
             assert!(InspectionRequest::parse(&request.to_string()).is_ok());
         }
         for raw in [

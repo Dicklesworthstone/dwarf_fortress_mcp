@@ -325,3 +325,51 @@ fn aggregate_source_and_final_stock_metadata_stay_inside_their_budgets() -> Resu
         Err(error) if error.code == ErrorCode::BudgetExceeded));
     Ok(())
 }
+
+#[test]
+fn furniture_allocation_uses_the_captured_fortress_and_never_reserves_items() -> Result<()> {
+    let source = source()?;
+    let snapshot = source.snapshot().expect("operations snapshot");
+    let context = context(snapshot);
+    let anchor = anchor_json(snapshot.anchor());
+    let query = json!({"kind":"furniture_allocation",
+        "slots":[{"name":"bed","kind":"bed","target":[2,2,3]}]});
+    let request = |query: Value, anchor: Value| {
+        InspectionRequest::parse(&json!({"schema":"dfmcp.query/1",
+            "expected_anchor":anchor,"query":query}).to_string())
+    };
+
+    let allocation = request(query.clone(), anchor.clone())?.execute(&source, &context)?;
+    assert_eq!(allocation["status"], "allocated");
+    assert_eq!(allocation["anchor"], anchor);
+    assert_eq!(allocation["source_digest"], source.source_digest()?.to_hex());
+    assert_eq!(allocation["plan"]["steps"][0]["item"], 6);
+    assert_eq!(allocation["request"]["world_folder"], "region1");
+    assert_eq!(allocation["request"]["site"], 4);
+    assert_eq!(allocation["items_reserved"], false);
+    assert_eq!(allocation["commit_compatible"], false);
+    assert_eq!(allocation["game_effect_performed"], false);
+
+    let mut excluded = query.clone();
+    excluded["excluded_items"] = json!([6]);
+    let shortage = request(excluded, anchor.clone())?.execute(&source, &context)?;
+    assert_eq!(shortage["status"], "shortage");
+    assert_eq!(shortage["shortage"]["missing"], 1);
+    assert!(shortage["plan"].is_null());
+
+    for (key, value) in [("world_folder", json!("elsewhere")), ("site", json!(7))] {
+        let mut foreign = query.clone();
+        foreign[key] = value;
+        assert!(matches!(request(foreign, anchor.clone())?.execute(&source, &context),
+            Err(error) if error.code == ErrorCode::StaleAnchor));
+    }
+    let mut stale = anchor.clone();
+    stale["tick"] = json!(121);
+    assert!(matches!(request(query.clone(), stale)?.execute(&source, &context),
+        Err(error) if error.code == ErrorCode::StaleAnchor));
+    let mut small = context;
+    small.budget.max_output_tokens = 1;
+    assert!(matches!(request(query, anchor)?.execute(&source, &small),
+        Err(error) if error.code == ErrorCode::BudgetExceeded));
+    Ok(())
+}

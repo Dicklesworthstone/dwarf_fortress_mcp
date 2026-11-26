@@ -192,6 +192,15 @@ fn native_preflight_inspection_is_read_only_and_growth_plan_acquires_its_own_bas
         diagnosis["production_inspection"]["anchor"],
         source["anchor"]
     );
+    // The fixture has observed BED stock, but its stack of seven is not a
+    // placeable singleton. Keep that distinction through the public Query.
+    let furniture = inspect(&mut runtime, source, json!({"kind":"furniture_allocation",
+        "slots":[{"name":"bed","kind":"bed","target":[2,2,3]}]}))?;
+    let allocation = &furniture["production_inspection"];
+    assert_eq!(allocation["status"], "shortage");
+    assert_eq!(allocation["source_digest"], source["source_digest"]);
+    assert_eq!(allocation["original_goal_evidence"], false);
+    assert!(allocation["plan"].is_null());
     let first_chain = inspect(&mut runtime, source, declared_chain())?;
     let chain = &first_chain["production_inspection"];
     assert_eq!(chain["anchor"], source["anchor"]);

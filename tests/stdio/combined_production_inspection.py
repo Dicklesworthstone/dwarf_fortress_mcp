@@ -180,6 +180,29 @@ class InspectionTests:
         self.assertEqual(relationships['witness']['anchor'], report['anchor'])
         self.assert_single_original_effects(first, original)
 
+    def test_captured_furniture_can_be_assigned_without_changing_the_original_order(self):
+        self.peer.operations_capture = operations_capture
+        sid, _, _ = self.order_plan()
+        self.peer.inventory_stack = 1
+        current = self.goal_sample(sid, 125, inventory=False)
+        source = current['production_inspection_source']
+        self.assertIn('furniture_allocation', source['query_kinds'])
+        query = {'kind': 'furniture_allocation',
+                 'slots': [{'name': 'bed', 'kind': 'bed', 'target': [1, 1, 1]}]}
+        allocated = self.assert_inspection(
+            self.inspection_request(sid, envelope(query, source['anchor'])), current)
+        self.assertEqual(allocated['status'], 'allocated')
+        self.assertEqual(allocated['plan']['steps'][0]['item'], 6)
+        self.assertFalse(allocated['items_reserved'])
+        self.assertFalse(allocated['game_effect_performed'])
+        self.assertFalse(allocated['original_goal_evidence'])
+        query['excluded_items'] = [6]
+        shortage = self.assert_inspection(
+            self.inspection_request(sid, envelope(query, source['anchor'])), current)
+        self.assertEqual(shortage['shortage']['missing'], 1)
+        self.assertIsNone(shortage['plan'])
+        self.assert_inspection_refused(self.inspection_request(sid, envelope(query, current['anchor'])))
+
     def test_production_inspection_joint_inventory_and_graph_queries_use_one_capture(self):
         self.peer.operations_capture = operations_capture
         sid, _, _ = self.inventory_plan()
