@@ -90,12 +90,44 @@ fn qualified(snapshot: &WorldSnapshot, mut alert: Json) -> Json {
     alert
 }
 
-fn supply_alerts(snapshot: &WorldSnapshot, population: &Population<'_>) -> Vec<Json> {
-    let Some(ledger) =
-        effects::stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id))
-    else {
-        return Vec::new();
+/// Elapsed game ticks until stock is empty and until at least one dwarf goes
+/// without. The simulator consumes on the ledger's periodic boundaries. An
+/// exact last full round empties the ledger without leaving anyone unserved.
+fn supply_timing(
+    held: Option<u64>,
+    living: u64,
+    metabolism: Option<u64>,
+    interval: u64,
+    world_tick: u64,
+) -> (Option<u64>, Option<u64>) {
+    let Some(held) = held.filter(|_| living > 0) else {
+        return (None, None);
     };
+    let ticks_to_round = |round: u64| -> Option<u64> {
+        if round == 0 {
+            return Some(0);
+        }
+        let clock = metabolism?;
+        let next = interval - clock % interval;
+        let elapsed = (round - 1).checked_mul(interval)?.checked_add(next)?;
+        clock.checked_add(elapsed)?;
+        world_tick.checked_add(elapsed)?;
+        Some(elapsed)
+    };
+    (
+        ticks_to_round(held.div_ceil(living)),
+        (held / living).checked_add(1).and_then(ticks_to_round),
+    )
+}
+
+fn supply_alerts(snapshot: &WorldSnapshot, population: &Population<'_>) -> Vec<Json> {
+    let ledger = effects::stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id));
+    let metabolism = ledger.and_then(|ledger| {
+        match production_fact(ledger, effects::METABOLISM_TICKS_FIELD, snapshot.tick) {
+            Some(Value::U64(ticks)) => Some(*ticks),
+            _ => None,
+        }
+    });
     if population.living.is_empty() && population.complete() {
         return Vec::new();
     }
@@ -123,24 +155,33 @@ fn supply_alerts(snapshot: &WorldSnapshot, population: &Population<'_>) -> Vec<J
             "PREPARE_MEAL",
         ),
     ] {
-        let held = match production_fact(ledger, stock, snapshot.tick) {
+        let held = match ledger.and_then(|ledger| production_fact(ledger, stock, snapshot.tick)) {
             Some(Value::U64(held)) => Some(*held),
             _ => None,
         };
         let mut known_deprived = 0usize;
         let mut unknown_needs = population.unknown;
+        let mut unavailable_reports = 0usize;
         for unit in &population.living {
             match production_fact(unit, need, snapshot.tick) {
                 Some(Value::Text(state)) if state == deprived => known_deprived += 1,
                 Some(Value::Text(state)) if state == "satisfied" => {}
-                _ => unknown_needs += 1,
+                _ => {
+                    unknown_needs += 1;
+                    unavailable_reports += usize::from(unit.fields.contains_key(need));
+                }
             }
         }
         let target = population.complete().then_some(living.saturating_mul(4));
-        let ticks_left = if population.complete() && living > 0 {
-            held.and_then(|held| (held / living).checked_mul(interval))
+        // Worlds without a metabolism produce no need reports. Preserve any
+        // actual citizen report even if its stock ledger has disappeared.
+        if ledger.is_none() && known_deprived == 0 && unavailable_reports == 0 {
+            continue;
+        }
+        let (ticks_left, first_unserved) = if population.complete() {
+            supply_timing(held, living, metabolism, interval, snapshot.tick.0)
         } else {
-            None
+            (None, None)
         };
         let shortfall = held.zip(target).filter(|(held, target)| held < target);
         let (severity, epistemic, finding) = if known_deprived > 0 {
@@ -177,8 +218,23 @@ fn supply_alerts(snapshot: &WorldSnapshot, population: &Population<'_>) -> Vec<J
                     "{noun} sufficiency is unknown: current stock or the complete living roster is not established"
                 ),
             )
+        } else if unavailable_reports > 0 {
+            alerts.push(json!({
+                "alert":format!("{noun}_need_coverage"), "severity":"medium",
+                "epistemic_state":"unknown",
+                "finding":format!("{unavailable_reports} living dwarves have unavailable {noun} need reports"),
+                "unknown_need_units":unknown_needs, "unavailable_need_reports":unavailable_reports,
+                "known_deprived_units":known_deprived, "stock":held, "remedy":null,
+            }));
+            continue;
         } else {
             continue;
+        };
+        let finding = match first_unserved {
+            Some(ticks) => format!(
+                "{finding}. With the current population and no replenishment, some dwarves would go without {noun} in {ticks} game ticks."
+            ),
+            None => finding,
         };
         let (blocker, assign_labor) = if shortfall.is_some() {
             production_capacity(snapshot, population, job)
@@ -189,7 +245,8 @@ fn supply_alerts(snapshot: &WorldSnapshot, population: &Population<'_>) -> Vec<J
             "alert":format!("{noun}_supply"), "severity":severity,
             "epistemic_state":epistemic, "finding":finding, "stock":held,
             "ticks_until_exhausted":ticks_left,
-            "estimate_basis":"whole consumption rounds at the laboratory calibration",
+            "ticks_until_first_unserved_round":first_unserved,
+            "estimate_basis":"prediction using the observed metabolism phase with constant population and no stock changes except consumption",
             "living_units":population.complete().then_some(living),
             "known_living_units":living, "unknown_living_units":population.unknown,
             "deprived_units":(unknown_needs == 0).then_some(known_deprived),

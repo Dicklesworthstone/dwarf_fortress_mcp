@@ -399,3 +399,29 @@ fn public_wait_pulse_retains_unknown_alert_evidence() -> TestResult {
 
 #[path = "lab_harvest_alerts_mcp_tests.rs"]
 mod harvesting;
+
+#[test]
+fn public_observation_distinguishes_empty_stock_from_the_first_missed_drink() -> TestResult {
+    let session = open("98795", "starter_fortress", false)?;
+    edit(&session, |snapshot| {
+        write(snapshot, EntityId::new(5001), "stock.drink", WorldValue::U64(7))?;
+        write(
+            snapshot,
+            EntityId::new(5001),
+            "metabolism_ticks",
+            WorldValue::U64(dfmcp_intent::effects::DRINK_INTERVAL_TICKS - 1),
+        )
+    })?;
+    let observed = parsed(&fortress_observe(Some(session)))?;
+    assert_eq!(observed["ok"], true, "{observed}");
+    let alert = observed["world_alerts"]
+        .as_array()
+        .ok_or("alerts missing")?
+        .iter()
+        .find(|alert| alert["alert"] == "drink_supply")
+        .ok_or("drink alert missing")?;
+    assert_eq!(alert["stock"], 7);
+    assert_eq!(alert["ticks_until_exhausted"], 1);
+    assert_eq!(alert["ticks_until_first_unserved_round"], 1 + dfmcp_intent::effects::DRINK_INTERVAL_TICKS);
+    Ok(())
+}

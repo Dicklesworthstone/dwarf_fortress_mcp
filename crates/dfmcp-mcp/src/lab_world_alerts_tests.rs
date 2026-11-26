@@ -464,3 +464,114 @@ fn bounded_threat_selection_keeps_critical_hazards_and_names_omissions() -> Test
     assert_eq!(alerts, world_alerts(&snapshot));
     Ok(())
 }
+
+#[test]
+fn supply_deadlines_follow_the_registered_consumption_boundaries() -> TestResult {
+    let interval = effects::DRINK_INTERVAL_TICKS;
+    for (stock, empty_after, first_missed_after) in [
+        (0, 0, 1),
+        (3, 1, 1),
+        (7, 1, 1 + interval),
+        (8, 1 + interval, 1 + interval),
+    ] {
+        let mut snapshot = source()?;
+        set(
+            &mut snapshot,
+            starter::STOCK_LEDGER,
+            effects::METABOLISM_TICKS_FIELD,
+            lab_fact(Value::U64(interval - 1)),
+        )?;
+        set(
+            &mut snapshot,
+            starter::STOCK_LEDGER,
+            effects::STOCK_DRINK_FIELD,
+            lab_fact(Value::U64(stock)),
+        )?;
+        let initial = drink(&snapshot)?;
+        assert_eq!(initial["ticks_until_exhausted"], empty_after);
+        assert_eq!(initial["ticks_until_first_unserved_round"], first_missed_after);
+
+        // Check both reported boundaries against actual physical stock and
+        // need transitions, with no production between observations.
+        for elapsed in [empty_after, first_missed_after - 1, first_missed_after] {
+            let mut advanced = snapshot.clone();
+            advanced.tick = GameTick::new(snapshot.tick.0 + elapsed);
+            effects::advance_effects(&mut advanced, elapsed)?;
+            advanced.refresh_hash();
+            let actual = drink(&advanced)?;
+            assert_eq!(actual["stock"] == 0, elapsed >= empty_after);
+            assert_eq!(actual["known_deprived_units"] != 0, elapsed >= first_missed_after);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn unqualified_metabolism_and_unrepresentable_times_cannot_supply_a_deadline() -> TestResult {
+    let mut snapshot = source()?;
+    set(
+        &mut snapshot,
+        starter::STOCK_LEDGER,
+        effects::STOCK_DRINK_FIELD,
+        lab_fact(Value::U64(3)),
+    )?;
+    let mut unknown = lab_fact(Value::U64(effects::DRINK_INTERVAL_TICKS - 1));
+    unknown.source = FactSource::Replay;
+    for clock in [unknown, lab_fact(Value::U64(u64::MAX))] {
+        set(
+            &mut snapshot,
+            starter::STOCK_LEDGER,
+            effects::METABOLISM_TICKS_FIELD,
+            clock,
+        )?;
+        let alert = drink(&snapshot)?;
+        assert_eq!(alert["stock"], 3);
+        assert!(alert["ticks_until_exhausted"].is_null());
+        assert!(alert["ticks_until_first_unserved_round"].is_null());
+    }
+    Ok(())
+}
+
+#[test]
+fn observed_deprivation_survives_missing_economy_without_inventing_a_shortage() -> TestResult {
+    let mut snapshot = source()?;
+    snapshot.graph.entities.remove(&starter::STOCK_LEDGER);
+    snapshot.refresh_hash();
+    assert!(world_alerts(&snapshot).iter().all(|alert| alert["alert"] != "drink_supply"));
+    set(
+        &mut snapshot,
+        EntityId::new(1001),
+        effects::NEED_DRINK_FIELD,
+        lab_fact(Value::Text("thirsty".to_owned())),
+    )?;
+    let alert = drink(&snapshot)?;
+    assert_eq!(alert["severity"], "critical");
+    assert_eq!(alert["epistemic_state"], "certified_derived");
+    assert_eq!(alert["known_deprived_units"], 1);
+    for field in ["stock", "ticks_until_exhausted", "ticks_until_first_unserved_round", "remedy"] {
+        assert!(alert[field].is_null(), "{field}: {alert}");
+    }
+    Ok(())
+}
+
+#[test]
+fn explicit_unavailable_welfare_with_ample_stock_stays_visible_without_a_remedy() -> TestResult {
+    let mut snapshot = source()?;
+    let mut unknown = lab_fact(Value::Text("thirsty".to_owned()));
+    unknown.presence = Some(FactPresence::Redacted("withheld".to_owned()));
+    set(
+        &mut snapshot,
+        EntityId::new(1001),
+        effects::NEED_DRINK_FIELD,
+        unknown,
+    )?;
+    let alerts = world_alerts(&snapshot);
+    assert!(alerts.iter().all(|alert| alert["alert"] != "drink_supply"));
+    let coverage = alerts.iter().find(|alert| alert["alert"] == "drink_need_coverage")
+        .ok_or("missing citizen need coverage")?;
+    assert_eq!(coverage["epistemic_state"], "unknown");
+    assert_eq!(coverage["unavailable_need_reports"], 1);
+    assert_eq!(coverage["known_deprived_units"], 0);
+    assert!(coverage["remedy"].is_null());
+    Ok(())
+}

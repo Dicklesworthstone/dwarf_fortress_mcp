@@ -1,0 +1,1 @@
+Food and drink alerts distinguish exhaustion from the first missed ration, using the reference metabolism phase. Hunger and thirst evidence survives a missing stock ledger. The timing model matched a separate round-by-round calculation across 78,897 cases. The Rust and Observe regressions have not executed on this source. Owner: df-lab-alert-evidence-w5a.
