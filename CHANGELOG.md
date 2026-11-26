@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Reject malformed terrain at the shared simulation boundary
+
+- Require chunk lookup identity and one to 256 positive RLE runs totaling
+  256 cells before terrain reads or writes.
+- Keep malformed terrain unknown to room proofs and refuse excavation,
+  construction and nominal no-op edits without mutating the source.
+- Preserve valid coordinate extremes, maximally fragmented chunks and explicit
+  UNKNOWN cells.
+- Add three world regression groups and three public effect integration groups.
+  The full world library suite passes 156 tests on current nightly; intent
+  integration execution and full workspace/native/live qualification are
+  separate at this checkpoint.
+
 ## Unreleased — Recover guarded actions and provision furnished rooms
 
 - Durable laboratory commits return a restorable pre-action checkpoint for guarded plans. Failed checkpoint publication rolls back the staged laboratory action.

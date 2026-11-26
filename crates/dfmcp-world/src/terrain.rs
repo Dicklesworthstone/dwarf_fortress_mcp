@@ -2,9 +2,11 @@
 //!
 //! Canonical terrain is stored as run-length encoded 16x16x1 chunks keyed by
 //! `ChunkCoord { x: x.div_euclid(16), y: y.div_euclid(16), z }`, matching the
-//! spatial index. A tile whose chunk is absent, malformed, or not 16x16 is
-//! unknown: region predicates never treat missing terrain as a match. Partially
-//! observed chunks retain explicit UNKNOWN cells instead of inventing terrain.
+//! spatial index. Each chunk must match its lookup coordinate and contain at
+//! most 256 positive runs covering exactly 256 tiles. A tile whose chunk is
+//! absent, malformed, or not 16x16 is unknown: region predicates never treat
+//! missing terrain as a match. Partially observed chunks retain explicit UNKNOWN
+//! cells instead of inventing terrain.
 
 use dfmcp_core::{DfmcpError, ErrorCode, MapCoord, MapCuboid, Result};
 
@@ -55,20 +57,26 @@ pub fn tile_slot(coord: MapCoord) -> TileSlot {
     }
 }
 
-fn chunk_is_canonical(chunk: &MapChunk) -> bool {
-    i32::from(chunk.width) == TERRAIN_CHUNK_EDGE
+fn chunk_is_canonical(chunk: &MapChunk, expected: ChunkCoord) -> bool {
+    chunk.coord == expected
+        && i32::from(chunk.width) == TERRAIN_CHUNK_EDGE
         && i32::from(chunk.height) == TERRAIN_CHUNK_EDGE
+        // Bound the source before scanning or allocating. Zero-length runs can
+        // otherwise give an arbitrarily large vector an apparently valid sum.
+        && !chunk.terrain_runs.is_empty()
+        && chunk.terrain_runs.len() <= TERRAIN_CHUNK_TILES as usize
+        && chunk.terrain_runs.iter().all(|run| run.length > 0)
         && chunk.encoded_tile_count() == Some(TERRAIN_CHUNK_TILES)
 }
 
-fn code_in_chunk(chunk: &MapChunk, offset: u32) -> Option<u32> {
-    if !chunk_is_canonical(chunk) {
+fn code_in_chunk(chunk: &MapChunk, slot: TileSlot) -> Option<u32> {
+    if !chunk_is_canonical(chunk, slot.chunk) {
         return None;
     }
     let mut start = 0u32;
     for run in &chunk.terrain_runs {
         let end = start.checked_add(run.length)?;
-        if offset < end {
+        if slot.offset < end {
             return Some(run.tile_code);
         }
         start = end;
@@ -91,8 +99,8 @@ fn encode_runs(codes: &[u32]) -> Vec<TerrainRun> {
     runs
 }
 
-fn decode_runs(chunk: &MapChunk) -> Option<Vec<u32>> {
-    if !chunk_is_canonical(chunk) {
+fn decode_runs(chunk: &MapChunk, expected: ChunkCoord) -> Option<Vec<u32>> {
+    if !chunk_is_canonical(chunk, expected) {
         return None;
     }
     let mut codes = Vec::with_capacity(TERRAIN_CHUNK_TILES as usize);
@@ -150,7 +158,7 @@ impl WorldSnapshot {
         self.graph
             .chunks
             .get(&slot.chunk)
-            .and_then(|chunk| code_in_chunk(chunk, slot.offset))
+            .and_then(|chunk| code_in_chunk(chunk, slot))
             .filter(|code| *code != tile_codes::UNKNOWN)
     }
 
@@ -187,7 +195,7 @@ impl WorldSnapshot {
                 format!("terrain at {coord:?} is not observed"),
             )
         })?;
-        let mut codes = decode_runs(chunk).ok_or_else(|| {
+        let mut codes = decode_runs(chunk, slot.chunk).ok_or_else(|| {
             DfmcpError::new(
                 ErrorCode::PreconditionsFailed,
                 format!("terrain chunk containing {coord:?} is not a canonical 16x16 chunk"),
@@ -331,6 +339,155 @@ mod tests {
         assert_eq!(
             snapshot().region_terrain_truth(huge, 2),
             RegionTruth::Unknown
+        );
+        Ok(())
+    }
+
+    fn corrupt_chunk(chunk: &mut MapChunk, variant: usize) {
+        match variant {
+            0 => chunk.coord.x += 1,
+            1 => chunk.coord.y -= 1,
+            2 => chunk.coord.z += 1,
+            3 => chunk.terrain_runs.insert(
+                0,
+                TerrainRun {
+                    tile_code: tile_codes::FLOOR,
+                    length: 0,
+                },
+            ),
+            4 => chunk.terrain_runs.push(TerrainRun {
+                tile_code: tile_codes::FLOOR,
+                length: 0,
+            }),
+            5 => chunk.terrain_runs.extend(std::iter::repeat_n(
+                TerrainRun {
+                    tile_code: tile_codes::SOLID_WALL,
+                    length: 0,
+                },
+                TERRAIN_CHUNK_TILES as usize,
+            )),
+            6 => chunk.width = 15,
+            7 => chunk.height = 17,
+            8 => chunk.terrain_runs[0].length = TERRAIN_CHUNK_TILES - 1,
+            9 => chunk.terrain_runs[0].length = TERRAIN_CHUNK_TILES + 1,
+            10 => chunk.terrain_runs.clear(),
+            _ => chunk.terrain_runs.push(TerrainRun {
+                tile_code: tile_codes::SOLID_WALL,
+                length: u32::MAX,
+            }),
+        }
+    }
+
+    #[test]
+    fn malformed_chunks_are_unknown_for_reads_proof_and_inert_for_writes() -> Result<()> {
+        let at = MapCoord::new(3, 2, 5);
+        let key = tile_slot(at).chunk;
+        for variant in 0..12 {
+            let mut source = snapshot();
+            let chunk = source.graph.chunks.get_mut(&key).ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "terrain fixture missing",
+                )
+            })?;
+            corrupt_chunk(chunk, variant);
+            source.refresh_hash();
+            assert_eq!(source.tile_code_at(at), None, "variant {variant}");
+            assert_eq!(
+                source.region_terrain_truth(area((3, 2, 5), (3, 2, 5))?, tile_codes::SOLID_WALL),
+                RegionTruth::Unknown,
+                "variant {variant}",
+            );
+            let proof = crate::Predicate::RegionTerrain {
+                area: area((3, 2, 5), (3, 2, 5))?,
+                tile_code: tile_codes::SOLID_WALL,
+            };
+            if variant < 3 {
+                // Scoped evidence already refuses aliased map keys at admission.
+                assert!(crate::PredicateEvidence::laboratory(&source).is_err());
+            } else {
+                let evidence = crate::PredicateEvidence::laboratory(&source)?;
+                assert_eq!(evidence.evaluate(&proof)?, crate::PredicateTruth::Unknown);
+                assert_eq!(
+                    evidence.evaluate(&crate::Predicate::Not(Box::new(proof)))?,
+                    crate::PredicateTruth::Unknown,
+                );
+            }
+            // Even a nominal no-op must not endorse malformed source geometry.
+            for code in [tile_codes::SOLID_WALL, tile_codes::FLOOR] {
+                let mut attempted = source.clone();
+                let error = attempted.set_tile_code(at, code).err().ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        "malformed terrain unexpectedly accepted mutation",
+                    )
+                })?;
+                assert_eq!(
+                    error.code,
+                    ErrorCode::PreconditionsFailed,
+                    "variant {variant}"
+                );
+                assert_eq!(attempted, source, "variant {variant}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn maximum_run_count_and_coordinate_extremes_remain_observed() -> Result<()> {
+        for at in [
+            MapCoord::new(i32::MIN, i32::MIN, i32::MIN),
+            MapCoord::new(-1, -1, -1),
+            MapCoord::new(0, 0, 0),
+            MapCoord::new(15, 15, 5),
+            MapCoord::new(i32::MAX, i32::MAX, i32::MAX),
+        ] {
+            let slot = tile_slot(at);
+            let mut source = snapshot();
+            let mut chunk = uniform_chunk(slot.chunk, tile_codes::SOLID_WALL);
+            chunk.terrain_runs = (0..TERRAIN_CHUNK_TILES)
+                .map(|offset| TerrainRun {
+                    tile_code: if offset % 2 == 0 {
+                        tile_codes::SOLID_WALL
+                    } else {
+                        tile_codes::FLOOR
+                    },
+                    length: 1,
+                })
+                .collect();
+            let expected = chunk.terrain_runs[slot.offset as usize].tile_code;
+            source.graph.chunks.insert(slot.chunk, chunk);
+            assert_eq!(source.tile_code_at(at), Some(expected));
+            assert!(!source.set_tile_code(at, expected)?);
+            assert!(source.set_tile_code(at, tile_codes::STAIR)?);
+            assert_eq!(source.tile_code_at(at), Some(tile_codes::STAIR));
+            assert_eq!(source.graph.chunks[&slot.chunk].revision, 2);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_tiles_remain_explicit_and_do_not_hide_known_region_mismatches() -> Result<()> {
+        let mut source = snapshot();
+        let unknown = MapCoord::new(0, 0, 5);
+        source.set_tile_code(unknown, tile_codes::UNKNOWN)?;
+        assert_eq!(source.tile_code_at(unknown), None);
+        assert_eq!(
+            crate::laboratory_access::laboratory_bounded_tile_code(&source, unknown),
+            Some(tile_codes::UNKNOWN),
+        );
+        let before = source.clone();
+        assert!(source.set_tile_code(unknown, tile_codes::FLOOR).is_err());
+        assert_eq!(source, before);
+        let span = area((0, 0, 5), (1, 0, 5))?;
+        assert_eq!(
+            source.region_terrain_truth(span, tile_codes::SOLID_WALL),
+            RegionTruth::Unknown,
+        );
+        source.set_tile_code(MapCoord::new(1, 0, 5), tile_codes::FLOOR)?;
+        assert_eq!(
+            source.region_terrain_truth(span, tile_codes::SOLID_WALL),
+            RegionTruth::Differs,
         );
         Ok(())
     }

@@ -1,5 +1,26 @@
 # Implementation Status
 
+## Unreleased — Refuse malformed terrain before excavation, construction and proof
+
+Canonical terrain reads and writes now require each chunk's stored coordinate
+to match its lookup key, and require one to 256 positive run lengths covering
+exactly 256 cells. Validation bounds the run vector before scanning or allocating.
+Malformed chunks remain unknown to region predicates and cannot authorize
+excavation, construction or even a nominal no-op terrain write. Explicit UNKNOWN
+cells, valid 256-run chunks and coordinate extremes retain their behavior.
+
+The complete actual-source world library suite passes on current nightly:
+156 tests, zero failures or ignored tests, including three new regression
+groups. Three public intent regression groups additionally cover dispatch,
+retained excavation before unrelated physical progress and a valid mine-to-build
+workflow; their execution is pending at this checkpoint. Independent source
+review, scoped formatting and whitespace checks pass. These are reference-world
+results; full workspace, MCP, native/live and compatibility qualification remain
+separate.
+
+Owners: `df-lab-connected-room-access-7c2` and
+`df-predicate-evidence-authority-r7m` (broader acceptance remains in progress).
+
 ## Unreleased — Laboratory recovery, furnished rooms and supply forecasting
 
 See [guarded recovery](IMPLEMENTATION_STATUS.d/2026-11-26-guarded-checkpoint-publication.md), [room access](IMPLEMENTATION_STATUS.d/2026-11-26-connected-dormitories.md), [dining capacity](IMPLEMENTATION_STATUS.d/2026-11-26-paired-dining.md), [supply forecasts](IMPLEMENTATION_STATUS.d/2026-11-26-supply-rounds.md) and [captured furniture](IMPLEMENTATION_STATUS.d/2026-11-26-production-furniture-allocation.md) for scope and evidence.
