@@ -644,7 +644,11 @@ fn protected_room_walls(
     let mut walls = BTreeSet::new();
     // Only bedroom geometry promises separating walls. Its doorway/corridor
     // cells are explicit planned floor and remain openings in this ring.
-    if layout.access_point().is_none() {
+    if !layout
+        .excavations()
+        .iter()
+        .any(|part| part.role == ExcavationRole::Doorway)
+    {
         return Ok(walls);
     }
     for room in layout

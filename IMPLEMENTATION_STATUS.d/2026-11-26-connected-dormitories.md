@@ -1,0 +1,1 @@
+The connected-room planner uses explicit doorway geometry to identify protected bedroom walls. The regression exercises a route from outside a three-bed dormitory through plan, commit and final goal evaluation. Source reviewed. Rust execution and live qualification are unverified for this change. Owner: df-lab-connected-room-access-7c2.

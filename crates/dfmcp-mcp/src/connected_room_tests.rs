@@ -146,6 +146,22 @@ fn route(analysis: &Json) -> Result<Vec<MapCoord>> {
 }
 
 #[test]
+fn connect_external_entrance_to_every_bed_in_a_shared_dormitory() -> Result<()> {
+    let mut raw = request_value(false);
+    raw["room"]["layout"] = json!({
+        "template":"dormitory", "origin":[2,6,10], "bed_count":3, "columns":2
+    });
+    let request = ConnectedRoomRequest::parse_current(&raw.to_string())?;
+    let source = source()?;
+    let (intent, analysis) = request.compile(IntentId::new(987), &source, "")?;
+    assert_eq!(route(&analysis)?.first(), Some(&request.entry));
+    assert_eq!(route(&analysis)?.last(), Some(&MapCoord::new(2, 6, 10)));
+    let (completed, _) = execute(source, &intent)?;
+    assert_eq!(request.semantic_goal_truth(&completed)?, PredicateTruth::True);
+    Ok(())
+}
+
+#[test]
 fn connected_bedrooms_forecast_and_execute_complete_access_and_item_goals() -> Result<()> {
     let request = request(false)?;
     let snapshot = source()?;
