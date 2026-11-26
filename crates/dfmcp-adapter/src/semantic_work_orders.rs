@@ -31,6 +31,7 @@ mod inventory_baseline;
 mod inventory_objective;
 mod stock_target;
 mod stock_target_watch;
+mod stock_watch_checkpoint;
 mod stock_targets_watch;
 pub mod store;
 pub use goal_history::{
@@ -55,6 +56,7 @@ pub use inventory_objective::{
     RetainedOrderObjective,
 };
 pub use stock_target::StockTargetAssessment;
+pub use stock_watch_checkpoint::StockWatchCheckpointTerms;
 pub use stock_target_watch::{
     STOCK_TARGET_WATCH_BYTES, StockTargetWatch, StockTargetWatchProgress,
 };

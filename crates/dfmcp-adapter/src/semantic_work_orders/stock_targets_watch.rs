@@ -3,7 +3,8 @@
 //! Every target is fixed by the same original qualified census. A later sample
 //! qualifies all minima against one projection and advances one shared stability
 //! window. Independently achieved member histories cannot prove the portfolio.
-//! This process-local owner creates no effects and restores no current proof.
+//! This owner creates no effects. Authenticated checkpoints retain the original
+//! complete cohort and historical lifecycle, while restoring no current proof.
 
 use dfmcp_core::{
     Digest32, ErrorCode, GameTick, ObservationCursor, OperationContext, Result, StateAnchor,
@@ -146,6 +147,75 @@ impl StockTargetsWatch {
             interrupted: false,
             latest: None,
         })
+    }
+
+    /// Encode the whole original portfolio and historical lifecycle atomically.
+    /// No partial target result, current proof or unfinished streak is retained.
+    pub fn checkpoint_bytes(&self) -> Vec<u8> {
+        let mut saved = self.source_guard.checkpoint();
+        saved.originals = self.originals.clone();
+        saved.witness = self.witness;
+        saved.last_counted = self.last_counted_tick;
+        saved.achieved = self.achieved_at;
+        saved.expired = self.expired;
+        saved.encode(true)
+    }
+
+    /// Recover only after the embedding owner authenticates private custody.
+    /// All targets still need a fresh coherent census; current proof is absent.
+    pub fn recover(bytes: &[u8], context: &OperationContext) -> Result<Self> {
+        let call = Call::new(context)?;
+        call.admit(8 * super::stock_watch_checkpoint::MAX_BYTES as u64)?;
+        let saved = super::stock_watch_checkpoint::Checkpoint::decode(bytes, true)?;
+        saved.authorize(&call.current()?)?;
+        let source_guard =
+            StockTargetWatch::recover(&saved.scalar_guard()?.encode(false), &call.current()?)?;
+        Ok(Self {
+            originals: saved.originals,
+            source_guard,
+            deadline_tick: saved.deadline,
+            poll_interval_ticks: saved.cadence,
+            stable_samples_required: saved.stable,
+            witness: saved.witness,
+            stable_samples_observed: if saved.achieved.is_some() {
+                saved.stable
+            } else {
+                0
+            },
+            last_counted_tick: saved.last_counted,
+            achieved_at: saved.achieved,
+            expired: saved.expired,
+            last_sample_anchor: None,
+            last_sample_continuous: false,
+            interrupted: true,
+            latest: None,
+        })
+    }
+
+    /// Verify identity and monotonic lifecycle across authenticated parent
+    /// journal records without combining independent member achievements.
+    pub fn verify_checkpoint_continuity(previous: &[u8], current: &[u8]) -> Result<()> {
+        use super::stock_watch_checkpoint::Checkpoint;
+        let previous = Checkpoint::decode(previous, true)?;
+        Checkpoint::decode(current, true)?.follows(&previous)
+    }
+
+    /// Inspect bounded historical lineage for private journal admission. This
+    /// validates encoding only and creates neither an owner nor authority.
+    pub fn checkpoint_identity(bytes: &[u8]) -> Result<(StateAnchor, GameTick)> {
+        let saved = super::stock_watch_checkpoint::Checkpoint::decode(bytes, true)?;
+        let original = saved
+            .originals
+            .first()
+            .ok_or_else(super::stock_watch_checkpoint::corrupt)?
+            .original_anchor();
+        Ok((original, saved.high_tick))
+    }
+
+    /// Read complete historical request terms without creating qualified
+    /// assessments, active owners or current proof.
+    pub fn checkpoint_terms(bytes: &[u8]) -> Result<super::StockWatchCheckpointTerms> {
+        super::stock_watch_checkpoint::Checkpoint::decode(bytes, true)?.terms()
     }
 
     pub fn originals(&self) -> &[StockTargetAssessment] {

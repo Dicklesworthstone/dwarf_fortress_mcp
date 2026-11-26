@@ -1,5 +1,33 @@
 # Implementation Status
 
+## Unreleased — Preserve original no-work stock history for recovery
+
+Scalar and portfolio stock watches now expose bounded canonical checkpoints for
+an embedding owner with authenticated private journal custody. The original
+assessments, complete target vector, goal identity and timing remain immutable.
+Successive records reject regressed native/canonical floors, forgotten timely
+achievement, renewed expiry and removed source fences. Only satisfied original
+assessments can be recovered; no positive order objective is deserialized.
+
+Recovery retains historical achievement but clears the current sample and
+unfinished stability streak. Fresh complete observations remain necessary for
+current proof. Historical Query authority is checked at the consumed tick floor;
+recovery creates no Observe grant, native effect or clock permission. Pure bounded
+term inspection lets a host bind its request before acknowledging custody without
+constructing a qualified current assessment.
+
+All 63 stock-related adapter tests pass, including nine new checkpoint
+regressions, with zero failures or ignored cases. The actual adapter lib-test
+crate compiled on current nightly in the isolated workspace using unchanged
+production crate manifests and source symlinks; final stock-related input hashes
+remained stable. Scoped formatting, whitespace checks and independent source
+review also pass. Full MCP/native/live qualification remains separate: an earlier
+full MCP check was killed while compiling the pinned asupersync dependency.
+These adapter APIs are the foundation for parent-journal integration; they do not
+by themselves make standalone combined sessions durable.
+
+Owner: `df-native-stock-target-3m9` (in progress).
+
 ## Unreleased — Revalidate active construction before physical progress
 
 Active construction now reuses the timeline's complete qualified building census

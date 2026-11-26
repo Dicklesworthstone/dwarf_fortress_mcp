@@ -172,6 +172,61 @@ impl StockTargetAssessment {
         })
     }
 
+    /// Reconstruct only a historical no-work assessment inside authenticated
+    /// watch custody. This cannot produce a positive order objective or qualify
+    /// current stock, and is deliberately private to this adapter module.
+    pub(super) fn recover_satisfied(bytes: &[u8]) -> Result<Self> {
+        use super::stock_watch_checkpoint::{Reader, corrupt};
+        if bytes.len() > 512 {
+            return Err(corrupt());
+        }
+        let mut reader = Reader::new(bytes);
+        if reader.take(DOMAIN.len())? != DOMAIN {
+            return Err(corrupt());
+        }
+        let recipe = WorkOrderRecipe::from_code(u32::from(reader.byte()?))?;
+        let target_stack_units = reader.u64()?;
+        let max_order_amount = reader.u32()?;
+        let baseline_stack_units = reader.u64()?;
+        let deficit_stack_units = reader.u64()?;
+        let original_anchor = reader.anchor()?;
+        let source_digest = reader.digest()?;
+        let source_generation = reader.u64()?;
+        let source_counters = [reader.u64()?, reader.u64()?, reader.u64()?];
+        let item_rows = reader.u32()?;
+        reader.finish()?;
+        if !(1..=Self::MAX_TARGET_STACK_UNITS).contains(&target_stack_units)
+            || !(1..=Self::MAX_ORDER_AMOUNT).contains(&max_order_amount)
+            || deficit_stack_units != 0
+            || baseline_stack_units < target_stack_units
+            || item_rows as usize > crate::live_operations::MAX_ITEMS
+            || baseline_stack_units > u64::from(item_rows) * i32::MAX as u64
+            || source_counters
+                .iter()
+                .any(|counter| *counter > u64::from(u32::MAX))
+            || original_anchor.tick.get() > crate::work_orders::MAX_NATIVE_TICK
+            || source_generation == 0
+            || source_digest == Digest32::ZERO
+        {
+            return Err(corrupt());
+        }
+        Ok(Self {
+            recipe,
+            target_stack_units,
+            max_order_amount,
+            baseline_stack_units,
+            deficit_stack_units,
+            original_anchor,
+            source_digest,
+            source_generation,
+            source_counters,
+            item_rows,
+            objective: None,
+            canonical_bytes: bytes.to_vec(),
+            witness: Digest32::of_bytes(bytes),
+        })
+    }
+
     pub const fn recipe(&self) -> WorkOrderRecipe {
         self.recipe
     }

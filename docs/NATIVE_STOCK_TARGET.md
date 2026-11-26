@@ -184,8 +184,8 @@ fences the owner. Decoded rejection floors survive later policy refusal.
 Each result separates current truth from the first timely achievement, names
 its complete anchor and source digest, and carries a deterministic witness.
 Historical achievement cannot make a later false or missing current count
-true. This monitor is process-local: reopening restores neither an unfinished
-streak nor current proof. It provides no recurring maintenance, material or
+true. Reopening restores neither an unfinished streak nor current proof.
+Authenticated historical checkpoints are described below. The monitor provides no recurring maintenance, material or
 usability guarantee, and no causal attribution to production.
 
 The combined single-target consumer now retains this watch after a no-work
@@ -206,6 +206,32 @@ truth after a timely historical achievement. Recovery output carries the
 original goal identity with no current sample or proof. The resource-project
 parent consumes this typed result, so an initially met single stock target can
 complete under its original deadline without inventing production.
+
+### Historical watch checkpoints
+
+`StockTargetWatch` and `StockTargetsWatch` provide bounded canonical checkpoints
+for an embedding owner with authenticated private journal custody. Their
+separate version-one domains preserve the existing assessment and watch identity
+bytes. The complete original target set, deadline, cadence and sample requirement
+are immutable. Native tick/allocation limits, canonical cursor, last counted tick,
+first timely achievement, expiry and source fencing cannot move backwards across
+successive checkpoints. Scalar and portfolio encodings cannot be substituted.
+
+Recovery reads historical custody under current Query authority at the consumed
+tick floor. It never restores a current sample or unfinished stability streak.
+Historical achievement remains explicit so that a completed goal cannot become
+new production merely because its owner restarted. A fresh complete census and
+ordinary Observe/Query authority are still required to prove current stock.
+Portfolio proof continues to require every target together in one coherent
+observation.
+
+The decoder bounds the entire record to 2,048 bytes before allocation and refuses
+malformed, noncanonical, truncated, trailing or inconsistent fields. Historical
+term inspection returns primitive request data, not a qualified current
+assessment. The embedding owner must authenticate the checkpoint and its complete
+request against the original private journal; a caller-supplied JSON object or
+matching content digest is insufficient. These adapter APIs alone do not make a
+standalone combined session durable.
 
 ### Keep every already-met target stable together
 

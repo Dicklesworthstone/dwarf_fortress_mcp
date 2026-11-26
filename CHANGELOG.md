@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Retain original stock-watch lifecycle across recovery
+
+- Add canonical scalar and portfolio checkpoints with immutable target/timing
+  identity, monotonic source limits and sticky achievement, expiry and fencing.
+- Recover historical ownership with no current sample or unfinished stability;
+  keep fresh census qualification and authority checks at the consumed tick.
+- Expose bounded historical request terms for private-journal validation without
+  creating current stock evidence or positive production objectives.
+- Pass all 63 stock-related adapter tests, including nine new recovery
+  regressions. Parent-journal integration and full MCP qualification remain
+  separate from this adapter foundation.
+
 ## Unreleased — Validate recovered construction before completion
 
 - Recheck active building positions, complete footprints, observed floor and

@@ -2,8 +2,9 @@
 //!
 //! A no-work assessment fixes the goal and its source lineage without inventing
 //! an order. Later complete censuses can prove the unchanged minimum over the
-//! original cadence and deadline. This process-local owner has no effect path,
-//! does not advance time and cannot restore proof from a retained count.
+//! original cadence and deadline. This owner has no effect path and does not
+//! advance time. Authenticated checkpoints retain historical identity and
+//! lifecycle, but cannot restore current proof from a retained count.
 
 use dfmcp_core::{
     Digest32, ErrorCode, GameTick, ObservationCursor, OperationContext, Result, StateAnchor,
@@ -45,8 +46,9 @@ pub struct StockTargetWatchProgress {
 }
 
 /// One non-cloneable no-work goal owner. Reopening a controller must establish
-/// a new observation streak under the unchanged original deadline; this type
-/// exposes no deserializer or constructor accepting historical success.
+/// a new unfinished observation streak under the unchanged original deadline.
+/// Checkpoint recovery requires independently authenticated host custody and
+/// preserves historical achievement without restoring any current sample.
 #[derive(Debug)]
 pub struct StockTargetWatch {
     original: StockTargetAssessment,
@@ -126,6 +128,94 @@ impl StockTargetWatch {
             fenced: false,
             latest: None,
         })
+    }
+
+    /// Encode historical identity and monotonic lifecycle only. The embedding
+    /// owner must durably authenticate these bytes before exposing recovery.
+    /// No current count or unfinished stability sample is retained.
+    pub fn checkpoint_bytes(&self) -> Vec<u8> {
+        self.checkpoint().encode(false)
+    }
+
+    pub(super) fn checkpoint(&self) -> super::stock_watch_checkpoint::Checkpoint {
+        super::stock_watch_checkpoint::Checkpoint {
+            originals: vec![self.original.clone()],
+            deadline: self.deadline_tick,
+            cadence: self.poll_interval_ticks,
+            stable: self.stable_samples_required,
+            witness: self.witness,
+            high_tick: self.high_tick,
+            high_counters: self.high_counters,
+            high_anchor: self.high_anchor,
+            last_counted: self.last_counted_tick,
+            achieved: self.achieved_at,
+            expired: self.expired,
+            fenced: self.fenced,
+        }
+    }
+
+    /// Recover an authenticated owner checkpoint, never a caller's count or
+    /// current proof. The host is responsible for journal identity and custody;
+    /// current authority is independently checked at the consumed tick floor.
+    pub fn recover(bytes: &[u8], context: &OperationContext) -> Result<Self> {
+        let call = Call::new(context)?;
+        call.admit(4 * super::stock_watch_checkpoint::MAX_BYTES as u64)?;
+        let saved = super::stock_watch_checkpoint::Checkpoint::decode(bytes, false)?;
+        saved.authorize(&call.current()?)?;
+        let original = saved
+            .originals
+            .first()
+            .ok_or_else(super::stock_watch_checkpoint::corrupt)?
+            .clone();
+        Ok(Self {
+            original,
+            deadline_tick: saved.deadline,
+            poll_interval_ticks: saved.cadence,
+            stable_samples_required: saved.stable,
+            witness: saved.witness,
+            high_tick: saved.high_tick,
+            high_counters: saved.high_counters,
+            high_anchor: saved.high_anchor,
+            stable_samples_observed: if saved.achieved.is_some() {
+                saved.stable
+            } else {
+                0
+            },
+            last_counted_tick: saved.last_counted,
+            achieved_at: saved.achieved,
+            expired: saved.expired,
+            last_sample_anchor: None,
+            last_sample_continuous: false,
+            interrupted: true,
+            fenced: saved.fenced,
+            latest: None,
+        })
+    }
+
+    /// Reject a rewritten original, forgotten lifecycle or regressed source
+    /// frontier when authenticating successive private journal checkpoints.
+    pub fn verify_checkpoint_continuity(previous: &[u8], current: &[u8]) -> Result<()> {
+        use super::stock_watch_checkpoint::Checkpoint;
+        let previous = Checkpoint::decode(previous, false)?;
+        Checkpoint::decode(current, false)?.follows(&previous)
+    }
+
+    /// Inspect bounded historical lineage for private journal admission. This
+    /// validates encoding only and creates neither an owner nor authority.
+    pub fn checkpoint_identity(bytes: &[u8]) -> Result<(StateAnchor, GameTick)> {
+        let saved = super::stock_watch_checkpoint::Checkpoint::decode(bytes, false)?;
+        let original = saved
+            .originals
+            .first()
+            .ok_or_else(super::stock_watch_checkpoint::corrupt)?
+            .original_anchor();
+        Ok((original, saved.high_tick))
+    }
+
+    /// Read historical request terms without creating a qualified assessment,
+    /// active owner or current proof. Journal custody is checked by the host.
+    pub fn checkpoint_terms(bytes: &[u8]) -> Result<super::StockWatchCheckpointTerms> {
+        super::stock_watch_checkpoint::Checkpoint::decode(bytes, false)?.terms()
     }
 
     pub const fn original(&self) -> &StockTargetAssessment {

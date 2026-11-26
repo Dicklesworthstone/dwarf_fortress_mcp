@@ -61,7 +61,8 @@
     "crates/dfmcp-adapter/src/semantic_work_orders/stock_target_watch_tests.rs",
     "crates/dfmcp-adapter/src/semantic_work_orders/stock_targets_watch.rs",
     "crates/dfmcp-adapter/src/semantic_work_orders/stock_targets_watch_tests.rs",
-    "docs/NATIVE_STOCK_TARGET.md"
+    "docs/NATIVE_STOCK_TARGET.md",
+    "crates/dfmcp-adapter/src/semantic_work_orders/stock_watch_checkpoint.rs"
   ],
   "mcp_consumer": {
     "profile": "serve-gameplay-dev labor-order",
@@ -483,6 +484,43 @@
       "tests/stdio/combined_stock_target_runtime_peer.py",
       "tests/stdio/combined_stock_targets_runtime_peer.py",
       "tests/stdio/project_publication_runtime_peer.py"
+    ]
+  },
+  "no_work_watch_checkpoint": {
+    "owner_bead": "df-native-stock-target-3m9",
+    "scalar_domain": "dfmcp-no-work-stock-watch-checkpoint/1",
+    "portfolio_domain": "dfmcp-no-work-stock-targets-watch-checkpoint/1",
+    "maximum_bytes": 2048,
+    "encoding": "bounded canonical big-endian fields; closed booleans and optional ticks",
+    "recovery_requires_authenticated_host_custody": true,
+    "operator_json_or_digest_is_authority": false,
+    "historical_terms_query_creates_qualified_assessment": false,
+    "recovery_requires_query_at_consumed_tick_floor": true,
+    "recovery_requires_observe": false,
+    "fresh_sampling_requires_observe_and_query": true,
+    "original_assessment_bytes_changed": false,
+    "positive_deficit_assessment_recoverable": false,
+    "immutable": [
+      "complete original assessments",
+      "goal witness",
+      "deadline",
+      "cadence",
+      "stable sample requirement"
+    ],
+    "monotone": [
+      "native tick and allocation counters",
+      "canonical cursor and tick",
+      "last counted tick",
+      "first timely achievement",
+      "expiry",
+      "source fence"
+    ],
+    "restored_current_sample": false,
+    "restored_unfinished_streak": false,
+    "restored_historical_achievement": true,
+    "partial_portfolio_recovery": false,
+    "source_paths": [
+      "crates/dfmcp-adapter/src/semantic_work_orders/stock_watch_checkpoint.rs"
     ]
   }
 }

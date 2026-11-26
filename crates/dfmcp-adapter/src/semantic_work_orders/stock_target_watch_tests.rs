@@ -264,6 +264,153 @@ fn no_work_watch_unknown_is_not_zero_and_interrupts_stability() -> Result<()> {
 }
 
 #[test]
+fn checkpoint_recovery_preserves_original_but_restarts_unfinished_stability() -> Result<()> {
+    let (mut watch, original, mut context) = initial(2, 200)?;
+    sample(&mut watch, 130, 8, Some(20))?;
+    let bytes = watch.checkpoint_bytes();
+    // Offline inspection requires Query, not a fabricated Observe grant.
+    context
+        .grants
+        .retain(|grant| grant.capability == Capability::Query);
+    let mut recovered = StockTargetWatch::recover(&bytes, &context)?;
+    assert_eq!(recovered.checkpoint_bytes(), bytes);
+    assert_eq!(recovered.original(), &original);
+    assert_eq!(recovered.witness(), watch.witness());
+    assert_eq!(recovered.high_tick(), GameTick(130));
+    assert!(recovered.latest().is_none());
+    assert!(!recovered.current_goal_proven());
+    assert_eq!(
+        sample(&mut recovered, 130, 9, Some(20))?.stable_samples_observed,
+        0
+    );
+    assert_eq!(
+        sample(&mut recovered, 140, 10, Some(20))?.stable_samples_observed,
+        1
+    );
+    assert!(sample(&mut recovered, 150, 11, Some(20))?.current_goal_proven);
+    StockTargetWatch::verify_checkpoint_continuity(&bytes, &recovered.checkpoint_bytes())?;
+    Ok(())
+}
+
+#[test]
+fn checkpoint_recovery_retains_achievement_without_restoring_current_truth() -> Result<()> {
+    let (mut watch, _, context) = initial(2, 200)?;
+    sample(&mut watch, 130, 8, Some(20))?;
+    sample(&mut watch, 140, 9, Some(20))?;
+    let bytes = watch.checkpoint_bytes();
+    let mut recovered = StockTargetWatch::recover(&bytes, &context)?;
+    assert_eq!(recovered.achieved_at(), Some(GameTick(140)));
+    assert!(recovered.latest().is_none());
+    assert!(!recovered.current_goal_proven());
+    let loss = sample(&mut recovered, 150, 10, Some(5))?;
+    assert_eq!(loss.achieved_at, Some(GameTick(140)));
+    assert!(!loss.current_goal_proven);
+    assert!(sample(&mut recovered, 210, 11, Some(20))?.current_goal_proven);
+    StockTargetWatch::verify_checkpoint_continuity(&bytes, &recovered.checkpoint_bytes())?;
+    // Forgetting achievement would incorrectly allow a completed goal to
+    // become a new finite-production continuation.
+    recovered.achieved_at = None;
+    recovered.stable_samples_observed = 0;
+    assert!(
+        StockTargetWatch::verify_checkpoint_continuity(&bytes, &recovered.checkpoint_bytes())
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn checkpoint_recovery_retains_rejection_floors_and_requires_current_query_authority() -> Result<()>
+{
+    let (mut watch, _, context) = initial(2, 200)?;
+    let mut newer = raw(180, Some(20));
+    newer.next_item_id = 400;
+    watch.note_capture(&newer)?;
+    let bytes = watch.checkpoint_bytes();
+    let mut recovered = StockTargetWatch::recover(&bytes, &context)?;
+    assert_eq!(recovered.high_tick(), GameTick(180));
+    assert_eq!(recovered.high_cursor().sequence, 7);
+    assert!(sample(&mut recovered, 170, 8, Some(20)).is_err());
+    assert!(recovered.fenced());
+    let fenced = recovered.checkpoint_bytes();
+    assert!(StockTargetWatch::recover(&fenced, &context)?.fenced());
+    assert!(StockTargetWatch::verify_checkpoint_continuity(&fenced, &bytes).is_err());
+    for cause in 0..5 {
+        let mut denied = context.clone();
+        match cause {
+            0 => denied.grants.clear(),
+            1 => denied.cancellation_requested = true,
+            2 => denied.anchor.cursor.epoch += 1,
+            3 => denied.budget.max_bytes = 8191,
+            _ => {
+                for grant in &mut denied.grants {
+                    grant.expires_at_tick = Some(GameTick(179));
+                }
+            }
+        }
+        assert!(
+            StockTargetWatch::recover(&bytes, &denied).is_err(),
+            "cause {cause}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn checkpoint_codec_rejects_truncation_trailing_bytes_bad_identity_and_positive_orders()
+-> Result<()> {
+    let (mut watch, _, context) = initial(2, 200)?;
+    let bytes = watch.checkpoint_bytes();
+    for end in 0..bytes.len() {
+        assert!(
+            StockTargetWatch::recover(&bytes[..end], &context).is_err(),
+            "prefix {end}"
+        );
+    }
+    let mut trailing = bytes.clone();
+    trailing.push(0);
+    assert!(StockTargetWatch::recover(&trailing, &context).is_err());
+    assert!(StockTargetWatch::recover(&vec![0; 2049], &context).is_err());
+    watch.witness = Digest32::ZERO;
+    assert!(StockTargetWatch::recover(&watch.checkpoint_bytes(), &context).is_err());
+    let (projection, current) = projection(raw(120, Some(5)), 2, 7)?;
+    watch.original = projection.stock_target(
+        WorkOrderRecipe::WoodenBed,
+        10,
+        100,
+        accepted(&projection),
+        &current,
+    )?;
+    assert!(StockTargetWatch::recover(&watch.checkpoint_bytes(), &context).is_err());
+    Ok(())
+}
+
+#[test]
+fn checkpoint_continuity_rejects_renewed_deadlines_regression_and_forgotten_expiry() -> Result<()> {
+    let (mut watch, _, context) = initial(2, 140)?;
+    let first = watch.checkpoint_bytes();
+    sample(&mut watch, 135, 8, Some(20))?;
+    let later = watch.checkpoint_bytes();
+    StockTargetWatch::verify_checkpoint_continuity(&first, &later)?;
+    assert!(StockTargetWatch::verify_checkpoint_continuity(&later, &first).is_err());
+    let (renewed, _, _) = initial(2, 200)?;
+    assert!(
+        StockTargetWatch::verify_checkpoint_continuity(&first, &renewed.checkpoint_bytes())
+            .is_err()
+    );
+    assert!(sample(&mut watch, 140, 9, Some(20))?.expired);
+    let expired = watch.checkpoint_bytes();
+    let mut recovered = StockTargetWatch::recover(&expired, &context)?;
+    assert!(sample(&mut recovered, 150, 10, Some(20))?.expired);
+    assert!(!recovered.current_goal_proven());
+    recovered.expired = false;
+    assert!(
+        StockTargetWatch::verify_checkpoint_continuity(&expired, &recovered.checkpoint_bytes())
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
 fn no_work_watch_off_cadence_contradictions_reset_but_never_accelerate_samples() -> Result<()> {
     let (mut watch, _, _) = initial(2, 200)?;
     sample(&mut watch, 130, 8, Some(20))?;
@@ -518,7 +665,9 @@ fn no_work_watch_withholding_does_not_erase_failed_or_missing_observations() -> 
     for failed in [false, true] {
         let (mut watch, _, _) = initial(2, 200)?;
         sample(&mut watch, 130, 8, Some(20))?;
-        if failed { watch.invalidate_current_sample(); }
+        if failed {
+            watch.invalidate_current_sample();
+        }
         watch.withhold_current_sample();
         let sequence = if failed { 9 } else { 20 };
         let restarted = sample(&mut watch, 140, sequence, Some(20))?;

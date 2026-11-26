@@ -181,6 +181,105 @@ fn portfolio_watch_requires_a_complete_same_census_satisfied_original() -> Resul
 }
 
 #[test]
+fn portfolio_checkpoint_recovery_restarts_one_complete_joint_streak() -> Result<()> {
+    let (mut watch, originals, context) = initial(2, 200)?;
+    sample(&mut watch, 130, 8, [20; 4])?;
+    let bytes = watch.checkpoint_bytes();
+    let mut recovered = StockTargetsWatch::recover(&bytes, &context)?;
+    assert_eq!(recovered.originals(), originals);
+    assert_eq!(recovered.witness(), watch.witness());
+    assert_eq!(recovered.checkpoint_bytes(), bytes);
+    assert!(recovered.latest().is_none());
+    assert!(!recovered.current_goal_proven());
+    assert_eq!(
+        sample(&mut recovered, 130, 9, [20; 4])?.stable_samples_observed,
+        0
+    );
+    assert_eq!(
+        sample(&mut recovered, 140, 10, [20; 4])?.stable_samples_observed,
+        1
+    );
+    assert_eq!(
+        sample(&mut recovered, 150, 11, [5, 20, 20, 20])?.stable_samples_observed,
+        0
+    );
+    assert_eq!(
+        sample(&mut recovered, 160, 12, [20; 4])?.stable_samples_observed,
+        1
+    );
+    assert!(sample(&mut recovered, 170, 13, [20; 4])?.current_goal_proven);
+    StockTargetsWatch::verify_checkpoint_continuity(&bytes, &recovered.checkpoint_bytes())?;
+    Ok(())
+}
+
+#[test]
+fn portfolio_checkpoint_retains_joint_achievement_and_withdraws_current_proof() -> Result<()> {
+    let (mut watch, _, context) = initial(2, 200)?;
+    sample(&mut watch, 130, 8, [20; 4])?;
+    sample(&mut watch, 140, 9, [20; 4])?;
+    let bytes = watch.checkpoint_bytes();
+    let mut recovered = StockTargetsWatch::recover(&bytes, &context)?;
+    assert_eq!(recovered.achieved_at(), Some(GameTick(140)));
+    assert!(recovered.latest().is_none());
+    assert!(!recovered.current_goal_proven());
+    assert!(!sample(&mut recovered, 150, 10, [20, 20, 5, 20])?.current_goal_proven);
+    assert!(sample(&mut recovered, 210, 11, [20; 4])?.current_goal_proven);
+    StockTargetsWatch::verify_checkpoint_continuity(&bytes, &recovered.checkpoint_bytes())?;
+    recovered.achieved_at = None;
+    assert!(
+        StockTargetsWatch::verify_checkpoint_continuity(&bytes, &recovered.checkpoint_bytes())
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn portfolio_checkpoint_refuses_scalar_substitution_partial_vectors_and_noncanonical_bytes()
+-> Result<()> {
+    let (mut watch, _, context) = initial(2, 200)?;
+    let bytes = watch.checkpoint_bytes();
+    for end in 0..bytes.len() {
+        assert!(
+            StockTargetsWatch::recover(&bytes[..end], &context).is_err(),
+            "prefix {end}"
+        );
+    }
+    let mut trailing = bytes.clone();
+    trailing.push(0);
+    assert!(StockTargetsWatch::recover(&trailing, &context).is_err());
+    assert!(StockTargetsWatch::recover(&vec![0; 2049], &context).is_err());
+    assert!(StockTargetWatch::recover(&bytes, &context).is_err());
+    assert!(StockTargetsWatch::recover(&watch.source_guard.checkpoint_bytes(), &context).is_err());
+    watch.originals.reverse();
+    assert!(StockTargetsWatch::recover(&watch.checkpoint_bytes(), &context).is_err());
+    watch.originals.reverse();
+    watch.originals.pop();
+    assert!(StockTargetsWatch::recover(&watch.checkpoint_bytes(), &context).is_err());
+    Ok(())
+}
+
+#[test]
+fn portfolio_checkpoint_retains_fences_and_fixed_expiry() -> Result<()> {
+    let (mut watch, _, context) = initial(2, 140)?;
+    sample(&mut watch, 135, 8, [20; 4])?;
+    let first = watch.checkpoint_bytes();
+    assert!(sample(&mut watch, 140, 9, [20; 4])?.expired);
+    let expired = watch.checkpoint_bytes();
+    let mut recovered = StockTargetsWatch::recover(&expired, &context)?;
+    assert!(sample(&mut recovered, 150, 10, [20; 4])?.expired);
+    assert!(!recovered.current_goal_proven());
+    StockTargetsWatch::verify_checkpoint_continuity(&first, &recovered.checkpoint_bytes())?;
+    assert!(StockTargetsWatch::verify_checkpoint_continuity(&expired, &first).is_err());
+    let mut wrong_generation = raw(160, [20; 4]);
+    wrong_generation.jobs.bridge_generation += 1;
+    assert!(recovered.note_capture(&wrong_generation).is_err());
+    let fenced = recovered.checkpoint_bytes();
+    assert!(StockTargetsWatch::recover(&fenced, &context)?.fenced());
+    assert!(StockTargetsWatch::verify_checkpoint_continuity(&fenced, &expired).is_err());
+    Ok(())
+}
+
+#[test]
 fn portfolio_watch_normalizes_all_four_targets_without_granting_effect_authority() -> Result<()> {
     let (projection, context) = projection(raw(120, [20; 4]), 2, 7)?;
     let originals = assessments(&projection, &context, &RECIPES)?;
@@ -633,7 +732,12 @@ fn portfolio_watch_withheld_for_reviewed_time_preserves_joint_streak_without_cur
     watch.withhold_current_sample();
     let complete = sample(&mut watch, 140, 10, [20; 4])?;
     assert_eq!(complete.stable_samples_observed, 2);
-    assert!(complete.targets.iter().all(|row| row.current_truth == PredicateTruth::True));
+    assert!(
+        complete
+            .targets
+            .iter()
+            .all(|row| row.current_truth == PredicateTruth::True)
+    );
     assert!(complete.continuous);
     assert!(complete.current_goal_proven);
     assert_eq!(complete.achieved_at, Some(GameTick(140)));
@@ -645,8 +749,8 @@ fn portfolio_watch_withheld_for_reviewed_time_preserves_joint_streak_without_cur
 }
 
 #[test]
-fn portfolio_watch_withholding_never_rejoins_failed_gapped_or_lost_member_stability()
--> Result<()> {
+fn portfolio_watch_withholding_never_rejoins_failed_gapped_or_lost_member_stability() -> Result<()>
+{
     for cause in 0..3 {
         let (mut watch, _, _) = initial(2, 200)?;
         sample(&mut watch, 130, 8, [20; 4])?;
@@ -660,11 +764,17 @@ fn portfolio_watch_withholding_never_rejoins_failed_gapped_or_lost_member_stabil
             }
         }
         watch.withhold_current_sample();
-        let sequence = match cause { 0 => 9, 1 => 20, _ => 10 };
+        let sequence = match cause {
+            0 => 9,
+            1 => 20,
+            _ => 10,
+        };
         let restarted = sample(&mut watch, 140, sequence, [20; 4])?;
         assert_eq!(restarted.stable_samples_observed, 1);
         assert!(!restarted.current_goal_proven);
-        if cause < 2 { assert!(!restarted.continuous); }
+        if cause < 2 {
+            assert!(!restarted.continuous);
+        }
         watch.withhold_current_sample();
         let complete = sample(&mut watch, 150, sequence + 1, [20; 4])?;
         assert!(complete.current_goal_proven);
