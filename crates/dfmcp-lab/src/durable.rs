@@ -1479,6 +1479,14 @@ impl DurableLabStore {
                 return Err(corrupt("durable head anchor does not match its snapshot"));
             }
         }
+        for checkpoint in store.index.checkpoints.values().flat_map(BTreeMap::values) {
+            if verified_anchors
+                .get(&checkpoint.state_hash)
+                .is_none_or(|anchor| anchor.fortress_id != checkpoint.fortress_id)
+            {
+                return Err(corrupt("durable checkpoint names a different fortress snapshot"));
+            }
+        }
         for commit in store.index.commits.values().flat_map(BTreeMap::values) {
             if verified_anchors
                 .get(&commit.sealed_state_hash)
@@ -1573,6 +1581,12 @@ impl DurableLabStore {
             }
         }
         store.validate_withdrawal_history(&verified_anchors)?;
+        // Sync names as well as contents before acknowledging the first publication.
+        // Reopening also retries a directory barrier that may previously have failed.
+        sync_dir(&store.root)?;
+        if let Some(parent) = store.root.parent() {
+            sync_dir(parent)?;
+        }
         store.remove_crash_leftovers();
         Ok(store)
     }
@@ -1727,7 +1741,8 @@ impl DurableLabStore {
                     "stored snapshot differs from the requested publication",
                 ));
             }
-            return Ok(());
+            // A previous rename may have succeeded while its directory sync failed.
+            return sync_dir(&self.root.join("objects"));
         }
         let bytes = snapshot.canonical_bytes();
         if bytes.len() as u64 > MAX_OBJECT_BYTES {
@@ -2071,15 +2086,27 @@ impl DurableLabStore {
         if checkpoint_id == CheckpointId::NIL {
             return Err(invalid("checkpoint id zero is reserved"));
         }
-        self.append(
-            Record::Checkpoint(DurableCheckpoint {
-                fortress_id: snapshot.fortress_id,
-                checkpoint_id,
-                label: label.to_owned(),
-                state_hash: snapshot.state_hash,
-            }),
-            Some(snapshot),
-        )
+        self.ensure_writable()?;
+        let checkpoint = DurableCheckpoint {
+            fortress_id: snapshot.fortress_id,
+            checkpoint_id,
+            label: label.to_owned(),
+            state_hash: snapshot.state_hash,
+        };
+        if let Some(previous) = self.index.checkpoints.get(&snapshot.fortress_id)
+            .and_then(|book| book.get(&checkpoint_id))
+        {
+            if previous != &checkpoint {
+                return Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "checkpoint identifier already names a different recovery point",
+                ));
+            }
+            // Repeating publication may skip the journal write only after
+            // validating the exact immutable object, just like the first write.
+            return self.write_object(snapshot);
+        }
+        self.append(Record::Checkpoint(checkpoint), Some(snapshot))
     }
 
     /// Record a committed plan, persisting the world it was sealed against.
@@ -2784,9 +2811,13 @@ impl Index {
             }
             Record::Checkpoint(checkpoint) => {
                 let book = self.checkpoints.entry(checkpoint.fortress_id).or_default();
-                if !book.contains_key(&checkpoint.checkpoint_id)
-                    && book.len() >= MAX_CHECKPOINTS_PER_FORTRESS
-                {
+                if let Some(previous) = book.get(&checkpoint.checkpoint_id) {
+                    if previous != &checkpoint {
+                        return Err(corrupt("checkpoint identifier was rebound in the journal"));
+                    }
+                    return Ok(());
+                }
+                if book.len() >= MAX_CHECKPOINTS_PER_FORTRESS {
                     return Err(DfmcpError::new(
                         ErrorCode::BudgetExceeded,
                         "durable laboratory fortress reached its checkpoint bound",
@@ -3197,6 +3228,46 @@ mod tests {
         assert_eq!(checkpoints[0].label, "before dig");
         assert_eq!(store.load_snapshot(checkpoints[0].state_hash)?, checkpoint);
         assert_eq!(store.report().records, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn checkpoint_identity_survives_retries_conflicts_and_compaction() -> Result<()> {
+        let dir = TempDir::new("immutable-checkpoint");
+        let source = snapshot(7, 3);
+        let id = CheckpointId::new(42);
+        let mut store = DurableLabStore::open(&dir.0)?;
+        store.persist_checkpoint(id, "original", &source)?;
+        store.set_append_budget(Some(0));
+        store.persist_checkpoint(id, "original", &source)?;
+        for (label, world) in [("renamed", source.clone()), ("original", snapshot(7, 4))] {
+            assert!(matches!(store.persist_checkpoint(id, label, &world),
+                Err(error) if error.code == ErrorCode::Conflict));
+        }
+        assert_eq!(store.report().records, 1);
+        store.compact()?;
+        drop(store);
+        let reopened = DurableLabStore::open(&dir.0)?;
+        let row = reopened.checkpoints(source.fortress_id).next()
+            .ok_or_else(|| corrupt("checkpoint missing after reopen"))?;
+        assert_eq!(row.label, "original");
+        assert_eq!(reopened.load_snapshot(row.state_hash)?, source);
+        Ok(())
+    }
+
+    #[test]
+    fn recovery_refuses_checkpoint_bound_to_another_fortress() -> Result<()> {
+        let dir = TempDir::new("checkpoint-lineage");
+        let mut store = DurableLabStore::open(&dir.0)?;
+        let source = snapshot(8, 1);
+        store.append(Record::Checkpoint(DurableCheckpoint {
+            checkpoint_id: CheckpointId::new(1),
+            fortress_id: FortressId::new(7),
+            state_hash: source.state_hash,
+            label: "wrong fortress".to_owned(),
+        }), Some(&source))?;
+        drop(store);
+        assert!(matches!(DurableLabStore::open(&dir.0), Err(error) if error.code == ErrorCode::CorruptLedger));
         Ok(())
     }
 
