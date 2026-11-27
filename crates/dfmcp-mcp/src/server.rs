@@ -2659,6 +2659,7 @@ fn authorize_wait_advance(
     ctx: &OperationContext,
     requested_ticks: u64,
     paused: bool,
+    selected: bool,
 ) -> Result<()> {
     if requested_ticks == 0 {
         return Ok(());
@@ -2684,6 +2685,9 @@ fn authorize_wait_advance(
             RiskTier::Reversible,
         )?;
         authorize_entry(&final_context, Capability::Observe, RiskTier::ReadOnly)?;
+        if selected {
+            authorize_entry(&final_context, Capability::Query, RiskTier::ReadOnly)?;
+        }
     }
     Ok(())
 }
@@ -6223,7 +6227,12 @@ fn wait_with_selection(
                 );
             }
             let paused = guard.adapter.snapshot().paused;
-            if let Err(error) = authorize_wait_advance(&entry_ctx, requested_ticks, paused) {
+            if let Err(error) = authorize_wait_advance(
+                &entry_ctx,
+                requested_ticks,
+                paused,
+                selected_digest.is_some() || watch_selected,
+            ) {
                 return dfmcp_error_payload("fortress.wait", &error);
             }
             let mut selected = match selected_digest

@@ -262,6 +262,7 @@ fn selected_authority_complete_source_and_commit_custody_are_checked_before_time
     })?;
     for (defect, code) in [
         ("query", "capability_denied"),
+        ("query_expires_during_wait", "capability_denied"),
         ("entities", "budget_exceeded"),
         ("bytes", "budget_exceeded"),
         ("custody", "conflict"),
@@ -272,6 +273,13 @@ fn selected_authority_complete_source_and_commit_custody_are_checked_before_time
             guard.commit_receipts = receipts.clone();
             match defect {
                 "query" => guard.grants.retain(|grant| grant.capability != Capability::Query),
+                "query_expires_during_wait" => {
+                    for grant in &mut guard.grants {
+                        if grant.capability == Capability::Query {
+                            grant.expires_at_tick = Some(dfmcp_core::GameTick(before.tick.0 + 1));
+                        }
+                    }
+                }
                 "entities" => guard.budget.max_entities = 1,
                 "bytes" => guard.budget.max_bytes = 1_024,
                 "custody" => guard.commit_receipts.clear(),
