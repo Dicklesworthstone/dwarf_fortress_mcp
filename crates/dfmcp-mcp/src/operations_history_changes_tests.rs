@@ -676,3 +676,94 @@ fn corrupt_historical_endpoint_never_produces_a_partial_comparison() -> Result<(
     assert_eq!(fixture.session.calls.load(Ordering::SeqCst), 1);
     Ok(())
 }
+
+#[test]
+fn furniture_arrivals_separate_new_ids_from_stock_changes_and_bound_only_examples() -> Result<()> {
+    let _serial = crate::test_serial();
+    for profile in [OperationsProfile::V1_3, OperationsProfile::PagedV1_4] {
+        let mut first = source(3, 3)?;
+        first.next_item_id = 35;
+        for item in &mut first.items {
+            item.type_key = "BED".to_owned();
+        }
+        let mut second = source(17, 4)?;
+        second.items.retain(|item| item.native_id >= 33);
+        for item in &mut second.items {
+            item.type_key = "BED".to_owned();
+            match item.native_id {
+                44 => item.material_index = 8,
+                45 => {
+                    item.type_key = "CHAIR".to_owned();
+                    item.item_type = 2;
+                }
+                46 => item.flags |= 1 << 3,
+                _ => {}
+            }
+        }
+        let fixture = archive(profile, first, vec![second], 8192)?;
+        assert_eq!(observe(&fixture.session)?["ok"], true);
+        let rows = listing(&fixture.session)?["rows"].clone();
+        let mut query = json!({"kind":"historical_furniture_arrivals","from":record(&rows[0]),
+            "to":record(&rows[1]),"furniture_kind":"bed","material":[0,1]});
+        let result = ask(&fixture.session, query.clone())?;
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["before_item_count"], 3);
+        assert_eq!(result["after_item_count"], 11);
+        assert_eq!(result["net_item_count_change"], 8);
+        assert_eq!(result["new_item_count"], 9);
+        assert_eq!(result["before_next_item_id"], 35);
+        assert_eq!(result["after_next_item_id"], 47);
+        assert_eq!(result["examples_truncated"], true);
+        let examples = result["new_item_examples"].as_array().ok_or_else(|| {
+            error(ErrorCode::InternalInvariantViolation, "missing furniture examples")
+        })?;
+        assert_eq!(examples.len(), 8);
+        for (offset, example) in examples.iter().enumerate() {
+            let id = 35 + offset as u32;
+            assert_eq!(example["native_item_id"], id);
+            assert_eq!(example["entity_id"], item_entity_id(id).to_string());
+            assert_eq!(example["generation"], 1);
+            assert_eq!(example["material"], json!([0, 1]));
+        }
+        assert_eq!(result["order_attribution_proven"], false);
+        assert_eq!(result["native_observations"], 0);
+        assert_eq!(result["basis"], rows[0]["anchor"]);
+        assert_eq!(result["anchor"], rows[1]["anchor"]);
+        query["material"] = Value::Null;
+        assert_eq!(ask(&fixture.session, query.clone())?["new_item_count"], 10);
+        query["furniture_kind"] = json!("chair");
+        let chair = ask(&fixture.session, query.clone())?;
+        assert_eq!(chair["new_item_count"], 1);
+        assert_eq!(chair["new_item_examples"][0]["native_item_id"], 45);
+        query["from"] = record(&rows[1]);
+        let same = ask(&fixture.session, query.clone())?;
+        assert_eq!(same["new_item_count"], 0);
+        assert_eq!(same["source_work"]["distinct_endpoints"], 1);
+        query["from"]["record_digest"] = json!("0".repeat(64));
+        assert_eq!(ask(&fixture.session, query)?["error"]["code"], "stale_anchor");
+        assert_eq!(fixture.session.calls.load(Ordering::SeqCst), 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn furniture_arrivals_refuse_source_resets_and_unbounded_or_untyped_filters() -> Result<()> {
+    let _serial = crate::test_serial();
+    let first = source(3, 3)?;
+    let mut reset = source(1, 4)?;
+    reset.jobs.bridge_generation += 1;
+    let fixture = archive(OperationsProfile::PagedV1_4, first, vec![reset], 8192)?;
+    assert_eq!(observe(&fixture.session)?["ok"], true);
+    let rows = listing(&fixture.session)?["rows"].clone();
+    let mut query = json!({"kind":"historical_furniture_arrivals","from":record(&rows[0]),
+        "to":record(&rows[1]),"furniture_kind":"bed"});
+    let refused = ask(&fixture.session, query.clone())?;
+    assert_eq!(refused["error"]["code"], "stale_anchor");
+    assert!(refused.get("new_item_count").is_none());
+    for material in [json!([-1, 1]), json!([1, -2]), json!([1]), json!("wood")] {
+        query["material"] = material;
+        assert_eq!(ask(&fixture.session, query.clone())?["error"]["code"], "invalid_request");
+    }
+    assert_eq!(fixture.session.calls.load(Ordering::SeqCst), 1);
+    Ok(())
+}

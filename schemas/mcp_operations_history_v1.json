@@ -27,6 +27,23 @@
         }
       },
       "description": "Verify and replay an exact committed record, then run a stateless query without bridge I/O. Authorization is checked at the present session anchor. The result names the historical anchor and explicitly does not claim current freshness."
+    },
+    {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "from", "to", "furniture_kind"],
+      "properties": {
+        "kind": {"const": "historical_furniture_arrivals"},
+        "from": {"type": "object", "additionalProperties": false, "required": ["record", "record_digest"],
+          "properties": {"record": {"type": "integer", "minimum": 1, "maximum": 4096},
+            "record_digest": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"}}},
+        "to": {"type": "object", "additionalProperties": false, "required": ["record", "record_digest"],
+          "properties": {"record": {"type": "integer", "minimum": 1, "maximum": 4096},
+            "record_digest": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"}}},
+        "furniture_kind": {"enum": ["bed", "chair", "table"]},
+        "material": {"anyOf": [{"type": "null"}, {"type": "array", "minItems": 2, "maxItems": 2, "items": false,
+          "prefixItems": [{"type": "integer", "minimum": 0, "maximum": 2147483647}, {"type": "integer", "minimum": -1, "maximum": 2147483647}]}]}
+      },
+      "description": "Count non-removed furniture records at two exact retained endpoints. Identify items at or beyond the earlier native item allocator frontier and show up to eight examples. An optional numeric material pair filters both rosters. Order attribution and material-class identification require independent evidence."
     }
   ]
 }

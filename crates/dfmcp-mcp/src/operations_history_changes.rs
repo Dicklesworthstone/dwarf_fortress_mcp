@@ -10,6 +10,9 @@ use std::time::Instant;
 #[allow(dead_code, clippy::duplicate_mod)]
 mod source;
 
+#[path = "operations_furniture_arrivals.rs"]
+mod furniture;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecordRef {
@@ -28,6 +31,12 @@ struct Envelope {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
+    HistoricalFurnitureArrivals {
+        from: RecordRef,
+        to: RecordRef,
+        furniture_kind: furniture::Kind,
+        material: Option<[i32; 2]>,
+    },
     HistoricalChanges {
         from: RecordRef,
         to: RecordRef,
@@ -146,10 +155,16 @@ impl SourceAdmission {
 
 fn render(view: &QueryResponseProjection, value: Value) -> Result<String> {
     let basis = value.get("basis").cloned().unwrap_or(Value::Null);
-    let changes = json!([{"kind":"archived_endpoint_comparison",
+    let changes = if value["kind"] == "historical_furniture_arrivals" {
+        json!([{"kind":"archived_furniture_arrivals","new_item_count":value["new_item_count"],
+            "net_item_count_change":value["net_item_count_change"],"detail_path":"new_item_examples",
+            "evidence":[value["comparison"]["from"]["record_digest"],value["comparison"]["to"]["record_digest"]]}])
+    } else {
+        json!([{"kind":"archived_endpoint_comparison",
         "change_count":value.get("change_count"),"returned":value.get("returned"),
         "detail_path":"changes","intermediate_history_proven":false,
-        "evidence":[value.get("basis_result_digest"),value.get("target_result_digest")]}]);
+        "evidence":[value.get("basis_result_digest"),value.get("target_result_digest")]}])
+    };
     let mut packet: Value = serde_json::from_str(&finish_query(view, value)?).map_err(|_| {
         error(
             ErrorCode::InternalInvariantViolation,
@@ -185,9 +200,9 @@ pub(super) fn execute(
         ));
     }
     let envelope: Envelope = serde_json::from_value(input.clone())
-        .map_err(|_| invalid("invalid operations historical_changes envelope"))?;
+        .map_err(|_| invalid("invalid operations historical comparison envelope"))?;
     if envelope.schema != "dfmcp.query/1" {
-        return Err(invalid("historical_changes requires dfmcp.query/1"));
+        return Err(invalid("historical comparison requires dfmcp.query/1"));
     }
     if envelope
         .expected_anchor
@@ -199,29 +214,29 @@ pub(super) fn execute(
             "comparison expected_anchor differs from current session",
         ));
     }
-    let Request::HistoricalChanges {
-        from,
-        to,
-        select,
-        limit,
-        continuation,
-    } = envelope.query;
+    let (from, to) = match &envelope.query {
+        Request::HistoricalChanges { from, to, select, limit, continuation } => {
+            if limit.is_some_and(|value| value == 0 || value > 128 || value > current.budget.max_entities)
+                || continuation.as_ref().is_some_and(|value| value.is_empty() || value.len() > 128)
+            {
+                return Err(invalid("historical comparison page arguments exceed their bounds"));
+            }
+            semantic_query::validate_entities_selection(select)?;
+            (from, to)
+        }
+        Request::HistoricalFurnitureArrivals { from, to, material, .. } => {
+            if material.is_some_and(|[kind, index]| kind < 0 || index < -1) {
+                return Err(invalid("expected an exact native material type and index"));
+            }
+            (from, to)
+        }
+    };
     if from.record > to.record {
         return Err(invalid("comparison requires from.record <= to.record"));
     }
-    if limit.is_some_and(|value| value == 0 || value > 128 || value > current.budget.max_entities)
-        || continuation
-            .as_ref()
-            .is_some_and(|value| value.is_empty() || value.len() > 128)
-    {
-        return Err(invalid(
-            "historical comparison page arguments exceed their bounds",
-        ));
-    }
-    semantic_query::validate_entities_selection(&select)?;
     let profile = session.state.profile();
     let journal = session.journal.as_mut().ok_or_else(|| {
-        invalid("historical_changes requires the operator-configured operations journal")
+        invalid("historical comparison requires the operator-configured operations journal")
     })?;
     if journal.profile() != profile
         || journal.state().snapshot().map(|snapshot| snapshot.anchor()) != Some(current.anchor)
@@ -232,8 +247,8 @@ pub(super) fn execute(
         ));
     }
     journal.validate_custody(&remaining(current, started)?)?;
-    let first = selected(journal, &from)?;
-    let last = selected(journal, &to)?;
+    let first = selected(journal, from)?;
+    let last = selected(journal, to)?;
     if first.anchor.cursor.epoch != last.anchor.cursor.epoch || last.anchor.tick < first.anchor.tick
     {
         return Err(error(
@@ -267,6 +282,18 @@ pub(super) fn execute(
         json!({"kind":"verified_operations_comparison_endpoints","journal_id":archive_id.to_string(),
         "profile":profile_name,"from_digest":first.record_digest.to_string(),"to_digest":last.record_digest.to_string()}),
     ];
+
+    let (select, limit, continuation) = match envelope.query {
+        Request::HistoricalChanges { select, limit, continuation, .. } => (select, limit, continuation),
+        Request::HistoricalFurnitureArrivals { furniture_kind, material, .. } => {
+            let journal = session.journal.as_mut().ok_or_else(|| invalid("comparison journal disappeared"))?;
+            let result = furniture::compare(
+                journal, [&first, &last], furniture_kind, material, current, started,
+            )?;
+            view.coverage["complete_domains"] = json!(["furniture_rosters_at_selected_endpoints"]);
+            return publish_comparison(journal, current, started, result, metadata, &view, (archive_id, archive_head, profile));
+        }
+    };
 
     // Reserve the entire packet and its repeated evidence before disk replay.
     let comparator_sample = json!({
@@ -345,7 +372,7 @@ pub(super) fn execute(
         None => &before,
     };
     metadata["source_work"] = source_admission.metadata();
-    let mut result = semantic_query::compare_endpoints_with_output_budget(
+    let result = semantic_query::compare_endpoints_with_output_budget(
         &before,
         after,
         &remaining(current, started)?,
@@ -355,13 +382,21 @@ pub(super) fn execute(
         continuation.as_deref(),
         output_bytes,
     )?;
+    publish_comparison(journal, current, started, result, metadata, &view, (archive_id, archive_head, profile))
+}
+
+fn publish_comparison(
+    journal: &mut Journal,
+    current: &OperationContext,
+    started: Instant,
+    mut result: Value,
+    metadata: Value,
+    view: &QueryResponseProjection,
+    expected: (Digest32, Digest32, OperationsProfile),
+) -> Result<String> {
     journal.validate_custody(&remaining(current, started)?)?;
-    if journal.id() != archive_id || journal.head() != archive_head || journal.profile() != profile
-    {
-        return Err(error(
-            ErrorCode::StaleAnchor,
-            "comparison archive identity changed",
-        ));
+    if (journal.id(), journal.head(), journal.profile()) != expected {
+        return Err(error(ErrorCode::StaleAnchor, "comparison archive identity changed"));
     }
     let object = result.as_object_mut().ok_or_else(|| {
         error(
@@ -382,7 +417,7 @@ pub(super) fn execute(
     );
     remaining(current, started)?;
     let response =
-        semantic_query::publish_with_active_work(current, result, |value| render(&view, value))?;
+        semantic_query::publish_with_active_work(current, result, |value| render(view, value))?;
     remaining(current, started)?;
     Ok(response)
 }

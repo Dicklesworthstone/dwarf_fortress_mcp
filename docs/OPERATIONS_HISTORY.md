@@ -300,6 +300,37 @@ This stores observed endpoints only. Heartbeats are deduplicated and intervals
 between observations are not recorded. It does not prove continuous conditions,
 complete game history, successful effects, resource availability or path access.
 
+## Inspect furniture arriving between two records
+
+Use `historical_furniture_arrivals` after observing a production interval. Supply
+the two record numbers and full lowercase digests returned by `history`.
+Both records must belong to one observation epoch in the same operations journal.
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "historical_furniture_arrivals",
+    "from": {"record": 1, "record_digest": "<first record digest>"},
+    "to": {"record": 2, "record_digest": "<later record digest>"},
+    "furniture_kind": "bed"
+  }
+}
+```
+
+Choose `bed`, `chair` or `table`. An optional `material` pair selects an exact
+native material type and index at both endpoints. The report counts non-removed
+item records, including installed and held furniture. It gives both endpoint
+counts, the signed change, and the number present at the later endpoint whose
+native ID is at least the earlier `next_item_id`. Thus an old bed leaving and
+a new bed arriving can yield zero net change and one new ID. The first eight
+qualifying IDs include their entity generations, numeric materials and subtypes.
+The count always covers the complete qualifying roster, even when the examples
+are capped. An item that existed only between the captures is outside this measure.
+
+Use the two capture references for follow-up inspection. Classifying a material
+as wood and attributing an item to a particular order require independent evidence.
+
 ## Evidence
 
 Fifteen Rust regression scenarios are registered: ten journal/storage tests and

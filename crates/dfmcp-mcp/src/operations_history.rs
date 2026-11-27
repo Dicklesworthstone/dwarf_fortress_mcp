@@ -296,7 +296,7 @@ pub(super) fn handles(input: &Value) -> bool {
             .get("query")
             .and_then(|q| q.get("kind"))
             .and_then(Value::as_str),
-        Some("history" | "historical_query" | "historical_changes")
+        Some("history" | "historical_query" | "historical_changes" | "historical_furniture_arrivals")
     )
 }
 pub(super) fn execute(
@@ -304,7 +304,10 @@ pub(super) fn execute(
     context: &OperationContext,
     input: &Value,
 ) -> Result<String> {
-    if input["query"]["kind"] == "historical_changes" {
+    if matches!(
+        input["query"]["kind"].as_str(),
+        Some("historical_changes" | "historical_furniture_arrivals")
+    ) {
         return changes::execute(session, context, input);
     }
     let started = Instant::now();

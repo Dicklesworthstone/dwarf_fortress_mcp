@@ -687,7 +687,7 @@ fn finish_query(view: &QueryResponseProjection, value: Value) -> Result<String> 
     Ok(encoded)
 }
 #[tool(
-    description = "Query the coherent operations snapshot with typed filters, aggregates, graph relations, search, baselines and watches. Modes: schema, summary, jobs, buildings, items, production, history. Optional profile-bound durable history supports exact historical queries and historical_changes between retained records under current authority in both 1.3 and paged 1.4. Production diagnosis joins observed conditions; inventory_plan allocates declared stack-unit demands without reserving or proving usable supply. furniture_allocation selects distinct observed items for every bed/chair/table target or explains a complete shortage; fresh placement review is required."
+    description = "Query the coherent operations snapshot with typed filters, aggregates, graph relations, search, baselines and watches. Modes: schema, summary, jobs, buildings, items, production, history. Optional profile-bound durable history supports exact historical queries and historical_changes between retained records under current authority in both 1.3 and paged 1.4. historical_furniture_arrivals counts beds, chairs or tables with new native IDs between exact retained endpoints. Production diagnosis joins observed conditions; inventory_plan allocates declared stack-unit demands without reserving or proving usable supply. furniture_allocation selects distinct observed items for every bed/chair/table target or explains a complete shortage; fresh placement review is required."
 )]
 pub fn fortress_query(
     session_id: Option<String>,

@@ -1,0 +1,1 @@
+Operations history can distinguish newly observed furniture identities from net inventory changes across a production interval. Query `historical_furniture_arrivals` for beds, chairs or tables and optionally filter an exact native material pair.

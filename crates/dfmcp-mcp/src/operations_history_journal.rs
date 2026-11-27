@@ -67,6 +67,18 @@ impl Journal {
         }
     }
 
+    pub(crate) fn state_at(
+        &mut self,
+        number: u64,
+        digest: Digest32,
+        context: &OperationContext,
+    ) -> Result<LiveOperationsState> {
+        match self {
+            Self::Single(journal) => journal.state_at(number, digest, context),
+            Self::Paged(journal) => journal.state_at(number, digest, context),
+        }
+    }
+
     pub(crate) fn snapshot_at(
         &mut self,
         number: u64,
