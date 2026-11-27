@@ -36,6 +36,7 @@ enum Request {
         to: RecordRef,
         furniture_kind: furniture::Kind,
         material: Option<[i32; 2]>,
+        examples_from_item_id: Option<u32>,
     },
     HistoricalChanges {
         from: RecordRef,
@@ -224,7 +225,10 @@ pub(super) fn execute(
             semantic_query::validate_entities_selection(select)?;
             (from, to)
         }
-        Request::HistoricalFurnitureArrivals { from, to, material, .. } => {
+        Request::HistoricalFurnitureArrivals { from, to, material, examples_from_item_id, .. } => {
+            if examples_from_item_id.is_some_and(|id| id > i32::MAX as u32) {
+                return Err(invalid("example item ID floor exceeds the native ID range"));
+            }
             if material.is_some_and(|[kind, index]| kind < 0 || index < -1) {
                 return Err(invalid("expected an exact native material type and index"));
             }
@@ -285,10 +289,10 @@ pub(super) fn execute(
 
     let (select, limit, continuation) = match envelope.query {
         Request::HistoricalChanges { select, limit, continuation, .. } => (select, limit, continuation),
-        Request::HistoricalFurnitureArrivals { furniture_kind, material, .. } => {
+        Request::HistoricalFurnitureArrivals { furniture_kind, material, examples_from_item_id, .. } => {
             let journal = session.journal.as_mut().ok_or_else(|| invalid("comparison journal disappeared"))?;
             let result = furniture::compare(
-                journal, [&first, &last], furniture_kind, material, current, started,
+                journal, [&first, &last], furniture_kind, material, examples_from_item_id, current, started,
             )?;
             view.coverage["complete_domains"] = json!(["furniture_rosters_at_selected_endpoints"]);
             return publish_comparison(journal, current, started, result, metadata, &view, (archive_id, archive_head, profile));

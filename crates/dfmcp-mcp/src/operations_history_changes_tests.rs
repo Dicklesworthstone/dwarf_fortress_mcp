@@ -686,7 +686,7 @@ fn furniture_arrivals_separate_new_ids_from_stock_changes_and_bound_only_example
         for item in &mut first.items {
             item.type_key = "BED".to_owned();
         }
-        let mut second = source(17, 4)?;
+        let mut second = source(18, 4)?;
         second.items.retain(|item| item.native_id >= 33);
         for item in &mut second.items {
             item.type_key = "BED".to_owned();
@@ -697,6 +697,10 @@ fn furniture_arrivals_separate_new_ids_from_stock_changes_and_bound_only_example
                     item.item_type = 2;
                 }
                 46 => item.flags |= 1 << 3,
+                47 => {
+                    item.type_key = "DOOR".to_owned();
+                    item.item_type = 3;
+                }
                 _ => {}
             }
         }
@@ -715,7 +719,7 @@ fn furniture_arrivals_separate_new_ids_from_stock_changes_and_bound_only_example
         assert_eq!(result["net_item_count_change"], 8);
         assert_eq!(result["new_item_count"], 9);
         assert_eq!(result["before_next_item_id"], 35);
-        assert_eq!(result["after_next_item_id"], 47);
+        assert_eq!(result["after_next_item_id"], 48);
         assert_eq!(result["examples_truncated"], true);
         let examples = result["new_item_examples"].as_array().ok_or_else(|| {
             error(ErrorCode::InternalInvariantViolation, "missing furniture examples")
@@ -732,12 +736,40 @@ fn furniture_arrivals_separate_new_ids_from_stock_changes_and_bound_only_example
         assert_eq!(result["native_observations"], 0);
         assert_eq!(result["basis"], rows[0]["anchor"]);
         assert_eq!(result["anchor"], rows[1]["anchor"]);
+        assert_eq!(result["examples_from_item_id"], 35);
+        assert_eq!(result["examples_skipped"], 0);
+        let next = &result["next_query"]["query"];
+        assert_eq!(next["from"], query["from"]);
+        assert_eq!(next["to"], query["to"]);
+        assert_eq!(next["material"], query["material"]);
+        assert_eq!(next["examples_from_item_id"], 43);
+        let tail = ask(&fixture.session, next.clone())?;
+        assert_eq!(tail["new_item_count"], 9);
+        assert_eq!(tail["before_item_count"], 3);
+        assert_eq!(tail["after_item_count"], 11);
+        assert_eq!(tail["examples_skipped"], 8);
+        assert_eq!(tail["new_item_examples"].as_array().map(Vec::len), Some(1));
+        assert_eq!(tail["new_item_examples"][0]["native_item_id"], 43);
+        assert!(tail["next_query"].is_null());
+        let mut exhausted = next.clone();
+        exhausted["examples_from_item_id"] = json!(i32::MAX);
+        let end = ask(&fixture.session, exhausted)?;
+        assert_eq!(end["new_item_count"], 9);
+        assert_eq!(end["examples_skipped"], 9);
+        assert_eq!(end["new_item_examples"], json!([]));
+        assert!(end["next_query"].is_null());
         query["material"] = Value::Null;
         assert_eq!(ask(&fixture.session, query.clone())?["new_item_count"], 10);
         query["furniture_kind"] = json!("chair");
         let chair = ask(&fixture.session, query.clone())?;
         assert_eq!(chair["new_item_count"], 1);
         assert_eq!(chair["new_item_examples"][0]["native_item_id"], 45);
+        query["furniture_kind"] = json!("door");
+        let doors = ask(&fixture.session, query.clone())?;
+        assert_eq!(doors["ok"], true);
+        assert_eq!(doors["new_item_count"], 1);
+        assert_eq!(doors["new_item_examples"][0]["native_item_id"], 47);
+        assert!(doors["next_query"].is_null());
         query["from"] = record(&rows[1]);
         let same = ask(&fixture.session, query.clone())?;
         assert_eq!(same["target_source"], expected_source);
@@ -764,6 +796,11 @@ fn furniture_arrivals_refuse_source_resets_and_unbounded_or_untyped_filters() ->
     let refused = ask(&fixture.session, query.clone())?;
     assert_eq!(refused["error"]["code"], "stale_anchor");
     assert!(refused.get("new_item_count").is_none());
+    for invalid_floor in [json!(-1), json!(2147483648_u64), json!("35")] {
+        let mut bad = query.clone();
+        bad["examples_from_item_id"] = invalid_floor;
+        assert_eq!(ask(&fixture.session, bad)?["error"]["code"], "invalid_request");
+    }
     for material in [json!([-1, 1]), json!([1, -2]), json!([1]), json!("wood")] {
         query["material"] = material;
         assert_eq!(ask(&fixture.session, query.clone())?["error"]["code"], "invalid_request");

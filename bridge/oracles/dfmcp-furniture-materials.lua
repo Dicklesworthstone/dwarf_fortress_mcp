@@ -33,8 +33,8 @@ local function observe()
             qerror('selected item is absent or removed: '..id)
         end
         local kind = df.item_type[item:getType()]
-        if kind ~= 'BED' and kind ~= 'CHAIR' and kind ~= 'TABLE' then
-            qerror('selected item is not a bed, chair or table: '..id)
+        if kind ~= 'BED' and kind ~= 'CHAIR' and kind ~= 'DOOR' and kind ~= 'TABLE' then
+            qerror('selected item is not a bed, chair, door or table: '..id)
         end
         local mat_type, mat_index = item:getMaterial(), item:getMaterialIndex()
         local row = {native_item_id=id, type_key=kind, subtype=item:getSubtype(),

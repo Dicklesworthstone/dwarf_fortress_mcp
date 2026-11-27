@@ -318,13 +318,13 @@ Both records must belong to one observation epoch in the same operations journal
 }
 ```
 
-Choose `bed`, `chair` or `table`. An optional `material` pair selects an exact
+Choose `bed`, `chair`, `door` or `table`. An optional `material` pair selects an exact
 native material type and index at both endpoints. The report counts non-removed
 item records, including installed and held furniture. It gives both endpoint
 counts, the signed change, and the number present at the later endpoint whose
 native ID is at least the earlier `next_item_id`. Thus an old bed leaving and
-a new bed arriving can yield zero net change and one new ID. The first eight
-qualifying IDs include their entity generations, numeric materials and subtypes.
+a new bed arriving can yield zero net change and one new ID. Each page of up to eight
+qualifying IDs includes their entity generations, numeric materials and subtypes.
 The count always covers the complete qualifying roster, even when the examples
 are capped. An item that existed only between the captures is outside this measure.
 
@@ -377,4 +377,30 @@ A plant material with its WOOD flag set contributes to the selected wood count.
 
 The resulting classification describes the independent read. The two calls
 cannot establish continuous process identity, production by an original order,
-or the materials of additional items omitted by the eight-example limit.
+or the materials of items outside the selected page.
+
+### Audit all matching arrivals
+
+The finite work-order catalog yields beds, chairs, doors and tables. Select
+`"furniture_kind":"door"` for doors. A query returns at most eight examples
+in ascending native item ID order. When more remain, submit the complete
+`next_query` envelope returned by the server to the same operations query
+handler. It preserves both record numbers and digests, furniture kind and
+material filter, and starts at the first matching item omitted from this page.
+Repeat until `next_query` is null. Each request replays the selected endpoints
+under current authority and the existing source, time and output limits.
+
+`before_item_count`, `after_item_count`, `new_item_count` and the net change
+remain totals for the two endpoints on every page. `examples_skipped` counts
+matching arrivals below the inclusive `examples_from_item_id` floor. The
+existing `examples_truncated` field is true whenever the page alone contains
+fewer rows than the complete arrival count, including on the final page of
+a multi-page result. Use `next_query` to determine whether another page exists.
+An explicit floor beyond the last match returns an empty page with the full
+counts and a null continuation.
+
+For an independent material audit, run the verifier on each nonempty page
+while the target is still paused. Across a complete traversal, each following
+`examples_skipped` equals the number of examples read so far, and the final
+sum of page lengths equals `new_item_count`. A material check can return
+unknown, including on a complete traversal.

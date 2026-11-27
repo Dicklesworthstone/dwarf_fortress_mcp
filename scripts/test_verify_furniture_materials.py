@@ -45,6 +45,17 @@ class FurnitureMaterials(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 compare(self.query, trial)
 
+    def test_last_door_page_of_an_exhaustive_audit(self):
+        self.query.update(native_type_key="DOOR", new_item_count=11, examples_skipped=8,
+                          examples_from_item_id=561, examples_truncated=True, before_next_item_id=550)
+        for item in self.obs["items"]:
+            item["type_key"] = "DOOR"
+        result = compare(self.query, self.obs)
+        self.assertEqual((result["new_item_count"], result["examples_skipped"], len(result["items"])), (11, 8, 3))
+        for wrong in [dict(examples_skipped=9), dict(examples_from_item_id=562), dict(examples_truncated=False)]:
+            with self.subTest(wrong=wrong), self.assertRaises(ValueError):
+                compare(dict(self.query, **wrong), self.obs)
+
     def test_only_returned_subset_may_be_classified(self):
         self.query.update(new_item_count=9, examples_truncated=True, after_next_item_id=570)
         for i in range(3, 8):

@@ -34,6 +34,9 @@ script('561','562','563')
 assert(printed and report.items[1].resolved and report.items[1].wood_flag)
 assert(report.items[2].resolved and not report.items[2].wood_flag)
 assert(not report.items[3].resolved and report.items[3].token==nil)
+df.item_type[7]='DOOR'
+script('561')
+assert(report.items[1].type_key == 'DOOR' and report.items[1].wood_flag)
 for _, args in ipairs({{}, {'1','1'}, {'1','-2'}, {'1e3'}, {'2147483648'},
                       {'1','2','3','4','5','6','7','8','9'}}) do
     assert(not pcall(script, table.unpack(args)))

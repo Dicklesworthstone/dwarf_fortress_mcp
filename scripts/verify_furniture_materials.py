@@ -31,14 +31,19 @@ def selected(arrivals):
     require(source["paused"] is True, "target was unpaused; capture a paused endpoint")
     rows = arrivals["new_item_examples"]
     count = arrivals["new_item_count"]
-    require(integer(count, 1, 65536) and isinstance(rows, list) and len(rows) == min(count, 8)
-            and arrivals["examples_truncated"] is (count > 8), "expected 1..8 complete selected examples")
+    skipped = arrivals.get("examples_skipped", 0)
+    require(integer(count, 1, 65536) and integer(skipped, 0, count) and isinstance(rows, list)
+            and len(rows) == min(count - skipped, 8) and arrivals["examples_truncated"] is (count > len(rows)),
+            "inconsistent arrival example page")
+    require(rows, "this page has no selected furniture examples")
     before, after = arrivals["before_next_item_id"], arrivals["after_next_item_id"]
     require(integer(before, 0, 2**31-1) and integer(after, before, 2**31-1), "invalid item frontier")
+    floor = arrivals.get("examples_from_item_id", before)
+    require(integer(floor, before, 2**31-1), "invalid item example floor")
     ids = [row["native_item_id"] for row in rows]
-    require(all(integer(id_, before, after-1) for id_ in ids) and ids == sorted(set(ids)),
+    require(all(integer(id_, floor, after-1) for id_ in ids) and ids == sorted(set(ids)),
             "invalid or duplicate selected item IDs")
-    require(arrivals["native_type_key"] in ("BED", "CHAIR", "TABLE"), "invalid furniture type")
+    require(arrivals["native_type_key"] in ("BED", "CHAIR", "DOOR", "TABLE"), "invalid furniture type")
     target = arrivals["comparison"]["to"]
     require(target["anchor"] == arrivals["anchor"] and re.fullmatch("[0-9a-f]{64}", target["record_digest"]),
             "inconsistent target record")
@@ -93,6 +98,8 @@ def compare(arrivals, observation):
         "new_item_count": arrivals["new_item_count"], "examples_truncated": arrivals["examples_truncated"],
         "selected_plant_wood_count": sum(row["classification"] == "plant_wood" for row in results),
         "selected_unknown_material_count": sum(row["classification"] == "unknown" for row in results),
+        "examples_from_item_id": arrivals.get("examples_from_item_id", arrivals["before_next_item_id"]),
+        "examples_skipped": arrivals.get("examples_skipped", 0),
         "items": results, "same_process_incarnation_proven": False, "order_attribution_proven": False,
     }
 
