@@ -212,11 +212,56 @@ void unload_drain() {
     World::fail_pause = false; f.step(); check(f.record().run->pause_verified);
     check(plugin_onstatechange(output, SC_BEGIN_UNLOAD) == CR_OK && plugin_shutdown(output) == CR_OK);
 }
-void invalid_clocks_and_maximum_wire() {
-    Fixture f; check(f.prepare().accepted() && f.commit().accepted()); World::tick = -1;
-    check(plugin_onupdate(output) == CR_OK && World::paused && engine.active());
-    World::tick = 101; f.step(0); check(!engine.active() && f.record().run->pause_verified);
-    World::folder = std::string(512, 'w'); auto obs = f.observe(); check(obs.accepted() && obs.observation().size() == run::MAX_CAPTURE_BYTES);
+void invalid_date_stops_without_claiming_order_progress() {
+    for (unsigned invalid = 0; invalid < 4; ++invalid) {
+        Fixture f; const int unpauses = World::unpauses;
+        check(f.prepare().accepted() && f.commit().accepted());
+        if (invalid == 0) World::tick = -1;
+        if (invalid == 1) World::tick = 403200;
+        if (invalid == 2) World::year = -1;
+        if (invalid == 3) World::year = static_cast<std::int64_t>(UINT32_MAX) + 1;
+        check(!f.observe().accepted());
+        f.order.status.whole = 1;
+        f.step(0);
+        const auto &record = f.record();
+        check(World::paused && !engine.active() && record.run->pause_verified);
+        check(record.run->phase == run::clock::Phase::Stopped && !record.run->tick_known);
+        check(record.run->reason == run::clock::Reason::NativeFailure);
+        check(record.trigger == run::Trigger::NativeFailure && !record.predicate_observed());
+        const auto reply = f.query();
+        check(reply.accepted() && reply.effect_record() == run::encode_record(record));
+        const auto reads = World::reads;
+        check(f.query().effect_record() == reply.effect_record() && World::reads == reads);
+        check(f.commit().accepted() && World::unpauses == unpauses + 1);
+    }
+}
+void invalid_date_retains_owner_until_original_pause_is_verified() {
+    for (bool replace_source : {false, true}) {
+        Fixture f; const auto unpauses = World::unpauses;
+        check(f.prepare().accepted() && f.commit().accepted());
+        World::year = -1; World::fail_pause = true;
+        check(f.cancel().accepted());
+        const auto &record = f.record();
+        check(engine.active() && record.run->phase == run::clock::Phase::Stopping);
+        check(!record.run->pause_verified && !record.run->tick_known);
+        check(f.query().accepted() && World::unpauses == unpauses + 1);
+        const int pauses = World::pauses;
+        World::fail_pause = false;
+        if (replace_source) ++World::site;
+        f.step(0);
+        check(!engine.active() && !record.run->tick_known && !record.predicate_observed());
+        if (replace_source) {
+            check(record.run->phase == run::clock::Phase::SourceLost && !record.run->pause_verified);
+            check(World::pauses == pauses && !World::paused);
+        } else {
+            check(record.run->phase == run::clock::Phase::Stopped && record.run->pause_verified);
+            check(record.run->reason == run::clock::Reason::Cancelled && World::paused);
+        }
+        check(f.query().accepted() && World::unpauses == unpauses + 1);
+    }
+}
+void maximum_wire() {
+    Fixture f; World::folder = std::string(512, 'w'); auto obs = f.observe(); check(obs.accepted() && obs.observation().size() == run::MAX_CAPTURE_BYTES);
     f.order.status.whole = 0; auto p = f.prepare({}, {100,1000}, std::string(128,'k')); check(p.accepted());
     check(f.commit().accepted()); f.order.status.whole = 1; f.step();
     auto record = f.query().effect_record(); check(record.size() == run::MAX_RECORD_BYTES);
@@ -227,7 +272,8 @@ int main() {
     setenv("DFMCP_ALLOW_UNADMITTED_ORDER_RUN_V1_14", "1", 1); setenv("DFMCP_ORDER_RUN_TOKEN", std::string(32,'x').c_str(), 1);
     unsetenv("DFMCP_ADMITTED_BRIDGE_PROTOCOL");
     canonical_vectors(); authentication_and_shapes(); predicate_callbacks_and_disconnected_clients();
-    target_drift_and_queue_validation(); broken_queue_during_run(); stale_source_and_ambiguous_responses(); independent_setter_scope(); unload_drain(); invalid_clocks_and_maximum_wire();
+    target_drift_and_queue_validation(); broken_queue_during_run(); stale_source_and_ambiguous_responses(); independent_setter_scope(); unload_drain();
+    invalid_date_stops_without_claiming_order_progress(); invalid_date_retains_owner_until_original_pause_is_verified(); maximum_wire();
     check(suspension_depth == 0);
     std::cout << "order-run bridge: " << checks << " assertions passed\n";
 }

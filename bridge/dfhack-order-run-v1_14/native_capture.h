@@ -47,11 +47,14 @@ inline run::Identity identity(std::uint64_t generation) {
 }
 inline run::clock::Snapshot clock_snapshot(std::uint64_t generation) {
     using namespace DFHack;
+    run::clock::Snapshot clock{generation, 0, 0, true, false, World::ReadPauseState()};
     const auto year = static_cast<std::int64_t>(World::ReadCurrentYear());
     const auto tick = static_cast<std::int64_t>(World::ReadCurrentTick());
-    run::require(year >= 0 && year <= UINT32_MAX && tick >= 0 && tick < 403200, 5);
-    return {generation, 0, static_cast<std::uint64_t>(year) * 403200 + static_cast<std::uint64_t>(tick),
-        true, true, World::ReadPauseState()};
+    if (year >= 0 && year <= UINT32_MAX && tick >= 0 && tick < 403200) {
+        clock.clock_valid = true;
+        clock.tick = static_cast<std::uint64_t>(year) * 403200 + static_cast<std::uint64_t>(tick);
+    }
+    return clock;
 }
 inline run::clock::Snapshot read_clock(std::uint64_t generation, const run::Identity &expected) {
     if (!(identity(generation) == expected)) return {}; // Base engine's source-loss sentinel.
@@ -60,6 +63,7 @@ inline run::clock::Snapshot read_clock(std::uint64_t generation, const run::Iden
 inline run::Capture capture(std::uint64_t generation, std::uint32_t id) {
     run::require(id <= INT32_MAX); run::Capture out; out.identity = identity(generation);
     out.clock = clock_snapshot(generation);
+    run::require(out.clock.clock_valid, 5); // Order evidence always requires a valid game date.
     const auto &queue = df::global::world->manager_orders;
     run::require(queue.manager_order_next_id >= 0 && queue.all.size() <= 4096, 5);
     out.id = id; out.next_order = static_cast<std::uint32_t>(queue.manager_order_next_id);

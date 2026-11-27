@@ -57,6 +57,11 @@ source loss and failed reads cannot manufacture a predicate-triggered result.
 The stability count is a native-reported sampled count, not a full sample trace
 or proof of continuous truth. Negative samples reset it, including early ones.
 
+A running order with an invalid game date triggers a safety stop. The bridge can
+still verify the raw pause setter and read back the pause on the original
+fortress. Its receipt reports an unknown tick and retains the previous order
+sample. A fresh order capture still requires a valid year and tick.
+
 A run that cannot verify a safety pause retains ownership and refuses a new run.
 The Idle/Busy/Closing atomic unload gate is claimed before unpause.
 SC_BEGIN_UNLOAD requests drain and vetoes unloading while Busy; the callback

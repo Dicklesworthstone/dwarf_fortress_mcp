@@ -1,0 +1,1 @@
+- A finite production run can verify its safety pause when the game date becomes invalid. The native order-run receipt reports an unknown tick and retains the last qualified order sample.
