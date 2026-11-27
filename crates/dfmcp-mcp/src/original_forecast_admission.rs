@@ -29,6 +29,8 @@ pub(in crate::server) struct AdmittedProjectSet<'a> {
     requested: Vec<Digest32>,
     pub(in crate::server) originals: Vec<model::Original>,
     pub(in crate::server) projects: Vec<model::Project>,
+    pub(super) current_recovered: Vec<model::RecoveredOriginal>,
+    complete_project: bool,
     pub(in crate::server) carried: Vec<CarriedStep>,
     pub(in crate::server) owned_actions: &'a [ActionId],
     /// Complete selected live/recovered and competing action domain. Drained
@@ -94,7 +96,11 @@ impl AdmittedProjectSet<'_> {
             .get(&digest)
             .ok_or_else(|| invalid("selected original goal disappeared during private forecast"))?;
         if self.recovered_goals.contains(&digest) {
-            original.forecast_recovered_truth_at(snapshot)
+            if self.complete_project {
+                original.forecast_recovered_truth_at(snapshot)
+            } else {
+                original.forecast_recovered_current_truth_at(snapshot)
+            }
         } else {
             original.forecast_truth_at(snapshot)
         }
@@ -263,6 +269,7 @@ pub(super) fn admit_originals<'a>(
     let mut goals = BTreeMap::new();
     let mut action_union = BTreeSet::new();
     let mut projects = Vec::new();
+    let mut current_recovered = Vec::new();
     let mut project_snapshots = Vec::new();
     let mut recovered_goals = BTreeSet::new();
     let mut recovered_sources = Vec::new();
@@ -302,8 +309,43 @@ pub(super) fn admit_originals<'a>(
             .find(|original| original.plan_digest == member.actual_digest())
             .ok_or_else(|| invalid("forecast original goal disappeared"))?;
         // A present live receipt remains authoritative: malformed live custody
-        // cannot fall back to recovery. The default current-stage route keeps
-        // its existing live-only behavior.
+        // cannot fall back to recovery in either forecast scope.
+        let current_recovery = if !complete_project
+            && !session.commit_receipts.contains_key(&member.requested_digest().to_hex())
+        {
+            let plan = original.resource_plan()
+                .ok_or_else(|| invalid("recovered original seal disappeared"))?;
+            let (archived, census, evidence) =
+                original.forecast_recovered_current_stage(session)?;
+            let verified = census.iter().filter(|row| row.state == "verified").count();
+            verified_recovered_steps = verified_recovered_steps.saturating_add(verified);
+            unfinished_recovered_steps =
+                unfinished_recovered_steps.saturating_add(census.len() - verified);
+            recovered_digests.insert(member.actual_digest());
+            let recovered = model::RecoveredOriginal::new(
+                plan, census, evidence, session.adapter.snapshot(), &session.carried,
+            )?;
+            recovered_steps = recovered_steps.saturating_add(plan.steps.len());
+            recovered_goals.insert(member.actual_digest());
+            if admitted_snapshots.insert(archived.anchor.state_hash) {
+                recovered_records = recovered_records.saturating_add(archived.records);
+                recovered_bytes = recovered_bytes.saturating_add(archived.bytes);
+                recovered_shape.0 = recovered_shape.0.saturating_add(archived.structural_bytes);
+                recovered_shape.1 = recovered_shape.1.saturating_add(archived.structural_work);
+                recovered_sources.push(json!({
+                    "anchor":anchor_json(&archived.anchor),
+                    "records":archived.records,"canonical_bytes":archived.bytes,
+                    "structural_bytes":archived.structural_bytes,"structural_work":archived.structural_work,
+                    "verification":"exact_sealed_snapshot_and_typed_plan_during_durable_recovery",
+                    "production_ledger_required":false,
+                    "query_archive_reads":0,
+                }));
+            }
+            current_recovered.push(recovered);
+            true
+        } else {
+            false
+        };
         let recovery = if complete_project
             && !session
                 .commit_receipts
@@ -335,7 +377,7 @@ pub(super) fn admit_originals<'a>(
         } else {
             None
         };
-        let selected = if recovery.is_some() {
+        let selected = if recovery.is_some() || current_recovery {
             super::super::plan_cancellation::Selection {
                 requested: member.requested_digest(),
                 actual: member.actual_digest(),
@@ -352,7 +394,7 @@ pub(super) fn admit_originals<'a>(
         let continued = project_lineages
             .get(&selected.actual)
             .is_some_and(|(_, descendants)| !descendants.is_empty());
-        if recovery.is_none() {
+        if recovery.is_none() && !current_recovery {
             admit_live_actions(session, &selected, &mut action_union, continued, continued)?;
         }
         original.selected_wait_truth(session)?;
@@ -582,8 +624,8 @@ pub(super) fn admit_originals<'a>(
     let mut additional_carried_bytes = 0u64;
     // Every real foreground wait includes recovered peer cadence, including
     // when the selected original still owns live action handles. Admit the
-    // same passive monitors for both scopes; selection remains live-only for
-    // current_stage and never gains recovered dispatch authority.
+    // same passive monitors for both scopes. Selected recovered originals
+    // are counted once and never gain recovered dispatch authority.
     let carried_originals: BTreeSet<_> = session
         .carried
         .iter()
@@ -705,6 +747,8 @@ pub(super) fn admit_originals<'a>(
         requested: digests.to_vec(),
         originals,
         projects,
+        current_recovered,
+        complete_project,
         carried: carried_progress,
         owned_actions: &session.open_actions,
         action_steps,

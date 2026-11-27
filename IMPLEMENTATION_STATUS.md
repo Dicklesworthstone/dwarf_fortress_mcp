@@ -1,5 +1,11 @@
 # Implementation Status
 
+## Unreleased — Forecast recovered work without recreating action handles
+
+Default current-stage joint forecasts can select authenticated recovered
+originals alongside live work, with raw-action source custody independent of
+production ledgers. See [implementation and verification scope](IMPLEMENTATION_STATUS.d/recovered-current-stage-forecast.md).
+
 ## Unreleased — Preserve completed action history in passive recovery views
 
 Work resources and original-goal Explain can now read verified archived step

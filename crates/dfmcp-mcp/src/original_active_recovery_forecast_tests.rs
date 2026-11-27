@@ -7,6 +7,9 @@ use dfmcp_core::GameTick;
 use dfmcp_intent::{ObligationStatus, RecoveredObligation};
 use server::{CarriedStep, recovered_step_progress};
 
+#[path = "original_current_recovery_forecast_tests.rs"]
+mod current;
+
 fn direct_beds() -> Result<ProjectSource> {
     Ok(ProjectSource::Production(ProductionRequest::parse_current(
         &json!({"template":"production","quotas":[{"item":"BED","minimum":4}]}).to_string(),

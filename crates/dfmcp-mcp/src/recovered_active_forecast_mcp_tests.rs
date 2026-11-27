@@ -199,10 +199,13 @@ fn current_stage_forecast_admits_recovered_peers_without_recovering_selected_han
     assert_eq!(complete["prediction"]["forecast_work"]["actual_game_ticks_advanced"], 0);
     assert_eq!(state(&owner)?, before);
 
-    // Peer admission must not expand current_stage selection to originals
-    // whose process-local action handles were lost at the real restart.
-    let refused = query(&owner, std::slice::from_ref(&recovered), 0)?;
-    assert_eq!(refused["ok"], false, "{refused}");
+    // The recovered peer can also be selected without restoring its lost
+    // process-local action handles or expanding a complete project.
+    let selected = query(&owner, std::slice::from_ref(&recovered), 0)?;
+    assert_eq!(selected["ok"], true, "{selected}");
+    assert_eq!(selected["schema"], "dfmcp.lab-original-forecast/5");
+    assert_eq!(selected["prediction"]["originals"][0]["selection_origin"], "durable_recovery");
+    assert_eq!(selected["prediction"]["originals"][0]["dispatch_handles_restored"], false);
     assert_eq!(state(&owner)?, before);
     let inspected_bytes = zero["source_work"]["inspected_canonical_and_custody_bytes"]
         .as_u64().ok_or("complete current-stage source accounting missing")?;

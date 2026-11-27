@@ -206,13 +206,14 @@ pub(super) fn execute(
         request.forecast_scope == Scope::CompleteProject,
     )?;
     let projects = std::mem::take(&mut admitted.projects);
+    let current_recovered = std::mem::take(&mut admitted.current_recovered);
     let carried_progress = std::mem::take(&mut admitted.carried);
     let source = &admitted.source;
     let mut inspections = 0u64;
     let mut inspected_records = 0u64;
     let mut inspected_bytes = 0u64;
     let mut predicate_node_visits_bound = 0u64;
-    let prediction = model::forecast(
+    let prediction = model::forecast_with_recovered(
         &session.adapter,
         &admitted.originals,
         admitted.owned_actions,
@@ -220,6 +221,7 @@ pub(super) fn execute(
         request.horizon_ticks,
         started,
         (request.forecast_scope == Scope::CompleteProject).then_some(projects),
+        current_recovered,
         carried_progress,
         |snapshot, modeled_actions, modeled_plan_bytes| {
             admitted.inspect_structure(snapshot, context, started)?;
@@ -327,6 +329,21 @@ pub(super) fn execute(
             response["source_work"]["fixed_structural_bytes"] = json!(admitted.fixed_shape.0);
             response["source_work"]["fixed_structural_work"] = json!(admitted.fixed_shape.1);
         }
+    }
+    if request.forecast_scope == Scope::CurrentStage && !admitted.recovered_goals.is_empty() {
+        response["schema"] = json!("dfmcp.lab-original-forecast/5");
+        response["forecast_scope"] = json!("current_stage");
+        response["source_work"]["recovered_original_source_witnesses"] =
+            json!(admitted.recovered_sources);
+        response["source_work"]["recovered_original_steps"] = json!(admitted.recovered_steps);
+        response["source_work"]["verified_recovered_original_steps"] =
+            json!(admitted.verified_recovered_steps);
+        response["source_work"]["recovered_observation_steps"] =
+            json!(admitted.unfinished_recovered_steps);
+        response["source_work"]["additional_original_records"] = json!(admitted.project_records);
+        response["source_work"]["additional_original_bytes"] = json!(admitted.project_bytes);
+        response["source_work"]["fixed_structural_bytes"] = json!(admitted.fixed_shape.0);
+        response["source_work"]["fixed_structural_work"] = json!(admitted.fixed_shape.1);
     }
     if started.elapsed() >= Duration::from_millis(context.budget.max_wall_millis) {
         return Err(exhausted(

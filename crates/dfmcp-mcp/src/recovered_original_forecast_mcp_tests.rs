@@ -10,6 +10,9 @@ mod chains;
 #[path = "recovered_active_forecast_mcp_tests.rs"]
 mod active;
 
+#[path = "recovered_current_stage_forecast_mcp_tests.rs"]
+mod current_stage;
+
 struct StateDir(std::path::PathBuf);
 impl StateDir {
     fn new(label: &str) -> Self {
@@ -33,6 +36,10 @@ impl Drop for StateDir {
 }
 
 fn open_durable(selector: &str) -> TestResult<Owner> {
+    open_durable_scenario(selector, "starter_fortress_resources")
+}
+
+fn open_durable_scenario(selector: &str, scenario: &str) -> TestResult<Owner> {
     let opened = parsed(&facade::fortress_open_session(
         Some(false),
         Some(selector.to_owned()),
@@ -58,7 +65,7 @@ fn open_durable(selector: &str) -> TestResult<Owner> {
         Some(4 * 1024 * 1024),
         Some(32_768),
         Some(64),
-        Some("starter_fortress_resources".to_owned()),
+        Some(scenario.to_owned()),
         Some(false),
         Some(true),
     ))?;
@@ -138,7 +145,10 @@ fn durable_recovered_harvest_forecasts_production_without_hydrating_or_changing_
     for _ in 0..2 {
         let owner = open_durable("8161501")?;
         let old_stage = query(&owner, std::slice::from_ref(&digest), 0)?;
-        assert_eq!(old_stage["ok"], false, "{old_stage}");
+        assert_eq!(old_stage["ok"], true, "{old_stage}");
+        assert_eq!(old_stage["schema"], "dfmcp.lab-original-forecast/5");
+        assert_eq!(old_stage["prediction"]["originals"][0]["predicted_outcome"], "goal_unmet");
+        assert!(old_stage["prediction"]["originals"][0]["future_stages"].is_null());
         let pending = plan(&owner, Some(order("preserve this pending review", 1)), None)?;
         let before = state(&owner)?;
         let result = forecast(&owner, &digest, 4_000)?;

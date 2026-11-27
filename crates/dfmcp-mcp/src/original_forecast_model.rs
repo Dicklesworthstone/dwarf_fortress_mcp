@@ -410,6 +410,44 @@ pub(super) fn forecast(
         horizon_ticks,
         started,
         projects,
+        Vec::new(),
+        carried,
+        inspect,
+        evaluate,
+        &mut OriginalMeter,
+    )
+}
+
+/// The public original query can select admitted recovered current-stage
+/// originals without interpreting their actions as a complete project.
+pub(super) fn forecast_with_recovered(
+    adapter: &MemoryAdapter,
+    originals: &[Original],
+    tracked: &[ActionId],
+    context: &OperationContext,
+    horizon_ticks: u64,
+    started: Instant,
+    projects: Option<Vec<Project>>,
+    recovered_originals: Vec<RecoveredOriginal>,
+    carried: Vec<CarriedStep>,
+    inspect: impl FnMut(&WorldSnapshot, u64, u64) -> Result<()>,
+    evaluate: impl FnMut(Digest32, &WorldSnapshot) -> Result<(PredicateTruth, PredicateTruth)>,
+) -> Result<Value> {
+    if recovered_originals.is_empty() {
+        return forecast(
+            adapter, originals, tracked, context, horizon_ticks, started,
+            projects, carried, inspect, evaluate,
+        );
+    }
+    forecast_metered(
+        adapter,
+        originals,
+        tracked,
+        context,
+        horizon_ticks,
+        started,
+        projects,
+        recovered_originals,
         carried,
         inspect,
         evaluate,
@@ -440,6 +478,7 @@ pub(crate) fn forecast_current_stage_metered(
         horizon_ticks,
         started,
         None,
+        Vec::new(),
         carried,
         inspect,
         evaluate,
@@ -470,6 +509,7 @@ pub(crate) fn forecast_project_metered(
         horizon_ticks,
         started,
         Some(projects),
+        Vec::new(),
         carried,
         inspect,
         evaluate,
@@ -485,6 +525,7 @@ fn forecast_metered(
     horizon_ticks: u64,
     started: Instant,
     mut projects: Option<Vec<Project>>,
+    recovered_originals: Vec<RecoveredOriginal>,
     mut carried: Vec<CarriedStep>,
     mut inspect: impl FnMut(&WorldSnapshot, u64, u64) -> Result<()>,
     mut evaluate: impl FnMut(Digest32, &WorldSnapshot) -> Result<(PredicateTruth, PredicateTruth)>,
@@ -571,6 +612,28 @@ fn forecast_metered(
             "joint project sources differ from selected original identities",
         ));
     }
+    if !recovered_originals.is_empty() && projects.is_some() {
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            "current-stage recovered selections cannot replace complete-project custody",
+        ));
+    }
+    let mut current_recovered = BTreeSet::new();
+    for recovered in &recovered_originals {
+        let original = originals.iter().find(|original| original.actual == recovered.original())
+            .ok_or_else(|| error(
+                ErrorCode::InvalidRequest,
+                "recovered current-stage custody is not a selected original",
+            ))?;
+        if !original.actions.is_empty() || !current_recovered.insert(recovered.original()) {
+            return Err(error(
+                ErrorCode::Conflict,
+                "recovered current-stage originals cannot alias live or duplicate action custody",
+            ));
+        }
+        recovered.validate_snapshot(adapter.snapshot())?;
+        recovered.rows(adapter.snapshot(), &carried)?;
+    }
     let tracked_recovered_steps = carried.len();
     let mut recovered_keys = BTreeSet::new();
     for row in &carried {
@@ -614,6 +677,7 @@ fn forecast_metered(
         .flatten()
         .flat_map(Project::recovered_originals)
         .map(RecoveredOriginal::original)
+        .chain(current_recovered.iter().copied())
         .collect();
     let recovered_peer_steps = carried
         .iter()
@@ -625,7 +689,7 @@ fn forecast_metered(
     }
     let recovered_steps = projects.as_ref().map_or(0, |projects| {
         projects.iter().map(Project::recovered_steps).sum::<usize>()
-    });
+    }).saturating_add(recovered_originals.iter().map(RecoveredOriginal::len).sum::<usize>());
     if let Some(projects) = &projects {
         for project in projects {
             all_actions.extend(project.retained_actions());
@@ -686,7 +750,7 @@ fn forecast_metered(
             ..context.clone()
         };
         observation_context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
-        if projects.is_some() {
+        if projects.is_some() || !recovered_originals.is_empty() {
             observation_context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         }
         let mut outcomes = Vec::with_capacity(originals.len());
@@ -709,7 +773,14 @@ fn forecast_metered(
                     stage,
                     &carried,
                 )?,
-                None => observe(&fork, original, samples[index], goal, stage)?,
+                None => match recovered_originals.iter()
+                    .find(|recovered| recovered.original() == original.actual)
+                {
+                    Some(recovered) => observe_with_recovery(
+                        &fork, original, samples[index], goal, stage, Some(recovered), &carried,
+                    )?,
+                    None => observe(&fork, original, samples[index], goal, stage)?,
+                },
             });
         }
         // Capture every exact reserve endpoint above before any future stage
@@ -1072,6 +1143,18 @@ fn forecast_metered(
             error(ErrorCode::InternalInvariantViolation, "forecast assumptions disappeared")
         })?.push(json!(
             "all authenticated unfinished recovered peers constrain the real foreground observation cadence in both scopes; their copied monitors are passive and confer no dispatch authority"
+        ));
+    }
+    if !recovered_originals.is_empty() {
+        report["forecast_scope"] = json!("current_stage");
+        report["forecast_work"]["recovered_original_steps"] = json!(recovered_steps);
+        report["forecast_work"]["verified_recovered_original_steps"] = json!(
+            recovered_originals.iter().map(RecoveredOriginal::historical_verified_steps).sum::<usize>()
+        );
+        report["assumptions"].as_array_mut().ok_or_else(|| {
+            error(ErrorCode::InternalInvariantViolation, "forecast assumptions disappeared")
+        })?.push(json!(
+            "selected recovered originals retain exact historical proof and passive monitor progress; no old action handle, original dispatch or additional project stage is recreated"
         ));
     }
     if let Some(projects) = &projects {

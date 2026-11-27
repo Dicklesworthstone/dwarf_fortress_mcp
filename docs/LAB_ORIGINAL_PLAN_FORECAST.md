@@ -2,9 +2,10 @@
 
 The existing `fortress.query` tool can forecast one to eight **already committed,
 original plans together**. The default scope selects current-session live
-originals; complete-project forecasting also accepts recovered roots and their
-admitted continuation chains, including an already-dispatched unfinished tip
-with an authenticated observation monitor. This answers a practical question
+originals and exact recovered originals, including raw excavation, harvest and
+work-order plans. Complete-project forecasting additionally accepts admitted
+continuation chains, including an already-dispatched unfinished tip with an
+authenticated observation monitor. This answers a practical question
 that independent plan comparisons cannot answer: will these originals still
 finish when they share the same finite workforce, materials and consumption?
 
@@ -47,7 +48,7 @@ cannot be counted twice. Results are sorted by actual original digest.
 
 Add `"forecast_scope": "complete_project"` to predict subsequent stages of an
 ordinary production, provisioned-room or connected-room root. The default is
-`"current_stage"`; omitting the field preserves the original `/1` response.
+`"current_stage"`; omitting the field preserves the original `/1` response for live-only selections.
 Live complete-project responses use `dfmcp.lab-original-forecast/2`. A request
 whose selected recovered steps are all historical uses
 `dfmcp.lab-original-forecast/3`. If a selected recovered root or final committed
@@ -191,8 +192,10 @@ This also applies when a new live original is selected with the default
 `current_stage` scope after durable reopening. Its verification schedule shares
 the recovered peers' cadence and deadlines, just as real foreground waiting
 does. Omitting those peers could predict an eligible stability sample too early.
-The selected original still requires live receipts; this shared progression
-does not admit recovered selections into `current_stage`.
+An exact recovered original can itself be selected in `current_stage`.
+Selected recovered steps count once in the action domain; their carried
+monitors are excluded from the unselected-peer count. No project source or
+production ledger is required for a raw action original.
 
 An initial zero-time polling round can release already-ready original
 dependencies. Subsequent slices follow the laboratory foreground wait policy:
@@ -220,9 +223,13 @@ available for outcome inspection.
 
 ## Read the result
 
-A successful current-stage response has schema `dfmcp.lab-original-forecast/1`;
-live complete-project responses use `/2`, historical recovered-project responses
-use `/3`, and selected unfinished recovered-project responses use `/4`.
+A successful live-only current-stage response has schema
+`dfmcp.lab-original-forecast/1`. Any current-stage selection containing a
+recovered original uses `dfmcp.lab-original-forecast/5`, with
+`forecast_scope: "current_stage"`; this includes entirely historical selections
+and mixed live/recovered selections. Live complete-project responses use `/2`,
+historical recovered-project responses use `/3`, and selected unfinished
+recovered-project responses use `/4`.
 All contain a
 `prediction` object with `epistemic_state: "predicted"`. Its top-level `anchor`
 and the Agent Turn anchor are the actual current source. A separate predicted
@@ -285,16 +292,46 @@ and source admission. Actual live-clock authority is unnecessary for a discarded
 simulation. An already-committed deferred effect still checks its real scoped
 grant and expiry at the modeled frontier. For example, a deferred pause cannot
 borrow a synthetic ControlClock grant. Modeled observation also respects Observe
-expiry; complete-project observations also respect modeled Query expiry.
+expiry; complete-project observations and selected recovered current-stage
+observations also respect modeled Query expiry.
 
-The default `current_stage` scope accepts only complete live original receipts
-owned by this session. Pending plans, foreign originals, withdrawn or
-restore-abandoned pursuits and missing original custody refuse before the model
-fork. Complete-project forecasting has the following bounded recovery path.
+The default `current_stage` scope accepts complete live original receipts owned
+by this session or exact recovered original custody. Pending plans, foreign
+originals, withdrawn or restore-abandoned pursuits and missing original custody
+refuse before the model fork. A present live receipt remains authoritative;
+malformed live custody cannot fall back to recovery.
 
 ### Forecast original work after durable reopen
 
-A reopened durable fortress can forecast an exact ordinary production,
+With the default `current_stage` scope, select the exact recovered original
+digest. The query predicts only that already committed original: raw Mine,
+harvest and work-order actions do not need to be wrapped in a production
+blueprint. A committed continuation may also be inspected independently without
+expanding its lineage. Every admitted step must be historical Verified and
+currently physically quiet, or already dispatched with its exact active
+recovered temporal monitor. Never-dispatched successors, failed or cancelled
+custody, unavailable sources and unknown physical work remain refusals.
+
+Ordinary durable recovery captures a compact, ledger-independent witness for
+every exact original sealed source: its complete canonical record/byte counts,
+structural byte/work bounds, original anchor, semantic digest and lossless
+typed-plan object digest. Current-stage admission compares the entire typed
+plan object, including variants that the older semantic encoding could alias.
+Historical source costs are charged even when every selected step is complete
+and no carried monitor remains. The query does not load the archive, hydrate
+history or reconstruct old handles. Production/room goal semantics still enforce
+their own original ledger requirements; complete-project admission additionally
+retains its existing source and current-ledger validation.
+
+Recovered current-stage responses use `/5`. Their original rows retain
+`selection_origin: "durable_recovery"`, immutable proof anchors, null ActionIds
+and separate private predicted proof. Source diagnostics include the archived
+witnesses, recovered/Verified/unfinished step counts and fixed historical
+structural charges. No future stage is prepared, and the next-step link still
+names the exact selected originals for an explicit real wait.
+
+With `forecast_scope: "complete_project"`, a reopened durable fortress can
+forecast an exact ordinary production,
 provisioned-room or connected-room root and its retained committed chain.
 Every predecessor must already have complete Verified, physically quiet
 original work. The final committed stage, or a root without descendants, may
@@ -461,7 +498,8 @@ custody, shared source accounting and read-only query projection.
 stock-ledger identity during pure private evaluation.
 `original_project_lineage.rs` validates the bounded exact retained chain.
 `objective_forecast_recovery.rs` retains forecast-specific sealed-source custody
-during ordinary recovery; `recovered_original_forecast.rs` separates immutable
+during ordinary recovery, including ledger-independent raw-original witnesses;
+`recovered_original_forecast.rs` separates immutable
 historical census from private predicted monitor results. The shared pure
 `recovered_step_progress.rs` implements real and predicted recovered observation
 and cadence without creating adapter handles.
@@ -498,6 +536,14 @@ and output admission, unfinished work, malformed live-custody precedence,
 replacement ledgers and preservation of pending review, world and history.
 Execution results and environment limitations are recorded
 in the implementation status; source presence alone is not a test result.
+
+New current-stage regression sources cover a raw Mine source with terrain and
+no stock ledger, durable reopening and comparison with real selected waiting,
+mixed live/recovered finite orders, retained cadence/stability, original deadline
+failure, current and modeled-expiry authority, exact typed aliases, missing
+historical witnesses, complete source/action/output limits and memory/file read
+purity. They are authored sources; compilation and execution remain unavailable
+in the disconnected implementation environment.
 
 Machine-readable contract:
 [`architecture/laboratory_original_forecast_v1.json`](../architecture/laboratory_original_forecast_v1.json).

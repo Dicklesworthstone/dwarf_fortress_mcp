@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Forecast recovered originals in the current stage
+
+- Admit exact recovered excavation, harvesting and production originals into
+  the default joint forecast, including selections mixed with live work.
+- Reuse authenticated original monitors and sealed-source custody without
+  recreating dispatch handles or requiring a production ledger for raw actions.
+- Preserve shared worker/resource contention, original deadlines and cadence,
+  historical proof, current authority and cumulative simulation bounds.
+- Add regression sources for recovery, mixed contention and refusal boundaries;
+  Rust compilation and execution remain unavailable in this environment.
+
 ## Unreleased — Keep completed originals visible after recovery
 
 - Show verified archived step dispositions in work resources and original-goal

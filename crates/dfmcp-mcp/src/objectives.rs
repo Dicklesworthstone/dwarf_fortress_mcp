@@ -101,6 +101,7 @@ pub(super) struct Objective {
     /// Exact archived source qualification, captured during ordinary recovery.
     /// Failure affects only the optional forecast, never existing goal recovery.
     recovered_project_source: Option<Result<forecast_recovery::RecoveredProjectSource>>,
+    recovered_forecast_source: Option<Result<forecast_recovery::RecoveredOriginalSource>>,
     /// Positive retired-step custody, verified against the original seal and
     /// exact archived frontier. A missing entity never populates this map.
     retired_never_dispatched: BTreeMap<u32, goal_custody::RetiredNondispatchProof>,
@@ -539,6 +540,7 @@ impl Objective {
             original_handles_live: true,
             recovered_wait_custody: None,
             recovered_project_source: None,
+            recovered_forecast_source: None,
             retired_never_dispatched: BTreeMap::new(),
             first_satisfied_anchor: None,
             historical_proof_verified: false,
@@ -1492,6 +1494,7 @@ pub(super) fn recover_objective(
         original_handles_live: false,
         recovered_wait_custody: None,
         recovered_project_source: None,
+        recovered_forecast_source: None,
         retired_never_dispatched: BTreeMap::new(),
         first_satisfied_anchor: retained.first_satisfied_anchor,
         historical_proof_verified: false,
@@ -1535,6 +1538,10 @@ pub(super) fn recover_objective(
             .source
             .intent(IntentId::new(retained.intent_id), &sealed)?;
         let plan = recovery_compiler::prepare_exact(&sealed, &intent, &ctx, retained.plan_digest)?;
+        let forecast_started = std::time::Instant::now();
+        let forecast_source =
+            forecast_recovery::RecoveredOriginalSource::capture(&sealed, &plan, &ctx);
+        objective.recovered_forecast_source = Some(forecast_source.clone());
         if matches!(
             &objective.source,
             PlanSource::Production { .. }
@@ -1546,7 +1553,11 @@ pub(super) fn recover_objective(
                 if room_provisioning::is_provisioned_room(raw))
         {
             objective.recovered_project_source = Some(
-                forecast_recovery::RecoveredProjectSource::capture(&sealed, &plan, &ctx),
+                forecast_source.and_then(|source| {
+                    forecast_recovery::RecoveredProjectSource::capture(
+                        &sealed, &plan, source, &ctx, forecast_started,
+                    )
+                }),
             );
         }
         if objective.requires_output_ledger() {
