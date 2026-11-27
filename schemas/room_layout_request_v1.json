@@ -174,7 +174,7 @@
         "rooms_count": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 13
+          "maximum": 14
         },
         "room_size": {
           "type": "array",
@@ -191,6 +191,11 @@
             "bed_only",
             "bed_chair_table"
           ]
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
         }
       },
       "if": {
@@ -226,7 +231,28 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "rooms_count": {
+                "const": 14
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "columns"
+            ],
+            "properties": {
+              "columns": {
+                "minimum": 7
+              }
+            }
+          }
+        }
+      ]
     },
     "dining": {
       "type": "object",

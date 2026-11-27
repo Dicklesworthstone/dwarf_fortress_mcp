@@ -151,21 +151,23 @@ def _area(value: object, guard: Guard) -> tuple[dict, list[_Rect], list[dict], l
                       'slots': [unit_name + '.' + item_kind for item_kind, _ in items]})
 
     if kind == 'bedroom_cluster':
-        _object(template, {'kind', 'rooms_count', 'room_size'}, {'furnishings'})
+        _object(template, {'kind', 'rooms_count', 'room_size'}, {'furnishings', 'columns'})
         furnishings = template.get('furnishings', 'bed_chair_table')
         require(furnishings in ('bed_only', 'bed_chair_table'), 'unsupported bedroom furnishings')
         bed_only = furnishings == 'bed_only'
-        # Fourteen rooms need 33 excavation parts. Fully furnished rooms also need 3 slots each.
-        count = integer(template['rooms_count'], 1, 13 if bed_only else 10)
+        columns = integer(template.get('columns', 4), 1, 8)
+        count = integer(template['rooms_count'], 1, 14 if bed_only else 10)
+        rows = (count + columns - 1) // columns
+        # Each room needs an interior and a door, plus one corridor per row and a spine.
+        require(2 * count + rows + 1 <= MAX_PARTS, 'bedroom rows exceed excavation part limit')
         size = template['room_size']
         require(type(size) is list and len(size) == 2, 'bedroom interior requires width and height')
         width, height = (integer(n, 1 if bed_only else 3, 7) for n in size)
         require(width * height >= 2, 'bedroom needs an interior approach beside its bed')
         kinds = ('bed',) if bed_only else ('bed', 'chair', 'table')
         constraints = _constraints(value.get('item_constraints', {}), kinds)
-        rows = (count + 3) // 4
         for row in range(rows):
-            in_row = min(4, count - row * 4)
+            in_row = min(columns, count - row * columns)
             py = y + row * (height + 3)
             for column in range(in_row):
                 px = x + column * (width + 1)
@@ -178,11 +180,13 @@ def _area(value: object, guard: Guard) -> tuple[dict, list[_Rect], list[dict], l
                 if not bed_only:
                     items += (('chair', (px + width - 1, py, z)),
                               ('table', (px + width - 1, py + 1, z)))
-                unit(row * 4 + column + 1, px, py, width, height, doorway, items)
+                unit(row * columns + column + 1, px, py, width, height, doorway, items)
             rectangle(x - 1, py + height + 1, in_row * (width + 1), 1, 'corridor')
         entrance = (x - 2, y + height + 1, z)
         rectangle(entrance[0], entrance[1], 1, (rows - 1) * (height + 3) + 1, 'corridor')
         normalized_template = {'kind': kind, 'rooms_count': count, 'room_size': [width, height]}
+        if columns != 4:
+            normalized_template['columns'] = columns
         if bed_only:
             normalized_template['furnishings'] = furnishings
     elif kind == 'dormitory':

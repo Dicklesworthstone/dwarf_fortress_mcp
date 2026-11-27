@@ -117,3 +117,52 @@ class PrivateBedroomTests(unittest.TestCase):
             handoff = RoomFurnitureHandoff.decode(result.stdout)
             self.assertEqual(handoff.room_plan, room)
             self.assertEqual([s.kind for s in handoff.allocation.plan().steps], ['bed'] * 7)
+
+    def test_narrow_site_fits_a_single_file_of_private_rooms(self):
+        area = private(7, (1, 2))
+        del area['origin']
+        narrow = request(area, size=(5, 36, 1))
+        self.assertEqual(solve(narrow).json()['status'], 'no_layout_in_domain')
+        area['template']['columns'] = 1
+        layout = solve(narrow)
+        room = layout.room_plan()
+        units = room.json()['areas'][0]['units']
+        self.assertEqual(len(units), 7)
+        self.assertEqual(len(set(u['origin'][0] for u in units)), 1)
+        self.assertEqual([u['name'] for u in units], [f'sleep.{i:03d}' for i in range(1, 8)])
+        self.assertEqual(len(room.json()['excavation_blueprint']['parts']), 22)
+        self.assertEqual(RoomPlan.decode(room.encode()), room)
+        check_access(self, room)
+
+    def test_row_width_preserves_every_room_and_respects_the_part_budget(self):
+        for count, columns in product((1, 7, 10, 13, 14), range(1, 9)):
+            area = private(count, (2, 1))
+            area['template']['columns'] = columns
+            parts = 2 * count + (count + columns - 1) // columns + 1
+            with self.subTest(count=count, columns=columns):
+                if parts > 32:
+                    with self.assertRaises(ValueError):
+                        RoomPlan.compile(intent(area))
+                    continue
+                room = RoomPlan.compile(intent(area))
+                self.assertEqual(len(room.json()['excavation_blueprint']['parts']), parts)
+                self.assertEqual(len(room.request().slots), count)
+                for index, unit in enumerate(room.json()['areas'][0]['units']):
+                    self.assertEqual(unit['origin'], [40 + index % columns * 3,
+                                                     40 + index // columns * 4, 2])
+                check_access(self, room)
+
+    def test_full_furnishing_and_default_row_width(self):
+        area = bedroom(7)
+        original = RoomPlan.compile(intent(area))
+        area['template']['columns'] = 4
+        self.assertEqual(RoomPlan.compile(intent(area)).encode(), original.encode())
+        area['template']['columns'] = 2
+        room = RoomPlan.compile(intent(area))
+        self.assertEqual(len(room.request().slots), 21)
+        self.assertEqual(len({u['origin'][0] for u in room.json()['areas'][0]['units']}), 2)
+        check_access(self, room)
+        for invalid in (0, True, 9, None):
+            area['template']['columns'] = invalid
+            with self.assertRaises(ValueError):
+                RoomPlan.compile(intent(area))
