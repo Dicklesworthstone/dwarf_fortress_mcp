@@ -128,6 +128,15 @@ fn query_field_diagnostics_cannot_be_archived_as_action_evidence() {
             field: "stock".to_owned(),
             state: FieldPresenceState::Known,
         },
+        Predicate::FieldProvenance {
+            entity_id: EntityId::new(7),
+            field: "stock".to_owned(),
+            source: dfmcp_world::FactProvenanceFilter {
+                kind: dfmcp_world::FactSourceKind::Derived,
+                name: None,
+                digest: None,
+            },
+        },
         Predicate::FieldFreshness {
             entity_id: EntityId::new(7),
             field: "stock".to_owned(),

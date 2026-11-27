@@ -141,13 +141,28 @@ Negation preserves that uncertainty. A known nonmatching selector does not
 require its unused quantity. Source-qualified mutation evidence retains its
 independent coverage and provenance checks.
 
-## Select field availability and observation age
+## Select field availability, observation age and provenance
 
-The shared row-filter grammar accepts two diagnostic operations wherever an
+The shared row-filter grammar accepts three diagnostic operations wherever an
 existing entity, aggregate, lexical, spatial, relationship or ranking query
 accepts `where`. Relationship targets and selected endpoint/baseline projections
-use the same grammar. Both operations compose with `all`, `any`, `not` and typed
+use the same grammar. These operations compose with `all`, `any`, `not` and typed
 value comparisons without another tool or a bridge refresh.
+
+Use a `provenance` filter to count records from a particular observation or
+to exclude agent assertions from an inspection. For example,
+`{"op":"provenance","field":"stock","source_kind":"derived","source_name":"dfmcp.lab-scenario/1"}`
+selects the laboratory source with that exact label. Allowed kinds are
+`dfhack_field`, `derived`, `agent_assertion`, and `replay`. The optional
+`source_name` matches the complete case-sensitive label. Replay has no label.
+Copy a field's `source_digest` into the filter to restrict results to that exact
+64-digit lowercase hexadecimal digest. All constraints apply to one record.
+
+A Known field or explicit absence observed by the selected tick can match its
+recorded origin. Missing, future, contradictory and unavailable facts remain
+Unknown under both positive and negated provenance tests. Combine `provenance`
+with `presence` to distinguish a known value from an explicit absence. A source
+match describes recorded metadata and grants no authority to act on the value.
 
 `{"op":"presence","field":"labor.BREW","state":"unobserved"}` selects
 entities whose recorded projection has no entry for that field. This lets an

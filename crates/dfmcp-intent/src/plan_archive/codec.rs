@@ -275,7 +275,9 @@ impl<F: FnMut() -> Result<()>> Writer<'_, F> {
                 self.compare_op(*op)?;
                 self.value(value, depth + 1)?;
             }
-            Predicate::FieldPresence { .. } | Predicate::FieldFreshness { .. } => {
+            Predicate::FieldPresence { .. }
+            | Predicate::FieldFreshness { .. }
+            | Predicate::FieldProvenance { .. } => {
                 return Err(invalid(
                     "query-only field diagnostics cannot enter a prepared-plan archive",
                 ));

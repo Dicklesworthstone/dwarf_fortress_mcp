@@ -262,3 +262,83 @@ fn diagnostic_filter_json_is_closed_and_bounded() {
         assert!(decode_filter(filter.clone()).is_err(), "{filter}");
     }
 }
+
+#[test]
+fn provenance_selects_exact_sources_and_preserves_unknown_at_retained_ticks() -> Result<()> {
+    let (mut snapshot, mut context) = fixture();
+    for (id, source) in [
+        (1, FactSource::Derived("scenario".to_owned())),
+        (2, FactSource::AgentAssertion("scenario".to_owned())),
+        (3, FactSource::Replay),
+        (14, FactSource::Derived("other".to_owned())),
+    ] {
+        if let Some(fact) = snapshot.graph.entities.get_mut(&EntityId::new(id))
+            .and_then(|row| row.fields.get_mut("reading"))
+        {
+            fact.source = source;
+        }
+    }
+    snapshot.refresh_hash();
+    context.anchor = snapshot.anchor();
+    let filter = json!({"op":"provenance","field":"reading","source_kind":"derived"});
+    for (kind, expected) in [
+        ("derived", vec!["1", "14"]),
+        ("agent_assertion", vec!["2"]),
+        ("replay", vec!["3"]),
+        ("dfhack_field", vec![]),
+    ] {
+        let mut by_kind = filter.clone();
+        by_kind["source_kind"] = json!(kind);
+        assert_eq!(ids(&execute(&snapshot, &context, &request(by_kind))?), expected);
+    }
+    let mut exact = filter.clone();
+    exact["source_name"] = json!("scenario");
+    exact["source_digest"] = json!(Digest32::of_bytes(b"field-availability-fixture").to_hex());
+    assert_eq!(ids(&execute(&snapshot, &context, &request(exact.clone()))?), ["1"]);
+    exact["source_digest"] = json!(Digest32::ZERO.to_hex());
+    assert!(ids(&execute(&snapshot, &context, &request(exact))?).is_empty());
+    context.anchor.tick = GameTick(100);
+    let negated = request(json!({"op":"not","arg":filter}));
+    let historical = execute_retained_with_output_budget(
+        &snapshot, &context, &negated, context.budget.max_bytes, Instant::now(),
+    )?;
+    assert_eq!(ids(&historical), ["2", "3"]);
+    Ok(())
+}
+
+#[test]
+fn provenance_continuations_bind_optional_selectors_and_reject_invalid_sources() -> Result<()> {
+    let (snapshot, context) = fixture();
+    let mut filter = json!({"op":"provenance","field":"reading","source_kind":"dfhack_field"});
+    let mut input = request(filter.clone());
+    input["query"]["limit"] = json!(1);
+    let first = execute(&snapshot, &context, &input)?;
+    assert_eq!(ids(&first), ["1"]);
+    input["query"]["continuation"] = first["continuation"].clone();
+    assert_eq!(ids(&execute(&snapshot, &context, &input)?), ["2"]);
+    for (key, value) in [
+        ("source_kind", json!("derived")),
+        ("source_name", json!("fixture.reading")),
+        ("source_digest", json!(Digest32::of_bytes(b"field-availability-fixture").to_hex())),
+    ] {
+        let mut changed = input.clone();
+        changed["query"]["where"][key] = value;
+        assert!(matches!(execute(&snapshot, &context, &changed),
+            Err(error) if error.code == ErrorCode::StaleAnchor));
+    }
+    for (key, value) in [
+        ("source_kind", json!("observed")),
+        ("source_name", json!("")),
+        ("source_name", json!("é".repeat(129))),
+        ("source_digest", json!("A".repeat(64))),
+        ("source_digest", json!("wrong")),
+    ] {
+        let mut invalid = filter.clone();
+        invalid[key] = value;
+        assert!(decode_filter(invalid).is_err());
+    }
+    filter["source_kind"] = json!("replay");
+    filter["source_name"] = json!("fixture.reading");
+    assert!(decode_filter(filter).is_err());
+    Ok(())
+}

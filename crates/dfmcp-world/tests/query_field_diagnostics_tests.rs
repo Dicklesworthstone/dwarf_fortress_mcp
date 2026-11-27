@@ -306,6 +306,15 @@ fn diagnostics_do_not_supply_laboratory_or_live_mutation_evidence() -> Result<()
             state,
         });
     }
+    predicates.push(Predicate::FieldProvenance {
+        entity_id: EntityId::new(1),
+        field: "stock".to_owned(),
+        source: dfmcp_world::FactProvenanceFilter {
+            kind: dfmcp_world::FactSourceKind::Derived,
+            name: None,
+            digest: None,
+        },
+    });
     predicates.push(Predicate::FieldFreshness {
         entity_id: EntityId::new(1),
         field: "stock".to_owned(),
@@ -473,5 +482,68 @@ fn diagnostic_identity_is_distinct_and_full_shape_is_checked_before_short_circui
     assert!(
         matches!(execute_query(&world(vec![Some(fact(None, 20)); 1_100], 20), &query(Predicate::All(vec![freshness(0); 4_000])), 100), Err(error) if error.code == ErrorCode::BudgetExceeded)
     );
+    Ok(())
+}
+
+#[test]
+fn provenance_matches_one_eligible_source_record_and_binds_continuations() -> Result<()> {
+    use dfmcp_world::{FactProvenanceFilter, FactSourceKind};
+
+    let mut other_origin = fact(None, 20);
+    other_origin.source = FactSource::AgentAssertion("dfmcp.lab-scenario/1".to_owned());
+    let snapshot = world(
+        vec![
+            Some(fact(None, 20)),
+            Some(fact(Some(FactPresence::Absent), 20)),
+            Some(other_origin),
+            Some(fact(Some(FactPresence::Redacted("private".to_owned())), 20)),
+            Some(fact(Some(FactPresence::Known(Value::U64(8))), 20)),
+            Some(fact(None, 21)),
+            None,
+        ],
+        20,
+    );
+    let source = FactProvenanceFilter {
+        kind: FactSourceKind::Derived,
+        name: None,
+        digest: None,
+    };
+    let select = |source| Predicate::FieldProvenance {
+        entity_id: EntityId::NIL,
+        field: "stock".to_owned(),
+        source,
+    };
+    let predicate = select(source.clone());
+    let negated = Predicate::Not(Box::new(predicate.clone()));
+    for (index, (result, inverse)) in [
+        (PredicateTruth::True, PredicateTruth::False),
+        (PredicateTruth::True, PredicateTruth::False),
+        (PredicateTruth::False, PredicateTruth::True),
+        (PredicateTruth::Unknown, PredicateTruth::Unknown),
+        (PredicateTruth::Unknown, PredicateTruth::Unknown),
+        (PredicateTruth::Unknown, PredicateTruth::Unknown),
+        (PredicateTruth::Unknown, PredicateTruth::Unknown),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = EntityId::new(index as u64 + 1);
+        assert_eq!(evaluate_truth_for(&snapshot, id, &predicate), result);
+        assert_eq!(evaluate_truth_for(&snapshot, id, &negated), inverse);
+    }
+    let mut request = query(predicate);
+    request.limit = 1;
+    request.continuation = execute_query(&snapshot, &request, 100)?.continuation;
+    assert!(request.continuation.is_some());
+    assert_eq!(execute_query(&snapshot, &request, 100)?.entities[0].id, EntityId::new(2));
+    for changed in [
+        FactProvenanceFilter { kind: FactSourceKind::AgentAssertion, ..source.clone() },
+        FactProvenanceFilter { name: Some("dfmcp.lab-scenario/1".to_owned()), ..source.clone() },
+        FactProvenanceFilter { digest: Some(Digest32::ZERO), ..source },
+    ] {
+        request.predicate = Some(select(changed));
+        assert!(matches!(execute_query(&snapshot, &request, 100),
+            Err(error) if error.code == ErrorCode::StaleAnchor));
+    }
     Ok(())
 }

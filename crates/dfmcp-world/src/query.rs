@@ -109,6 +109,62 @@ impl FieldPresenceState {
     }
 }
 
+/// Recorded origin of a field, independent of its admission as evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FactSourceKind {
+    DfhackField,
+    Derived,
+    AgentAssertion,
+    Replay,
+}
+
+impl FactSourceKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DfhackField => "dfhack_field",
+            Self::Derived => "derived",
+            Self::AgentAssertion => "agent_assertion",
+            Self::Replay => "replay",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FactProvenanceFilter {
+    pub kind: FactSourceKind,
+    pub name: Option<String>,
+    pub digest: Option<Digest32>,
+}
+
+impl FactProvenanceFilter {
+    pub(crate) fn encode(&self, output: &mut Vec<u8>) {
+        use crate::canonical::put_str;
+        put_str(output, self.kind.as_str());
+        output.push(u8::from(self.name.is_some()));
+        if let Some(name) = &self.name {
+            put_str(output, name);
+        }
+        output.push(u8::from(self.digest.is_some()));
+        if let Some(digest) = self.digest {
+            output.extend_from_slice(digest.as_bytes());
+        }
+    }
+
+    fn matches(&self, fact: &Fact) -> bool {
+        use crate::FactSource;
+        let (kind, name) = match &fact.source {
+            FactSource::DfhackField(name) => (FactSourceKind::DfhackField, Some(name)),
+            FactSource::Derived(name) => (FactSourceKind::Derived, Some(name)),
+            FactSource::AgentAssertion(name) => (FactSourceKind::AgentAssertion, Some(name)),
+            FactSource::Replay => (FactSourceKind::Replay, None),
+        };
+        self.kind == kind
+            && self.name.as_ref().is_none_or(|wanted| name == Some(wanted))
+            && self.digest.is_none_or(|wanted| fact.source_digest == wanted)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Predicate {
     True,
@@ -199,6 +255,13 @@ pub enum Predicate {
         entity_id: EntityId,
         field: String,
         state: FieldPresenceState,
+    },
+    /// Recorded origin of a consistently Known or explicitly Absent field at
+    /// the selected tick. Missing and unavailable facts remain Unknown.
+    FieldProvenance {
+        entity_id: EntityId,
+        field: String,
+        source: FactProvenanceFilter,
     },
     /// A consistently Known field was observed no more than this many ticks
     /// before the selected source tick. Future or unavailable fields remain
@@ -539,6 +602,16 @@ impl Predicate {
                     put_u64(output, *counter);
                 }
             }
+            Self::FieldProvenance {
+                entity_id,
+                field,
+                source,
+            } => {
+                output.push(18);
+                put_u64(output, entity_id.get());
+                put_str(output, field);
+                source.encode(output);
+            }
             Self::FieldPresence {
                 entity_id,
                 field,
@@ -688,6 +761,23 @@ fn evaluate_truth(
                 PredicateTruth::from_bool(
                     FieldPresenceState::of_fact(entity.fields.get(field), snapshot.tick) == *state,
                 )
+            }),
+        Predicate::FieldProvenance {
+            entity_id,
+            field,
+            source,
+        } => snapshot
+            .graph
+            .entities
+            .get(&target_entity(*entity_id, candidate))
+            .and_then(|entity| entity.fields.get(field))
+            .filter(|fact| {
+                fact.observed_at <= snapshot.tick
+                    && (fact.known_value().is_some()
+                        || matches!(fact.presence, Some(FactPresence::Absent)))
+            })
+            .map_or(PredicateTruth::Unknown, |fact| {
+                PredicateTruth::from_bool(source.matches(fact))
             }),
         Predicate::FieldFreshness {
             entity_id,
@@ -1103,7 +1193,22 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
                 ));
             }
             Predicate::FieldCompare { value, .. } => validate_query_value(value)?,
-            Predicate::FieldPresence { field, .. } | Predicate::FieldFreshness { field, .. } => {
+            Predicate::FieldProvenance { source, .. }
+                if source.name.as_ref().is_some_and(|name| {
+                    source.kind == FactSourceKind::Replay
+                        || name.is_empty()
+                        || name.len() > MAX_QUERY_FIELD_BYTES
+                        || name.chars().any(char::is_control)
+                }) =>
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "provenance label requires a named origin and bounded, non-control text",
+                ));
+            }
+            Predicate::FieldPresence { field, .. }
+            | Predicate::FieldFreshness { field, .. }
+            | Predicate::FieldProvenance { field, .. } => {
                 if field.len() > MAX_QUERY_FIELD_BYTES {
                     return Err(DfmcpError::new(
                         ErrorCode::BudgetExceeded,

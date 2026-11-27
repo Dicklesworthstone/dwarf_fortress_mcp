@@ -1238,6 +1238,15 @@ pub(crate) fn predicate_json(predicate: &Predicate) -> Json {
             "entity_id": entity_id.to_string(), "field": field,
             "state": state.as_str(), "eligible_as_mutation_evidence": false,
         }}),
+        Predicate::FieldProvenance {
+            entity_id,
+            field,
+            source,
+        } => json!({"query_field_provenance": {
+            "entity_id": entity_id.to_string(), "field": field, "source_kind": source.kind.as_str(),
+            "source_name": source.name, "source_digest": source.digest.map(|value| value.to_string()),
+            "eligible_as_mutation_evidence": false,
+        }}),
         Predicate::FieldFreshness {
             entity_id,
             field,

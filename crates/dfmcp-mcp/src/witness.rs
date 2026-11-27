@@ -90,7 +90,9 @@ impl ReadWitness {
                 // It also has owned history outside a snapshot. Never auto-rebase.
                 self.unbounded = true;
             }
-            Predicate::FieldPresence { .. } | Predicate::FieldFreshness { .. } => {
+            Predicate::FieldPresence { .. }
+            | Predicate::FieldFreshness { .. }
+            | Predicate::FieldProvenance { .. } => {
                 // Query metadata is not mutation evidence. Do not turn an
                 // unchanged diagnostic into authority for automatic rebase.
                 self.unbounded = true;

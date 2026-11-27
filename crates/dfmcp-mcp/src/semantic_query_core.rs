@@ -14,7 +14,7 @@ use dfmcp_world::graph_query::{
 };
 use dfmcp_world::query_page::{QueryCandidates, query_candidates};
 use dfmcp_world::{
-    CompareOp, EdgeKind, EntityKind, EntityRecord, Fact, FactPresence, FactSource,
+    CompareOp, EdgeKind, EntityKind, EntityRecord, Fact, FactPresence, FactProvenanceFilter, FactSource, FactSourceKind,
     FieldPresenceState, Predicate, QueryOrder, Value as WorldValue, WorldQuery, WorldSnapshot,
 };
 use serde::Deserialize;
@@ -116,6 +116,12 @@ enum Filter {
     Presence {
         field: String,
         state: Presence,
+    },
+    Provenance {
+        field: String,
+        source_kind: String,
+        source_name: Option<String>,
+        source_digest: Option<String>,
     },
     Freshness {
         field: String,
@@ -412,6 +418,32 @@ impl Filter {
                 field: filter_field(field)?,
                 state: state.into_world(),
             },
+            Self::Provenance {
+                field,
+                source_kind,
+                source_name,
+                source_digest,
+            } => {
+                let kind = match source_kind.as_str() {
+                    "dfhack_field" => FactSourceKind::DfhackField,
+                    "derived" => FactSourceKind::Derived,
+                    "agent_assertion" => FactSourceKind::AgentAssertion,
+                    "replay" => FactSourceKind::Replay,
+                    _ => return Err(invalid("unknown provenance source_kind")),
+                };
+                let digest = source_digest
+                    .map(|text| {
+                        Digest32::from_hex(&text)
+                            .filter(|value| value.to_hex() == text)
+                            .ok_or_else(|| invalid("source_digest requires 64 lowercase hex digits"))
+                    })
+                    .transpose()?;
+                Predicate::FieldProvenance {
+                    entity_id: EntityId::NIL,
+                    field: filter_field(field)?,
+                    source: FactProvenanceFilter { kind, name: source_name, digest },
+                }
+            }
             Self::Freshness {
                 field,
                 max_age_ticks,

@@ -476,7 +476,9 @@ impl<'a> PredicateEvidence<'a> {
             // Diagnostic presence/freshness selectors describe query metadata,
             // never a source-qualified game fact or a mutation precondition.
             // Keep Unknown under Not even for complete laboratory observations.
-            Predicate::FieldPresence { .. } | Predicate::FieldFreshness { .. } => Unknown,
+            Predicate::FieldPresence { .. }
+            | Predicate::FieldFreshness { .. }
+            | Predicate::FieldProvenance { .. } => Unknown,
             Predicate::EntityQuantity { kind, .. }
             | Predicate::EntityQuantityIncrease { kind, .. } => {
                 if !self.entity_absence_complete(Some(kind)) {

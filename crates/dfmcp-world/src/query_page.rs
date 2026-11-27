@@ -247,6 +247,16 @@ fn encode_predicate(bytes: &mut Vec<u8>, predicate: &Predicate) -> Result<()> {
             });
             value.encode(bytes);
         }
+        Predicate::FieldProvenance {
+            entity_id,
+            field,
+            source,
+        } => {
+            bytes.push(18);
+            put_u64(bytes, entity_id.get());
+            put_str(bytes, field);
+            source.encode(bytes);
+        }
         Predicate::FieldPresence {
             entity_id,
             field,
