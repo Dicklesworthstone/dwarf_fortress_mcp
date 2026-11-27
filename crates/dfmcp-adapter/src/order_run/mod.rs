@@ -371,6 +371,20 @@ impl OrderRunPlan {
     pub fn before(&self) -> &OrderCapture {
         &self.before
     }
+    /// Earliest representable tick for all required samples, and whether it is
+    /// strictly before the native tick cutoff. Wall time, callback timing and
+    /// changes in order state can still prevent a predicate observation.
+    #[must_use]
+    pub fn predicate_window(&self) -> (Option<u64>, bool) {
+        let offset = u64::from(self.spec.samples()) * u64::from(self.spec.interval());
+        let earliest = self
+            .before
+            .tick()
+            .checked_add(offset)
+            .filter(|tick| *tick <= MAX_NATIVE_TICK);
+        let reachable = earliest.is_some() && offset < u64::from(self.spec.game_ticks());
+        (earliest, reachable)
+    }
     pub fn native_bytes(&self) -> &[u8] {
         &self.bytes
     }

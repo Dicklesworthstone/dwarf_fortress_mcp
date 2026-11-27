@@ -447,6 +447,61 @@ class FlowTests(unittest.TestCase):
             with redirect_stdout(output): code = c.main(['inspect', '--journal', str(path), '--key', 'test'])
             self.assertEqual(code, 0); self.assertTrue(json.loads(output.getvalue())['result']['native_evidence']['current_pause_unproved'])
 
+    def test_read_only_cli_review_and_offline_inspect_preserve_limit_only_runs(self):
+        path = private_path()
+        args = ['--order-id', '9', '--world-folder', 'fort', '--site-id', '7', '--predicate', 'approved',
+                '--samples', '2', '--interval', '2', '--wall-ms', '1000']
+
+        def run_cli(argv):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = c.main(argv)
+            response = json.loads(output.getvalue())
+            self.assertEqual(code, 0, response)
+            return response['result']
+
+        with NativeDouble() as server:
+            env = {'DFMCP_ALLOW_UNADMITTED_ORDER_RUN_V1_14': '1',
+                   'DFMCP_ORDER_RUN_ENDPOINT': server.endpoint, 'DFMCP_ORDER_RUN_TOKEN': SECRET.decode()}
+            with patch.dict(os.environ, env, clear=True):
+                edge = run_cli(['review', *args, '--ticks', '4'])
+                inside = run_cli(['review', *args, '--ticks', '5'])
+            self.assertEqual(edge['predicate_window'], {'earliest_predicate_tick': 104, 'reachable_before_tick_limit': False})
+            self.assertEqual(inside['predicate_window'], {'earliest_predicate_tick': 104, 'reachable_before_tick_limit': True})
+            self.assertEqual(edge['before']['tick'], 100)
+            self.assertEqual(server.calls, ['Handshake', 'ObserveRun'] * 2)
+            self.assertFalse(server.records)
+            self.assertFalse(path.exists())
+
+            env['DFMCP_ORDER_RUN_ALLOW_CLOCK'] = '1'
+            with patch.dict(os.environ, env, clear=True):
+                prepared = run_cli(['prepare', *args, '--ticks', '4', '--journal', str(path), '--key', 'test'])
+            self.assertEqual(prepared['state'], 'prepared')
+            self.assertEqual(prepared['plan_digest'], edge['plan_digest'])
+            self.assertEqual(prepared['predicate_window'], edge['predicate_window'])
+            self.assertEqual(server.calls.count('PrepareRun'), 1)
+            self.assertEqual(server.unpauses, 0)
+
+        original_bytes = path.read_bytes()
+        with patch.dict(os.environ, {}, clear=True), patch.object(w, 'Client', side_effect=AssertionError('offline socket')):
+            historical = run_cli(['inspect', '--journal', str(path), '--key', 'test'])
+            page = run_cli(['inspect', '--journal', str(path)])
+        self.assertEqual(historical, prepared)
+        self.assertEqual(page['records'], [prepared])
+        self.assertEqual(path.read_bytes(), original_bytes)
+
+    def test_predicate_window_checks_native_calendar_independently_of_tick_limit(self):
+        for start, ticks, samples, interval, earliest, reachable in [
+                (w.MAX_TICK - 2, 3, 1, 2, w.MAX_TICK, True),
+                (w.MAX_TICK - 2, 2, 1, 2, w.MAX_TICK, False),
+                (w.MAX_TICK - 1, 3, 2, 1, None, False)]:
+            with self.subTest(start=start, ticks=ticks, samples=samples):
+                before = bytearray(CAPTURE)
+                before[24:32] = struct.pack('>Q', start)
+                encoded = w.make_plan(bytes(before), ticks, 1000, 1, samples=samples, interval=interval)
+                self.assertEqual(c.predicate_window(w.plan(encoded)),
+                                 dict(earliest_predicate_tick=earliest, reachable_before_tick_limit=reachable))
+
     def test_lost_commit_reply_reopens_only_for_receipt_query(self):
         path = private_path()
         with NativeDouble(lose='CommitRun') as server:

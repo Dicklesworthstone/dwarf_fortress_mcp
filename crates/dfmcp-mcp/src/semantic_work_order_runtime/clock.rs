@@ -294,6 +294,7 @@ pub struct ClockRunView {
 impl ClockRunView {
     pub fn to_json(&self) -> Value {
         let p = self.entry.plan();
+        let (earliest, reachable) = p.predicate_window();
         let native = self.entry.native().map(|n| json!({
             "phase":n.phase().as_str(), "reason":n.reason().as_str(), "trigger":n.trigger().as_str(),
             "unpause_attempted":n.unpause_attempted(), "historical_pause_verified":n.pause_verified(),
@@ -307,6 +308,7 @@ impl ClockRunView {
             "source_generation":p.before().generation(), "source_sequence":p.before().sequence(),
             "game_ticks":p.spec().game_ticks(), "wall_millis":p.spec().wall_ms(),
             "stop_predicate":p.spec().predicate().as_str(), "threshold":0,
+            "predicate_window":{"earliest_predicate_tick":earliest,"reachable_before_tick_limit":reachable},
             "purpose":if p.before().remaining()>0 { "advance_original_order" } else { "advance_for_original_stability_or_quiescence" },
             "native":native})
     }

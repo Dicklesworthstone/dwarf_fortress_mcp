@@ -76,6 +76,33 @@ ticks, with their product within the run horizon. They describe sampled truth,
 not continuous truth or a guarantee that the requested goal is attainable.
 Clock limits take precedence over a new predicate claim at their boundary.
 
+## Review a proposed interval
+
+The operator client can check a proposed interval against one read of the
+selected order before creating a journal or requesting clock control.
+
+```sh
+python3 scripts/order_run_client.py review \
+  --order-id 9 --world-folder fort --site-id 7 --predicate approved \
+  --samples 2 --interval 2 --ticks 5 --wall-ms 1000
+```
+
+Use the isolated order-run endpoint, token and development opt-in described
+above. The review connects through Handshake and ObserveRun. An accepted review
+returns the source capture, plan digest and `predicate_window`. Prepare performs
+its own fresh validation before acquiring the native run.
+
+For a start at tick 100, two matching samples taken two ticks apart can first
+satisfy the predicate at tick 104. A five-tick interval leaves room to observe
+it. A four-tick interval stops on the tick limit before sampling tick 104.
+Both intervals can advance an outer goal. `earliest_predicate_tick` is null
+when the samples would fall beyond the native calendar. The reachability flag
+is a timing calculation. The receipt records whether the samples actually
+matched and whether a pause was verified.
+
+Standalone and paired production MCP reviews expose the same two fields. The
+Python client also computes them when inspecting an existing journal offline.
+
 ## Durable ordering and failures
 
 Preparation synchronizes a complete sealed intent before native PrepareRun,

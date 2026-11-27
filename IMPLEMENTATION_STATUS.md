@@ -1,5 +1,9 @@
 # Implementation Status
 
+## Unreleased — Excavation, work custody and finite production reviews
+
+See [excavation stopping](IMPLEMENTATION_STATUS.d/excavation-clock-readback.md), [pending pause queries](IMPLEMENTATION_STATUS.d/excavation-external-pause-query.md), [production clock recovery](IMPLEMENTATION_STATUS.d/order-run-invalid-date-stop.md), [predicate timing](IMPLEMENTATION_STATUS.d/order-run-predicate-window.md), [excavation proof](IMPLEMENTATION_STATUS.d/lab-original-excavation-proof.md), [ordinary cancellation](IMPLEMENTATION_STATUS.d/lab-ordinary-cancel-custody.md) and [historical aggregates](IMPLEMENTATION_STATUS.d/aggregate-source-time-absence.md) for implementation and verification scope.
+
 ## Unreleased — Preserve original proof cadence across waits and forecasts
 
 Foreground waits, recovered-step progression and forecasts of committed plans now

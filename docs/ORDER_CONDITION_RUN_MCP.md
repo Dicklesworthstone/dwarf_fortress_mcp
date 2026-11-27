@@ -118,6 +118,12 @@ multiplied by interval cannot exceed the tick horizon. An already-true condition
 is refused instead of unnecessarily unpausing. No arbitrary query, reaction,
 Lua, command or native enum becomes a condition.
 
+The plan's `predicate_window` reports the earliest native tick that could supply
+all requested samples and whether it falls strictly before the tick cutoff.
+For an interval that ends on the earliest sample, the cutoff wins. An
+unrepresentable earliest tick appears as null. The `native.predicate_observed`
+field on the effect carries the separate observation result.
+
 The server constructs a sealed plan from its retained exact capture. Preparation
 re-observes, checks authority and synchronizes intent before native PrepareRun;
 it does not unpause. Review **`result.effect.plan.plan_digest`** before commit:

@@ -301,6 +301,11 @@ fn prepare(state: &mut State<Memory>, calls: &Rc<RefCell<Calls>>, key: &str) -> 
         },
     )?;
     assert_eq!(result["result"]["ok"], true);
+    assert_eq!(
+        result["result"]["effect"]["plan"]["predicate_window"],
+        json!({"earliest_predicate_tick":104,"reachable_before_tick_limit":true})
+    );
+    assert_eq!(result["result"]["effect"]["native"]["predicate_observed"], false);
     digest(
         result["result"]["effect"]["plan"]["plan_digest"]
             .as_str()

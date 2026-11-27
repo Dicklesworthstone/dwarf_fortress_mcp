@@ -176,6 +176,24 @@ fn condition_already_true_and_bad_cadence_never_seal() -> Result<()> {
     Ok(())
 }
 #[test]
+fn predicate_window_uses_distinct_samples_strict_cutoff_and_native_tick_range() -> Result<()> {
+    for (start, ticks, samples, interval, earliest, reachable) in [
+        (100, 5, 2, 2, Some(104), true),
+        (100, 4, 2, 2, Some(104), false),
+        (100, 1, 1, 1, Some(101), false),
+        (MAX_NATIVE_TICK - 4, 5, 2, 2, Some(MAX_NATIVE_TICK), true),
+        (MAX_NATIVE_TICK - 3, 5, 2, 2, None, false),
+    ] {
+        let spec = OrderRunSpec::new(ticks, 1000, OrderPredicate::Approved, samples, interval)?;
+        let capture = OrderCapture::decode(&capture_bytes("region1", 3, start, true, 0))?;
+        let plan = OrderRunPlan::new("window", spec, capture)?;
+        assert_eq!(plan.predicate_window(), (earliest, reachable));
+        assert_eq!(OrderRunPlan::decode(&plan.canonical_bytes())?, plan);
+    }
+    Ok(())
+}
+
+#[test]
 fn exact_identity_and_intent_changes_are_committed() -> Result<()> {
     let p = plan()?;
     let another_key = OrderRunPlan::new("another", p.spec(), p.before().clone())?;

@@ -50,9 +50,11 @@ pub fn capture(value: &OrderCapture) -> Value {
 }
 fn plan(value: &OrderRunPlan) -> Value {
     let s = value.spec();
+    let (earliest, reachable) = value.predicate_window();
     json!({"idempotency_key":value.key(),"plan_digest":value.digest().to_string(),
     "condition":{"order_id":value.before().order_id(),"predicate":s.predicate().as_str(),"threshold":s.predicate().threshold(),
         "stable_samples":s.samples(),"interval_ticks":s.interval(),"game_ticks":s.game_ticks(),"wall_millis":s.wall_ms()},
+    "predicate_window":{"earliest_predicate_tick":earliest,"reachable_before_tick_limit":reachable},
     "before":capture(value.before())})
 }
 pub fn entry(value: &OrderRunEntry) -> Value {

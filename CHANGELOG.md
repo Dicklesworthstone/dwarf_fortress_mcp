@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — Excavation recovery and finite order-run review
+
+- Verify excavation safety pauses from a fresh read, retain pending stops for QueryRun, and allow finite production to stop safely when the game date is unavailable.
+- Preview a proposed order run with the read-only Python `review` command. The CLI and MCP expose the earliest possible predicate tick and whether the samples fit before the clock cutoff.
+- Tie laboratory excavation proof and ordinary work cancellation to the original designation, building, item placement or order. Classify future absences consistently in aggregate queries.
+
 ## Unreleased — Keep timely proof stable across split waits and forecasts
 
 - Expose read-only next-observation ticks from retained obligation monitors.

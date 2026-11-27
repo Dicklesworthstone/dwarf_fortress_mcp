@@ -267,10 +267,22 @@ def open_journal(path, writable=False, create_binding=None):
             os.close(fd)
 
 
+def predicate_window(goal):
+    """Earliest possible native predicate stop, assuming every eligible sample matches."""
+    start = goal['before']['tick']
+    earliest = start + goal['samples'] * goal['interval']
+    # Native clock limits win before the order predicate is sampled on that tick.
+    representable = earliest <= w.MAX_TICK
+    return dict(earliest_predicate_tick=earliest if representable else None,
+                reachable_before_tick_limit=representable and earliest < start + goal['game_ticks'])
+
+
 def summary(entry):
     proof = native(entry)
-    return dict(key=entry['key'], state=entry['state'], plan_digest=w.plan_digest(bytes.fromhex(entry['plan'])).hex(),
-                unresolved=unresolved(entry), native_evidence=proof, current_pause_unproved=True, goods_produced_proven=False)
+    encoded_plan = bytes.fromhex(entry['plan'])
+    return dict(key=entry['key'], state=entry['state'], plan_digest=w.plan_digest(encoded_plan).hex(),
+                predicate_window=predicate_window(w.plan(encoded_plan)), unresolved=unresolved(entry),
+                native_evidence=proof, current_pause_unproved=True, goods_produced_proven=False)
 
 
 def source_matches(journal, client):
@@ -336,19 +348,21 @@ def environment(control):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='operation', required=True)
-    for name in ('observe', 'prepare', 'commit', 'query', 'cancel', 'inspect'):
+    for name in ('observe', 'review', 'prepare', 'commit', 'query', 'cancel', 'inspect'):
         cmd = commands.add_parser(name)
-        if name != 'observe':
+        if name == 'review':
+            cmd.description = 'Inspect a proposed run and its sampling window using one read-only order observation.'
+        if name not in ('observe', 'review'):
             cmd.add_argument('--journal', type=Path, required=True)
-        if name not in ('observe', 'inspect'):
+        if name not in ('observe', 'review', 'inspect'):
             cmd.add_argument('--key', required=True)
         if name != 'inspect':
             cmd.add_argument('--timeout-ms', type=int, default=10000)
         else:
             cmd.add_argument('--key'); cmd.add_argument('--after-key', default=''); cmd.add_argument('--head'); cmd.add_argument('--limit', type=int, default=4)
-        if name in ('observe', 'prepare'):
+        if name in ('observe', 'review', 'prepare'):
             cmd.add_argument('--order-id', required=True, type=int)
-        if name == 'prepare':
+        if name in ('review', 'prepare'):
             cmd.add_argument('--world-folder', required=True); cmd.add_argument('--site-id', required=True, type=int)
             cmd.add_argument('--predicate', choices=('approved', 'active', 'remaining_at_most'), required=True)
             cmd.add_argument('--threshold', type=int, default=0); cmd.add_argument('--samples', type=int, default=1)
@@ -374,7 +388,7 @@ def main(argv=None):
                                   records=[summary(journal.entries[k]) for k in page],
                                   next_after=page[-1] if len(selected) > len(page) else None,
                                   historical_only=True, native_contacted=False)
-        elif args.operation in ('observe', 'prepare'):
+        elif args.operation in ('observe', 'review', 'prepare'):
             endpoint, secret = environment(args.operation == 'prepare')
             w.integer(args.order_id, 0, 2**31 - 1)
             with w.Client(endpoint, secret, args.timeout_ms) as client:
@@ -387,7 +401,14 @@ def main(argv=None):
                     predicate = ('approved', 'active', 'remaining_at_most').index(args.predicate) + 1
                     encoded_plan = w.make_plan(bytes.fromhex(observed['capture_hex']), args.ticks, args.wall_ms,
                                                predicate, args.threshold, args.samples, args.interval)
-                    result = prepare(client, args.journal, args.key, encoded_plan)
+                    if args.operation == 'review':
+                        goal = w.plan(encoded_plan)
+                        result = dict(plan_digest=w.plan_digest(encoded_plan).hex(), before=goal['before'],
+                                      predicate=args.predicate, threshold=goal['threshold'], samples=goal['samples'],
+                                      interval=goal['interval'], game_ticks=goal['game_ticks'], wall_ms=goal['wall_ms'],
+                                      predicate_window=predicate_window(goal))
+                    else:
+                        result = prepare(client, args.journal, args.key, encoded_plan)
         else:
             endpoint, secret = environment(args.operation in ('commit', 'cancel'))
             with open_journal(args.journal, writable=True) as journal:
