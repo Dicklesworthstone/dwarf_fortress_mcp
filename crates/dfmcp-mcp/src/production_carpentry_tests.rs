@@ -31,6 +31,7 @@ fn context(snapshot: &WorldSnapshot) -> OperationContext {
             (Capability::Observe, RiskTier::ReadOnly),
             (Capability::Plan, RiskTier::ReadOnly),
             (Capability::Construct, RiskTier::Guarded),
+            (Capability::Designate, RiskTier::Guarded),
             (Capability::ConfigureLabor, RiskTier::Reversible),
             (Capability::ConfigureProduction, RiskTier::Reversible),
             (Capability::ControlClock, RiskTier::Reversible),

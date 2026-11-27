@@ -236,3 +236,141 @@ fn future_drink_reserve_includes_new_constructor_and_workshop_service() -> Resul
     );
     Ok(())
 }
+
+#[test]
+fn underground_site_mines_then_builds_then_makes_the_original_beds() -> Result<()> {
+    let mut snapshot = unstaffed_workshop()?;
+    for unit in snapshot
+        .graph
+        .entities
+        .values_mut()
+        .filter(|row| row.kind == EntityKind::Unit)
+    {
+        unit.fields
+            .insert("labor.MINING".into(), lab_fact(Value::Bool(false)));
+    }
+    snapshot.refresh_hash();
+    let mut input = input();
+    let site = &mut input["prerequisites"]["workshops"][0];
+    site["location"] = json!([2, 6, 10]);
+    site["min"] = json!([1, 5, 10]);
+    site["max"] = json!([3, 7, 10]);
+    assert!(
+        ProductionRequest::parse_current(&input.to_string())?
+            .compile(&snapshot)
+            .is_err()
+    );
+    input["prerequisites"]["workshops"][0]["preparation"] = json!("mine_rock_v1");
+    let request = ProductionRequest::parse_current(&input.to_string())?;
+    let compiled = request.compile(&snapshot)?;
+    let restored = ProductionRequest::parse(&request.canonical_json())?;
+    assert_eq!(request, restored);
+    assert_eq!(compiled.actions, restored.compile(&snapshot)?.actions);
+    let actions = parse_steps(&compiled.actions)?;
+    let find = |test: fn(&Action) -> bool| {
+        actions
+            .iter()
+            .position(|step| test(&step.action))
+            .ok_or_else(|| invalid("workshop project step missing"))
+    };
+    let miner = find(|a| matches!(a, Action::SetLabor{labor,..} if labor == "MINING"))?;
+    let constructor = find(|a| matches!(a, Action::SetLabor{labor,..} if labor == "CONSTRUCTION"))?;
+    let dig = find(|a| matches!(a, Action::DesignateDig { .. }))?;
+    let build = find(|a| matches!(a, Action::Build { .. }))?;
+    let order = find(|a| matches!(a, Action::CreateWorkOrder { .. }))?;
+    assert_eq!(actions[dig].depends_on, vec![miner as u32]);
+    assert!(actions[build].depends_on.contains(&(dig as u32)));
+    assert!(actions[build].depends_on.contains(&(constructor as u32)));
+    assert!(actions[order].depends_on.contains(&(build as u32)));
+    assert_eq!(
+        snapshot.tile_code_at(MapCoord::new(3, 7, 10)),
+        Some(tile_codes::SOLID_WALL)
+    );
+    let finished = execute(snapshot, &compiled)?;
+    assert_eq!(
+        finished.tile_code_at(MapCoord::new(3, 7, 10)),
+        Some(tile_codes::FLOOR)
+    );
+    assert_eq!(stock(&finished, effects::STOCK_BED_FIELD)?, 2);
+    assert_eq!(stock(&finished, effects::STOCK_WOOD_FIELD)?, 17);
+    Ok(())
+}
+
+#[test]
+fn mine_rock_sites_skip_ready_floor_and_refuse_unknown_or_unsafe_terrain() -> Result<()> {
+    let mut snapshot = unstaffed_workshop()?;
+    let mut input = input();
+    input["prerequisites"]["workshops"][0]["preparation"] = json!("mine_rock_v1");
+    let request = ProductionRequest::parse_current(&input.to_string())?;
+    let ready = request.compile(&snapshot)?;
+    assert!(
+        parse_steps(&ready.actions)?
+            .iter()
+            .all(|step| !matches!(step.action, Action::DesignateDig { .. }))
+    );
+    let site = MapCoord::new(0, 0, 10);
+    for code in [tile_codes::OPEN_SPACE, tile_codes::STAIR, tile_codes::TREE] {
+        snapshot.set_tile_code(site, code)?;
+        snapshot.refresh_hash();
+        assert!(request.compile(&snapshot).is_err());
+    }
+    for marker in [Json::Null, json!(true), json!("dig_anything")] {
+        input["prerequisites"]["workshops"][0]["preparation"] = marker;
+        assert!(ProductionRequest::parse_current(&input.to_string()).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn reserve_mining_must_lead_to_the_matching_workshop_and_output() -> Result<()> {
+    let mut world = scenario_snapshot("starter_fortress_provisions", FortressId::new(997), false)?;
+    world.graph.entities.remove(&starter::STILL);
+    world.refresh_hash();
+    let request = ProductionRequest::parse_current(&json!({
+        "template":"production", "reserve_until_tick":2401, "quotas":[{"item":"DRINK","minimum":40}],
+        "prerequisites":{"assign_labor":true,"workforce":"complete_project_v1",
+            "workshops":[{"building":"workshop:Still","location":[2,6,10],"preparation":"mine_rock_v1"}]}
+    }).to_string())?;
+    let compiled = request.compile(&world)?;
+    let mut original = Intent {
+        id: IntentId::new(997),
+        anchor: world.anchor(),
+        summary: "maintain the original drink reserve".into(),
+        terminal_condition: compiled.terminal.clone(),
+        constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
+        requested_actions: parse_steps(&compiled.actions)?,
+    };
+    compiled.apply_capacity_horizon(&mut original)?;
+    assert!(PredicateEvidence::laboratory(&world)?.establishes(&original.terminal_condition)?);
+    let planner = StaticPlanner::default();
+    let plan = planner.prepare_laboratory(&world, &original, &context(&world))?;
+    assert!(plan.required_capabilities.contains(&Capability::Designate));
+    let dig = plan
+        .steps
+        .iter()
+        .find(|step| matches!(step.action, Action::DesignateDig { .. }))
+        .ok_or_else(|| invalid("reserve lost its original workshop excavation"))?;
+    let guard = Predicate::All(dig.preconditions.clone()).normalized();
+    assert!(PredicateEvidence::laboratory(&world)?.establishes(&guard)?);
+    let mut changed_terrain = world.clone();
+    changed_terrain.set_tile_code(MapCoord::new(2, 6, 10), tile_codes::STAIR)?;
+    changed_terrain.refresh_hash();
+    assert!(!PredicateEvidence::laboratory(&changed_terrain)?.establishes(&guard)?);
+    for mutation in 0..3 {
+        let mut changed = original.clone();
+        for step in &mut changed.requested_actions {
+            match (&mut step.action, mutation) {
+                (Action::CreateWorkOrder { .. }, 0) => step.depends_on.clear(),
+                (Action::Build { kind, .. }, 1) => *kind = BuildingKind::Workshop("Kitchen".into()),
+                (Action::DesignateDig { mode, .. }, 2) => *mode = DigMode::Channel,
+                _ => {}
+            }
+        }
+        assert!(
+            planner
+                .prepare_laboratory(&world, &changed, &context(&world))
+                .is_err()
+        );
+    }
+    Ok(())
+}

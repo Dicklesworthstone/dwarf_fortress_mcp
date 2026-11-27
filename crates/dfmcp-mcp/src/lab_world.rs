@@ -1500,6 +1500,7 @@ pub(crate) const PROJECT_WORKFORCE_POLICY: &str = "complete_project_v1";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ProductionWorkshopSite {
+    preparation: Option<WorkshopSitePreparation>,
     location: MapCoord,
     footprint: MapCuboid,
 }
@@ -1515,14 +1516,36 @@ struct ProductionQuotaInput {
     item: String,
     minimum: u32,
 }
+/// Explicit permission to mine observed ordinary rock inside this exact site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum WorkshopSitePreparation {
+    MineRockV1,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ProductionWorkshopInput {
+    #[serde(
+        default,
+        deserialize_with = "present_site_preparation",
+        skip_serializing_if = "Option::is_none"
+    )]
+    preparation: Option<WorkshopSitePreparation>,
     building: String,
     location: [i32; 3],
     min: Option<[i32; 3]>,
     max: Option<[i32; 3]>,
 }
+fn present_site_preparation<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<WorkshopSitePreparation>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    WorkshopSitePreparation::deserialize(deserializer).map(Some)
+}
+
 /// Shared typed grammar keeps nested room setup permissions strict before any
 /// JSON normalization can erase duplicate authorization or site keys.
 #[derive(Deserialize, Serialize)]
@@ -1709,9 +1732,13 @@ impl ProductionRequest {
                     {
                         return Err(invalid("production workshop sites overlap"));
                     }
+                    if site.preparation.is_some() && planner.is_none() {
+                        return Err(invalid("workshop site preparation requires a retained production planner generation"));
+                    }
                     workshops.insert(
                         site.building,
                         ProductionWorkshopSite {
+                            preparation: site.preparation,
                             location,
                             footprint,
                         },
@@ -1835,12 +1862,18 @@ impl ProductionRequest {
         if let Some(setup) = &self.prerequisites {
             request["prerequisites"] = json!({
                 "assign_labor": setup.assign_labor,
-                "workshops": setup.workshops.iter().map(|(building, site)| json!({
+                "workshops": setup.workshops.iter().map(|(building, site)| {
+                    let mut row = json!({
                     "building": building,
                     "location": [site.location.x, site.location.y, site.location.z],
                     "min": [site.footprint.min.x, site.footprint.min.y, site.footprint.min.z],
                     "max": [site.footprint.max.x, site.footprint.max.y, site.footprint.max.z],
-                })).collect::<Vec<_>>(),
+                    });
+                    if let Some(preparation) = site.preparation {
+                        row["preparation"] = json!(preparation);
+                    }
+                    row
+                }).collect::<Vec<_>>(),
             });
             if setup.workforce.is_some() {
                 request["prerequisites"]["workforce"] = json!(PROJECT_WORKFORCE_POLICY);
@@ -2604,10 +2637,12 @@ fn production_setup_refusal(message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(ErrorCode::PreconditionsFailed, message)
 }
 
-fn production_site_is_eligible(
+/// Return whether the qualified site needs excavation before construction.
+fn production_site_requires_mining(
     snapshot: &WorldSnapshot,
     site: &ProductionWorkshopSite,
-) -> Result<()> {
+) -> Result<bool> {
+    let mut needs_mining = false;
     let released: BTreeSet<EntityId> = effects::construction_material_report(snapshot)?
         .into_iter()
         .flat_map(|report| report.allocations)
@@ -2615,10 +2650,16 @@ fn production_site_is_eligible(
         .map(|allocation| allocation.building)
         .collect();
     for at in region_tiles(site.footprint) {
-        if snapshot.tile_code_at(at) != Some(tile_codes::FLOOR) {
-            return Err(production_setup_refusal(format!(
-                "production workshop requires established open floor at {at:?}"
-            )));
+        match (snapshot.tile_code_at(at), site.preparation) {
+            (Some(tile_codes::FLOOR), _) => {}
+            (Some(tile_codes::SOLID_WALL), Some(WorkshopSitePreparation::MineRockV1)) => {
+                needs_mining = true;
+            }
+            _ => {
+                return Err(production_setup_refusal(format!(
+                    "workshop site requires established floor, or ordinary rock with preparation=mine_rock_v1, at {at:?}"
+                )));
+            }
         }
         let below_z =
             at.z.checked_sub(1)
@@ -2688,7 +2729,15 @@ fn production_site_is_eligible(
             )));
         }
     }
-    Ok(())
+    if needs_mining
+        && i64::from(site.footprint.max.x) - i64::from(site.footprint.min.x) >= 7
+        && i64::from(site.footprint.max.y) - i64::from(site.footprint.min.y) >= 7
+    {
+        return Err(production_setup_refusal(
+            "workshop excavation exceeds the supported clear span",
+        ));
+    }
+    Ok(needs_mining)
 }
 
 /// Prefer explicit non-membership to unavailable membership, and unavailable
@@ -2778,28 +2827,48 @@ fn compile_production_prerequisites(
     let mut labor_actions = BTreeMap::<(EntityId, String), u32>::new();
     let mut workshop_actions = BTreeMap::<String, u32>::new();
     let mut setup = ProductionSetup::default();
+    // Bind the site and its terrain once for every missing facility, including
+    // sites shared by multiple recipes. Existing complete workshops take priority.
+    let mut missing_sites = BTreeMap::new();
+    for (output, _, workshop, _, _) in &requirements {
+        if !missing_sites.contains_key(*workshop)
+            && ready_production_workshop(snapshot, workshop).is_none()
+        {
+            let site = options.workshops.get(*workshop).ok_or_else(|| {
+                production_setup_refusal(format!(
+                    "{output} requires {workshop}; supply its explicit prerequisites.workshops site"
+                ))
+            })?;
+            missing_sites.insert(
+                *workshop,
+                (site, production_site_requires_mining(snapshot, site)?),
+            );
+        }
+    }
+    let mut mining_dependency = None;
     let mut construction_dependency = None;
     if options.workforce.is_some() {
         use dfmcp_intent::workforce_planning::{ProjectSetupLabor, ProjectSetupStaffing};
-        let required = if requirements
-            .iter()
-            .any(|(_, _, workshop, _, _)| ready_production_workshop(snapshot, workshop).is_none())
-        {
-            vec![ProjectSetupLabor::Construction]
-        } else {
-            Vec::new()
-        };
+        let mut required = Vec::new();
+        if missing_sites.values().any(|(_, mine)| *mine) {
+            required.push(ProjectSetupLabor::Mining);
+        }
+        if !missing_sites.is_empty() {
+            required.push(ProjectSetupLabor::Construction);
+        }
         let staffing = ProjectSetupStaffing::plan(snapshot, &required, options.assign_labor)?;
         for requested in &staffing.actions {
             setup
                 .actions
                 .push(crate::project_staffing::action_json(requested)?);
         }
+        mining_dependency =
+            crate::project_staffing::dependency(&staffing, ProjectSetupLabor::Mining);
         construction_dependency =
             crate::project_staffing::dependency(&staffing, ProjectSetupLabor::Construction);
         setup.setup_workforce = Some(staffing);
     }
-    for ((output, job, workshop, field, labor), family) in requirements.iter().zip(family_for_job) {
+    for ((_, job, workshop, field, labor), family) in requirements.iter().zip(family_for_job) {
         let worker = workers
             .get(family)
             .copied()
@@ -2887,15 +2956,24 @@ fn compile_production_prerequisites(
                 "action_index": null,
             }));
         } else {
-            let site = options.workshops.get(*workshop).ok_or_else(|| {
-                production_setup_refusal(format!(
-                    "{output} requires {workshop}; supply its explicit prerequisites.workshops site"
-                ))
-            })?;
+            let (site, needs_mining) = missing_sites
+                .get(*workshop)
+                .ok_or_else(|| invalid("production setup lost its qualified workshop site"))?;
             let index = if let Some(index) = workshop_actions.get(*workshop) {
                 *index
             } else {
-                production_site_is_eligible(snapshot, site)?;
+                let mut build_dependencies: Vec<_> = construction_dependency.into_iter().collect();
+                if *needs_mining {
+                    let dig = u32::try_from(setup.actions.len())
+                        .map_err(|_| invalid("production mining step index overflow"))?;
+                    setup.actions.push(json!({
+                        "action":{"kind":"designate_dig","mode":"mine",
+                            "min":[site.footprint.min.x,site.footprint.min.y,site.footprint.min.z],
+                            "max":[site.footprint.max.x,site.footprint.max.y,site.footprint.max.z]},
+                        "depends_on":mining_dependency.into_iter().collect::<Vec<_>>(),
+                    }));
+                    build_dependencies.push(dig);
+                }
                 let index = u32::try_from(setup.actions.len())
                     .map_err(|_| invalid("production setup step index overflow"))?;
                 setup.actions.push(json!({
@@ -2906,7 +2984,7 @@ fn compile_production_prerequisites(
                         "min": [site.footprint.min.x, site.footprint.min.y, site.footprint.min.z],
                         "max": [site.footprint.max.x, site.footprint.max.y, site.footprint.max.z],
                     },
-                    "depends_on": construction_dependency.into_iter().collect::<Vec<_>>(),
+                    "depends_on": build_dependencies,
                 }));
                 workshop_actions.insert((*workshop).to_owned(), index);
                 index
@@ -3028,6 +3106,15 @@ impl ProductionCompilation {
                 "production horizon binding already carries a reserve admission marker",
             ));
         }
+        let has_site_mining = proposed
+            .requested_actions
+            .iter()
+            .any(|step| matches!(step.action, Action::DesignateDig { .. }));
+        if has_site_mining && proposed.requested_actions != parse_steps(&self.actions)? {
+            return Err(invalid(
+                "workshop excavation must belong to the reviewed production program",
+            ));
+        }
         match self.consumption_horizon {
             Some(horizon) => {
                 self.workload
@@ -3044,6 +3131,40 @@ impl ProductionCompilation {
         }
         if let Some(staffing) = &self.setup_workforce {
             crate::project_staffing::bind_actions(staffing, &mut proposed)?;
+        }
+        // A deferred designation runs only on the same eligible terrain classes
+        // reviewed for mine_rock_v1. Generic Mine also supports stairs and ramps.
+        if has_site_mining {
+            for step in &mut proposed.requested_actions {
+                let Action::DesignateDig {
+                    area,
+                    mode: DigMode::Mine,
+                } = step.action
+                else {
+                    continue;
+                };
+                if validate_region(area)? > MAX_PRODUCTION_WORKSHOP_TILES {
+                    return Err(invalid(
+                        "workshop excavation guard exceeds its bounded site",
+                    ));
+                }
+                let cells = region_tiles(area)
+                    .map(|at| {
+                        let cell = MapCuboid { min: at, max: at };
+                        Predicate::Any(vec![
+                            Predicate::RegionTerrain {
+                                area: cell,
+                                tile_code: tile_codes::SOLID_WALL,
+                            },
+                            Predicate::RegionTerrain {
+                                area: cell,
+                                tile_code: tile_codes::FLOOR,
+                            },
+                        ])
+                    })
+                    .collect();
+                step.preconditions.push(Predicate::All(cells).normalized());
+            }
         }
         *intent = proposed;
         Ok(())

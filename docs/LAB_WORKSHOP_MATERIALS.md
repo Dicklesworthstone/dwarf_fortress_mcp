@@ -161,3 +161,38 @@ for the workshop setup used by complete production and furnished-room plans.
 
 See [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md) for executed
 evidence and its full-server, native and live qualification limits.
+
+## Preparing a production site underground
+
+On a laboratory production request, a workshop site can include
+`"preparation":"mine_rock_v1"`. The planner reuses an existing completed
+workshop first. For a missing workshop, it inspects the specified site, its
+support and its surrounding terrain. It proposes mining only when the footprint
+contains ordinary solid rock. A mix of eligible floor and rock can become
+one floor footprint. On established floor the build can proceed directly.
+
+```json
+{
+  "template": "production",
+  "quotas": [{"item": "BED", "minimum": 2}],
+  "prerequisites": {
+    "workforce": "complete_project_v1",
+    "assign_labor": true,
+    "workshops": [{
+      "building": "workshop:Carpenters",
+      "location": [2, 6, 10],
+      "min": [1, 5, 10],
+      "max": [3, 7, 10],
+      "preparation": "mine_rock_v1"
+    }]
+  }
+}
+```
+
+The ordinary guarded designation must complete before construction can start.
+The finite bed order depends on completion of the workshop. In a shared-workforce
+world the complete-project policy reviews mining and construction labor when each
+is needed. The workshop consumes its regular construction inputs and the beds
+consume their separate production inputs. The absolute reserve and consumption
+horizon includes the scheduled excavation. Sites that omit the preparation
+policy continue to require open floor.

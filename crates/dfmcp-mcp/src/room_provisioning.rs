@@ -635,9 +635,12 @@ impl ProvisionedRoomRequest {
             use dfmcp_intent::workforce_planning::{ProjectSetupLabor, ProjectSetupStaffing};
             let mut required = Vec::new();
             let evidence = dfmcp_world::PredicateEvidence::laboratory(snapshot)?;
-            let mut needs_mining = access
-                .as_ref()
-                .is_some_and(|part| !part.excavations.is_empty());
+            let mut needs_mining = requested_actions
+                .iter()
+                .any(|step| matches!(step.action, Action::DesignateDig { .. }))
+                || access
+                    .as_ref()
+                    .is_some_and(|part| !part.excavations.is_empty());
             for step in excavation_parts.iter().flatten() {
                 if let Action::DesignateDig { area, mode } = step.action
                     && !evidence.establishes(&Predicate::RegionTerrain {
@@ -674,8 +677,15 @@ impl ProvisionedRoomRequest {
                         .checked_add(offset)
                         .ok_or_else(|| bounds("project setup dependency overflow"))?;
                 }
-                if matches!(requested.action, Action::Build { .. }) {
-                    crate::project_staffing::require_dependency(requested, construction_dependency);
+                match requested.action {
+                    Action::DesignateDig { .. } => {
+                        crate::project_staffing::require_dependency(requested, mining_dependency)
+                    }
+                    Action::Build { .. } => crate::project_staffing::require_dependency(
+                        requested,
+                        construction_dependency,
+                    ),
+                    _ => {}
                 }
                 // These are generated procurement defaults, never caller
                 // deadlines. Seal them only after the complete room program

@@ -502,9 +502,11 @@ fn laboratory_reserve_horizon(
                 Action::Build { kind: BuildingKind::Workshop(kind), .. }
                     if matches!(kind.as_str(), "Still" | "Kitchen" | "Carpenters"))
         });
+        let workshop_mines = reserve_workshop_mines(intent);
         let mut production = false;
-        for requested in &intent.requested_actions {
+        for (index, requested) in intent.requested_actions.iter().enumerate() {
             let allowed = match &requested.action {
+                Action::DesignateDig { .. } => workshop_mines.contains(&index),
                 Action::CreateWorkOrder { job_token, .. }
                     if crate::effects::work_order_product(job_token).is_some() =>
                 {
@@ -526,8 +528,9 @@ fn laboratory_reserve_horizon(
                         // Explicit complete-project setup may need a constructor
                         // before its workshop. This is not a general exception
                         // for unrelated labor changes beside a satisfied goal.
-                        || (labor == "CONSTRUCTION"
-                            && constructs_workshop
+                        || ((labor == "CONSTRUCTION" && constructs_workshop
+                            || labor == "MINING" && workshop_mines.iter().any(|mine|
+                                intent.requested_actions[*mine].depends_on.contains(&(index as u32))))
                             && crate::effects::laboratory_workforce_model(evidence.snapshot())?
                                 == Some(crate::effects::LABORATORY_WORKFORCE_MODEL))
                 }
@@ -548,6 +551,63 @@ fn laboratory_reserve_horizon(
         }
     }
     Ok(horizon)
+}
+
+/// Only the original stock output can justify a reserve-related excavation.
+/// Follow actual dependencies from that order to the matching workshop and
+/// finally to a Mine of the exact bounded footprint.
+fn reserve_workshop_mines(intent: &Intent) -> BTreeSet<usize> {
+    fn names_field(predicate: &Predicate, wanted: &str) -> bool {
+        match predicate {
+            Predicate::FieldCompare { field, .. } => field == wanted,
+            Predicate::All(terms) => terms.iter().any(|term| names_field(term, wanted)),
+            _ => false,
+        }
+    }
+    let mut mines = BTreeSet::new();
+    for order in &intent.requested_actions {
+        let Action::CreateWorkOrder { job_token, .. } = &order.action else {
+            continue;
+        };
+        let Some((stock, _)) = crate::effects::work_order_product(job_token) else {
+            continue;
+        };
+        let Some((workshop, _)) = crate::effects::work_order_requirements(job_token) else {
+            continue;
+        };
+        if !names_field(&intent.terminal_condition, stock) {
+            continue;
+        }
+        for &index in &order.depends_on {
+            let Some(build) = intent.requested_actions.get(index as usize) else {
+                continue;
+            };
+            let Action::Build {
+                kind: BuildingKind::Workshop(kind),
+                footprint,
+                ..
+            } = &build.action
+            else {
+                continue;
+            };
+            if workshop.strip_prefix("workshop:") != Some(kind.as_str())
+                || footprint.min.z != footprint.max.z
+                || !footprint
+                    .tile_count()
+                    .is_some_and(|tiles| (1..=64).contains(&tiles))
+            {
+                continue;
+            }
+            for &index in &build.depends_on {
+                if let Some(dig) = intent.requested_actions.get(index as usize)
+                    && matches!(&dig.action, Action::DesignateDig { area, mode: crate::DigMode::Mine } if area == footprint)
+                {
+                    mines.insert(index as usize);
+                }
+            }
+        }
+    }
+    mines
 }
 
 /// Shape/depth/node bounds have already been checked by
