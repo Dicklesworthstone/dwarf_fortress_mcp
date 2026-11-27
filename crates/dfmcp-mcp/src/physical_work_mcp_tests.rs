@@ -1077,3 +1077,70 @@ fn emergency_receipt_budget_refusal_preserves_existing_shared_clock_consent() ->
     }
     Ok(())
 }
+
+#[test]
+fn rebased_unpause_keeps_the_reviewed_digest_across_shared_consent_refusals() -> TestResult {
+    let _serial = crate::test_serial();
+    let owner = open_session_paused("73424", true, Some("starter_fortress"), true, true)?;
+    let peer = open_session("73424", true, None, true)?;
+    let reviewed = parsed(&facade::fortress_plan(
+        Some(owner.clone()), None, Some(false), None, None,
+    ))?;
+    assert_eq!(reviewed["ok"], true, "{reviewed}");
+    set_brewer(&peer, false)?;
+    for _ in 0..2 {
+        let refused = commit(&owner, &reviewed)?;
+        assert_eq!(refused["clock_consent"]["votes"], 1, "{refused}");
+        assert_eq!(refused["mutation_dispatched"], false);
+        assert!(snapshot(&owner)?.paused);
+    }
+
+    let closed = cancel(&peer, "close_session", "session")?;
+    assert_eq!(closed["ok"], true, "{closed}");
+    let committed = commit(&owner, &reviewed)?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    assert_ne!(committed["plan_digest"], reviewed["plan_digest"]);
+    assert_eq!(committed["paused"], false);
+    assert!(committed["witness_rebase"].is_object());
+    let replay = commit(&owner, &reviewed)?;
+    assert_eq!(replay["plan_digest"], committed["plan_digest"]);
+    assert_eq!(replay["actions"], committed["actions"]);
+    Ok(())
+}
+
+#[test]
+fn rebased_commit_reserves_both_receipt_keys_before_dispatch() -> TestResult {
+    let _serial = crate::test_serial();
+    let owner = open_session("73425", true, Some("starter_fortress"), true)?;
+    let peer = open_session("73425", true, None, true)?;
+    let reviewed = plan(
+        &owner,
+        r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"MINE","enabled":true}}]"#,
+    )?;
+    set_brewer(&peer, false)?;
+    let before = snapshot(&owner)?;
+    in_session(&owner, |guard| {
+        for index in 0..MAX_LAB_COMMIT_RECEIPTS - 1 {
+            guard.commit_receipts.insert(format!("fixture-{index}"), String::new());
+        }
+        Ok(())
+    })?;
+    let refused = commit(&owner, &reviewed)?;
+    assert_eq!(refused["error"]["code"], "budget_exceeded", "{refused}");
+    assert_eq!(snapshot(&owner)?, before);
+    in_session(&owner, |guard| {
+        assert_eq!(guard.commit_receipts.len(), MAX_LAB_COMMIT_RECEIPTS - 1);
+        guard.commit_receipts.remove("fixture-0");
+        Ok(())
+    })?;
+    let committed = commit(&owner, &reviewed)?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    assert_ne!(committed["plan_digest"], reviewed["plan_digest"]);
+    assert_eq!(commit(&owner, &reviewed)?["actions"], committed["actions"]);
+    in_session(&owner, |guard| {
+        assert_eq!(guard.commit_receipts.len(), MAX_LAB_COMMIT_RECEIPTS);
+        guard.commit_receipts.retain(|key, _| !key.starts_with("fixture-"));
+        Ok(())
+    })?;
+    Ok(())
+}

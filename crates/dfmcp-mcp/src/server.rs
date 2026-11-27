@@ -5505,21 +5505,13 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                     "the session already tracks its maximum number of open actions; wait for or cancel existing work first",
                 );
             }
-            let mut pending = pending;
-            let requested_digest = plan_digest.clone();
-            let mut plan_digest = plan_digest.clone();
-            let mut witness_rebase = None;
-            if pending.plan.anchor != guard.adapter.snapshot().anchor() {
+            let requested_digest = plan_digest;
+            // Keep the reviewed source and seal in custody until the adapter accepts
+            // preparation. A lease or consent refusal must be retryable with the
+            // digest the caller actually received. A retry proves the witness anew.
+            let (rebased, witness_rebase) = if pending.plan.anchor != guard.adapter.snapshot().anchor() {
                 match rebase_by_witness(guard, &pending) {
-                    Ok((plan, certificate)) => {
-                        plan_digest = plan.digest.to_string();
-                        pending = PendingPlan {
-                            plan,
-                            digest: plan_digest.clone(),
-                            source: pending.source,
-                        };
-                        witness_rebase = Some(certificate);
-                    }
+                    Ok((plan, certificate)) => (Some(plan), Some(certificate)),
                     Err(reason) => {
                         let mut payload: serde_json::Value =
                             serde_json::from_str(&replay_stale_plan(guard, pending))
@@ -5528,10 +5520,27 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                         return payload.to_string();
                     }
                 }
+            } else {
+                (None, None)
+            };
+            let candidate = rebased.as_ref().unwrap_or(&pending.plan);
+            let plan_digest = candidate.digest.to_string();
+            // A successful rebase retains a receipt for both the reviewed seal
+            // and the executed seal. Reserve both keys before leases or effects.
+            if requested_digest != plan_digest
+                && !guard.commit_receipts.contains_key(&plan_digest)
+                && guard.commit_receipts.len() >= MAX_LAB_COMMIT_RECEIPTS - 1
+            {
+                guard.pending = Some(pending);
+                return coded_error_payload(
+                    "fortress.commit",
+                    ErrorCode::BudgetExceeded,
+                    "rebased commit requires room for both the reviewed and executed receipt keys",
+                );
             }
             let resource_output_ledger = match objectives::prepare_resource_output_ledger(
                 guard,
-                &pending.plan,
+                candidate,
                 &pending.source,
             ) {
                 Ok(ledger) => ledger,
@@ -5541,14 +5550,14 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                 }
             };
             let evicted_objectives =
-                match objectives::objective_evictions(guard, pending.plan.digest) {
+                match objectives::objective_evictions(guard, candidate.digest) {
                     Ok(evicted) => evicted,
                     Err(error) => {
                         guard.pending = Some(pending);
                         return dfmcp_error_payload("fortress.commit", &error);
                     }
                 };
-            if guard.shared_members > 1 && plan_sets_pause(&pending.plan, false) {
+            if guard.shared_members > 1 && plan_sets_pause(candidate, false) {
                 let me = guard.session_id;
                 guard.leases.unpause_consent.insert(me);
                 let votes = guard.leases.unpause_consent.len();
@@ -5573,7 +5582,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                 }
             }
             let leases_before = guard.leases.clone();
-            let plan_leases = match acquire_plan_leases(guard, &pending.plan) {
+            let plan_leases = match acquire_plan_leases(guard, candidate) {
                 Ok(leases) => leases,
                 Err(error) => {
                     guard.pending = Some(pending);
@@ -5588,8 +5597,19 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                     return dfmcp_error_payload("fortress.commit", &error);
                 }
             };
-            match guard.adapter.prepare(&pending.plan, &prepare_ctx) {
+            match guard.adapter.prepare(candidate, &prepare_ctx) {
                 Ok(prepared) => {
+                    // Subsequent durable admission and recovery identify the exact
+                    // prepared plan. Keep that identity on any downstream failure.
+                    let pending = if let Some(plan) = rebased {
+                        PendingPlan {
+                            plan,
+                            digest: plan_digest.clone(),
+                            source: pending.source,
+                        }
+                    } else {
+                        pending
+                    };
                     let (_, commit_ctx) = match next_context(guard) {
                         Ok(value) => value,
                         Err(error) => {
