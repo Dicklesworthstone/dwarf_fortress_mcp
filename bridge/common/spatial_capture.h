@@ -11,6 +11,7 @@
 #include "TileTypes.h"
 #include "modules/Job.h"
 #include "modules/Items.h"
+#include "terrain_blocks.h"
 #include "modules/Maps.h"
 #include "modules/World.h"
 #include "df/building.h"
@@ -161,10 +162,11 @@ inline std::uint32_t terrain(const Bounds &b,std::string &out){
     for(auto n:b.origin)u32(out,n);
     for(auto n:b.size)u32(out,n);
     u32(out,b.size[0]*b.size[1]*b.size[2]);
+    dfmcp_terrain::BlockRow blocks;
     for(std::uint32_t z=b.origin[2];z<b.origin[2]+b.size[2];++z)
     for(std::uint32_t y=b.origin[1];y<b.origin[1]+b.size[1];++y)
     for(std::uint32_t x=b.origin[0];x<b.origin[0]+b.size[0];++x){
-        auto *block=Maps::getTileBlock(x,y,z);if(!block){out.push_back(0);continue;}
+        auto *block=blocks.at(x,y,z);if(!block){out.push_back(0);continue;}
         const auto lx=x&15,ly=y&15;const auto &d=block->designation[lx][ly].bits;
         if(d.hidden){out.push_back(1);continue;}
         const auto tt=block->tiletype[lx][ly];if(static_cast<int>(tt)<0||!is_valid_enum_item(tt))return 5;

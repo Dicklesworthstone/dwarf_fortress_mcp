@@ -10,7 +10,8 @@ unchanged.
 
 The native plugin is `bridge/dfhack-map-v1_5/dfmcp_map_v1_5.cpp`; its supplied
 CMake target is `dfmcp_map_v1_5`. Build it within a named DFHack source checkout
-with the real generated DF headers and protobuf toolchain. The package is
+with the real generated DF headers and protobuf toolchain. Keep the sibling
+`bridge/common/terrain_blocks.h` header available at its repository-relative path. The package is
 `dfmcp.map.v1_5`. Only `Handshake` and `ReadObservation` are registered, both
 with flags zero, so the region is acquired under one native RPC suspension.
 
@@ -55,7 +56,8 @@ operation. Neither that lifecycle nor whole-map streaming is implemented here.
 
 ## Presence and fields
 
-The producer calls `Maps::getTileBlock`, never `ensureTileBlock`. It does not
+Within one suspended read, the producer calls `Maps::getTileBlock` once per
+intersecting 16×16 block on each z-level. Tile records stay in z, y, x order. It does not
 allocate terrain blocks, reveal hidden cells, change designations, pause/unpause,
 move units, or mutate saves.
 

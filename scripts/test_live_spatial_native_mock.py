@@ -105,7 +105,7 @@ int main(){
  Handshake(out,&r,&p);check(p.accepted);check(!p.has_payload);check(p.minor==6);
  read();check(p.accepted);check(p.complete);check(p.has_payload);check(p.total==p.payload.size());
  const auto golden=p.payload;const auto first_token=p.token;r.snapshot=p.token;
- const auto calls=Maps::reads;
+ const auto calls=Maps::reads;check(calls==1);
  Maps::block.designation[2][2].bits.flow_size=7;Maps::block.temperature_1[2][2]=1;wood.stack=9;World::tick=4;
  read();check(p.accepted);check(p.payload==golden);check(Maps::reads==calls);
  r.nonce=std::string(16,'x');bad();r.nonce=std::string(16,'n');r.ox=1;bad();r.ox=0;r.sx=3;bad();r.sx=4;
@@ -210,7 +210,7 @@ def main():
     fixture=root/'crates/dfmcp-adapter/tests/fixtures/spatial_v1_6.hex'
     if fixture.exists():assert fixture.read_text().strip()==expected.hex()
     result.update(compiler=args.compiler,flags=flags,golden_bytes=len(expected),evidence='mock_native_interfaces_not_real_dfhack_qualification',
-        source_sha256={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in [producer,root/'bridge/common/spatial_capture.h',root/'bridge/common/retained_snapshot.h']})
+        source_sha256={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in [producer,root/'bridge/common/spatial_capture.h',root/'bridge/common/terrain_blocks.h',root/'bridge/common/retained_snapshot.h']})
     if args.output:pathlib.Path(args.output).write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(result,indent=2))
 if __name__=='__main__':main()

@@ -75,7 +75,7 @@ int main(){setenv("DFMCP_MAP_TOKEN",std::string(32,'t').c_str(),1);
  Maps::blocks[1].designation[0][15].bits.flow_size=3;Maps::blocks[1].designation[0][15].bits.liquid_type=true;
  Maps::blocks[2].occupancy[14][0].bits.building=2;Maps::blocks[2].occupancy[14][0].bits.unit_grounded=true;
  Handshake(output,&request,&reply);check(reply.accepted);check(!reply.has_payload);check(reply.minor==5);check(Maps::calls==0);
- read();check(reply.accepted);check(reply.has_payload);check(reply.code==0);check(Maps::calls==24);const auto golden=reply.payload;
+ read();check(reply.accepted);check(reply.has_payload);check(reply.code==0);check(Maps::calls==8);const auto golden=reply.payload;
  // Arbitrary changes behind the hidden cell never change the wire observation.
  Maps::blocks[0].tiletype[15][15]=df::tiletype::WALL;Maps::blocks[0].temperature_1[15][15]=60000;
  Maps::blocks[0].walkable[15][15]=999;read();check(reply.payload==golden);
@@ -100,7 +100,10 @@ int main(){setenv("DFMCP_MAP_TOKEN",std::string(32,'t').c_str(),1);
  request.ox=0;request.oy=0;request.oz=1;request.w=32;request.h=32;request.d=2;request.maximum=1024;reject();
  request.maximum=1024*1024;read();check(reply.accepted);check(reply.payload.size()>1024);
  // Full hard-volume acquisition; sparse blocks remain unknown instead of being created.
- Maps::sx=128;Maps::sy=128;request.w=128;request.h=128;request.d=1;read();check(reply.accepted);check(reply.payload.size()>16384);
+ Maps::sx=128;Maps::sy=128;request.w=128;request.h=128;request.d=1;const auto before=Maps::calls;
+ read();check(reply.accepted);check(reply.payload.size()>16384);check(Maps::calls-before==64);
+ // The maximal unaligned strip uses nine columns. Missing blocks are cached too.
+ Maps::sx=144;request.ox=15;const auto unaligned=Maps::calls;read();check(reply.accepted);check(Maps::calls-unaligned==72);
  const char*hex="0123456789abcdef";std::cout<<"{\"checks\":"<<checks<<",\"hex\":\"";
  for(unsigned char c:golden){std::cout<<hex[c>>4]<<hex[c&15];}std::cout<<"\"}\n";
 }
@@ -139,6 +142,7 @@ def main():
         fixture=root/'crates/dfmcp-adapter/tests/fixtures/map_v1_5.hex'
         if fixture.exists():assert fixture.read_text().strip()==expected.hex()
         result.update(compiler=args.compiler,flags=flags,golden_bytes=len(expected),source_sha256=hashlib.sha256(producer.read_bytes()).hexdigest(),
+            terrain_blocks_sha256=hashlib.sha256((root/'bridge/common/terrain_blocks.h').read_bytes()).hexdigest(),
             evidence='mock_interfaces_not_real_dfhack_or_rust_execution')
         if args.output:pathlib.Path(args.output).write_text(json.dumps(result,indent=2)+'\n')
         print(json.dumps(result,indent=2))

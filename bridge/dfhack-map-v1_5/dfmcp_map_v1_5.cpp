@@ -11,6 +11,7 @@
 #include "RemoteServer.h"
 #include "VersionInfo.h"
 #include "TileTypes.h"
+#include "../common/terrain_blocks.h"
 #include "modules/Maps.h"
 #include "modules/World.h"
 #include "df/map_block.h"
@@ -103,10 +104,11 @@ command_result ReadObservation(color_ostream &,const wire::Request *in,wire::Rep
     u32(payload,size[0]*size[1]*size[2]);
     // Flags=0 gives one suspended read. Never allocate a missing block or reveal
     // hidden terrain: those cells have presence tags only, not scrubbed attributes.
+    dfmcp_terrain::BlockRow blocks;
     for(std::uint32_t z=origin[2];z<origin[2]+size[2];++z)
     for(std::uint32_t y=origin[1];y<origin[1]+size[1];++y)
     for(std::uint32_t x=origin[0];x<origin[0]+size[0];++x){
-        auto *block=Maps::getTileBlock(static_cast<std::int32_t>(x),static_cast<std::int32_t>(y),static_cast<std::int32_t>(z));
+        auto *block=blocks.at(x,y,z);
         if(!block){payload.push_back(0);continue;}
         const auto lx=x&15,ly=y&15;const auto &d=block->designation[lx][ly].bits;
         if(d.hidden){payload.push_back(1);continue;}
