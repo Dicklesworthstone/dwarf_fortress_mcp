@@ -95,6 +95,34 @@ public:
         token.swap(id);
         return true;
     }
+    // Roll back a newly inserted capture until its first response is fully built.
+    // An existing token can be read through this scope without giving up its cache entry.
+    class FirstPage {
+    public:
+        explicit FirstPage(Cache &cache) : cache_(cache) {}
+        FirstPage(const FirstPage &) = delete;
+        FirstPage &operator=(const FirstPage &) = delete;
+        bool insert(const std::string &owner, std::uint64_t generation, Limits limits,
+                    std::string payload, Clock::time_point now) {
+            if (!token_.empty()) return false;
+            return cache_.insert(owner, generation, limits, std::move(payload), now, token_);
+        }
+        const std::string &token() const { return token_; }
+        void published() noexcept { token_.clear(); }
+        ~FirstPage() {
+            if (token_.empty()) return;
+            // A page lookup may already have expired the entry.
+            const auto found = cache_.entries.find(token_);
+            if (found != cache_.entries.end()) {
+                cache_.retained -= found->second.payload.size();
+                cache_.entries.erase(found);
+            }
+        }
+    private:
+        Cache &cache_;
+        std::string token_;
+    };
+
     bool page(const std::string &owner,const std::string &token,std::uint64_t generation,Limits limits,
               std::uint64_t offset,std::size_t width,Clock::time_point now,Page &out) {
         expire(now);

@@ -1,5 +1,6 @@
 #include "../common/retained_snapshot.h"
 #include <cstdlib>
+#include <string_view>
 #include <tuple>
 #include <vector>
 #include "Core.h"
@@ -78,17 +79,47 @@ bool authorize(const wire::Request *in,wire::Reply *out)
     if(difference) return false;
     out->set_failure_code(5);
     const auto &version=Core::getInstance().vinfo;
-    const std::string df=version?version->getVersion():std::string(),dfhack=Version::dfhack_version();
+    const std::string df=version?version->getVersion():std::string();
+    const char *native_version=Version::dfhack_version();
+    if(!native_version)return false;
+    const std::string dfhack(native_version);
     if(!generation || generation==std::numeric_limits<std::uint64_t>::max() || !valid_utf8(df,128,false) || !valid_utf8(dfhack,128,false)) return false;
     out->set_bridge_generation(generation);out->set_df_version(df);out->set_dfhack_version(dfhack);out->set_failure_code(0);return true;
 }
-command_result Handshake(color_ostream &,const wire::Request *in,wire::Reply *out)
+// Never return partially built success payloads or native exception text.
+command_result failed_reply(const wire::Request *in, wire::Reply *out)
 {
-    if(authorize(in,out)) {
-        if(!in->snapshot_token().empty() || in->offset()!=0 || in->release())out->set_failure_code(3);
-        else out->set_accepted(true);
+    try {
+        out->Clear();
+        out->set_accepted(false);
+        out->set_failure_code(5);
+        const auto &nonce = in->client_nonce();
+        out->set_client_nonce(nonce.size() >= 16 && nonce.size() <= 64 ? nonce : "");
+        out->set_protocol_major(1);
+        out->set_protocol_minor(4);
+        out->set_bridge_generation(0);
+        out->set_df_version("");
+        out->set_dfhack_version("");
+        return CR_OK;
+    } catch (...) {
+        out->Clear();
+        return CR_FAILURE;
     }
-    return CR_OK;
+}
+
+command_result Handshake(color_ostream &, const wire::Request *in, wire::Reply *out)
+{
+    try {
+        if (authorize(in, out)) {
+            if (!in->snapshot_token().empty() || in->offset() != 0 || in->release())
+                out->set_failure_code(3);
+            else
+                out->set_accepted(true);
+        }
+        return CR_OK;
+    } catch (...) {
+        return failed_reply(in, out);
+    }
 }
 
 template<class T> bool roster(const std::vector<T *> &source,std::size_t maximum,std::int32_t horizon,
@@ -199,37 +230,70 @@ std::uint32_t capture(const wire::Request *in,std::string &payload)
     }
     return payload.size()>in->max_bytes()?3:0;
 }
-command_result ReadObservation(color_ostream &,const wire::Request *in,wire::Reply *out)
+command_result ReadObservation(color_ostream &, const wire::Request *in, wire::Reply *out)
 {
-    if(!authorize(in,out))return CR_OK;
-    const auto now=dfmcp_snapshot::Cache::Clock::now();
-    std::string token=in->snapshot_token();
-    if(in->release()) {
-        if(token.empty() || in->offset()!=0) {out->set_failure_code(3);return CR_OK;}
-        if(!snapshots.release(in->client_nonce(),token,generation,bounds(in),now)) {out->set_failure_code(6);return CR_OK;}
-        out->set_snapshot_token(token);out->set_accepted(true);return CR_OK;
+    try {
+        if (!authorize(in, out)) return CR_OK;
+        const auto &key = in->client_nonce();
+        const auto cache_limits = bounds(in);
+        const auto &requested = in->snapshot_token();
+        using Clock = dfmcp_snapshot::Cache::Clock;
+        if (in->release()) {
+            if (requested.empty() || in->offset() != 0) {
+                out->set_failure_code(3);
+                return CR_OK;
+            }
+            if (!snapshots.release(key, requested, generation, cache_limits, Clock::now())) {
+                out->set_failure_code(6);
+                return CR_OK;
+            }
+            out->set_snapshot_token(requested);
+            out->set_accepted(true);
+            return CR_OK;
+        }
+        dfmcp_snapshot::Cache::FirstPage first(snapshots);
+        if (requested.empty()) {
+            if (in->offset() != 0 || !snapshots.can_capture(in->max_bytes(), Clock::now())) {
+                out->set_failure_code(3);
+                return CR_OK;
+            }
+            std::string payload;
+            const auto status = capture(in, payload);
+            if (status) {
+                out->set_failure_code(status);
+                return CR_OK;
+            }
+            if (!first.insert(key, generation, cache_limits, std::move(payload), Clock::now())) {
+                out->set_failure_code(3);
+                return CR_OK;
+            }
+        }
+        const auto &token = requested.empty() ? first.token() : requested;
+        dfmcp_snapshot::Page page;
+        if (!snapshots.page(key, token, generation, cache_limits, in->offset(), in->page_bytes(), Clock::now(), page)) {
+            out->set_failure_code(6);
+            return CR_OK;
+        }
+        out->set_snapshot_token(page.token);
+        out->set_offset(page.offset);
+        out->set_total_bytes(page.total);
+        out->set_payload_sha256(page.digest);
+        out->set_complete(page.complete);
+        out->set_observation(page.bytes);
+        out->set_accepted(true);
+        first.published();
+        return CR_OK;
+    } catch (...) {
+        return failed_reply(in, out);
     }
-    if(token.empty()) {
-        if(in->offset()!=0) {out->set_failure_code(3);return CR_OK;}
-        if(!snapshots.can_capture(in->max_bytes(),now)) {out->set_failure_code(3);return CR_OK;}
-        std::string payload;
-        const auto code=capture(in,payload);if(code) {out->set_failure_code(code);return CR_OK;}
-        if(!snapshots.insert(in->client_nonce(),generation,bounds(in),std::move(payload),
-            dfmcp_snapshot::Cache::Clock::now(),token)) {out->set_failure_code(3);return CR_OK;}
-    }
-    dfmcp_snapshot::Page page;
-    if(!snapshots.page(in->client_nonce(),token,generation,bounds(in),in->offset(),in->page_bytes(),
-        dfmcp_snapshot::Cache::Clock::now(),page)) {out->set_failure_code(6);return CR_OK;}
-    out->set_snapshot_token(page.token);out->set_offset(page.offset);out->set_total_bytes(page.total);
-    out->set_payload_sha256(page.digest);out->set_complete(page.complete);out->set_observation(page.bytes);out->set_accepted(true);
-    return CR_OK;
 }
 }
 DFhackCExport command_result plugin_init(color_ostream &,std::vector<PluginCommand> &) {return CR_OK;}
 DFhackCExport command_result plugin_shutdown(color_ostream &) {snapshots.clear();return CR_OK;}
 DFhackCExport command_result plugin_onstatechange(color_ostream &,state_change_event event)
 {
-    if(event==SC_WORLD_LOADED || event==SC_WORLD_UNLOADED) {
+    if (event == SC_WORLD_LOADED || event == SC_WORLD_UNLOADED ||
+        event == SC_MAP_LOADED || event == SC_MAP_UNLOADED) {
         snapshots.clear();if(generation!=std::numeric_limits<std::uint64_t>::max())++generation;
     }
     return CR_OK;

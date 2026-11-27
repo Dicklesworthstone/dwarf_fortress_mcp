@@ -48,45 +48,104 @@ bool authorize(const wire::Request *in,wire::Reply *out){
     if(!generation||generation==std::numeric_limits<std::uint64_t>::max()||!capture::utf8(df,128)||!capture::utf8(dfhack,128))return false;
     out->set_bridge_generation(generation);out->set_df_version(df);out->set_dfhack_version(dfhack);out->set_failure_code(0);return true;
 }
-command_result Handshake(color_ostream &,const wire::Request *in,wire::Reply *out){
-    if(authorize(in,out)){
-        if(!in->snapshot_token().empty()||in->offset()!=0||in->release())out->set_failure_code(3);
-        else out->set_accepted(true);
-    }return CR_OK;
-}
-command_result ReadObservation(color_ostream &,const wire::Request *in,wire::Reply *out){
-    if(!authorize(in,out))return CR_OK;
+// Never return partially built success payloads or native exception text.
+command_result failed_reply(const wire::Request *in, wire::Reply *out)
+{
     try {
-        const auto now=dfmcp_snapshot::Cache::Clock::now();const auto key=owner(in);auto token=in->snapshot_token();
-        if(in->release()){
-            if(token.empty()||in->offset()!=0){out->set_failure_code(3);return CR_OK;}
-            if(!snapshots.release(key,token,generation,limits(in),now)){out->set_failure_code(6);return CR_OK;}
-            out->set_snapshot_token(token);out->set_accepted(true);return CR_OK;
-        }
-        if(token.empty()){
-            if(in->offset()!=0){out->set_failure_code(3);return CR_OK;}
-            if(!snapshots.can_capture(in->max_bytes(),now)){out->set_failure_code(3);return CR_OK;}
-            std::string payload;const auto status=capture::capture(bounds(in),payload);
-            if(status){out->set_failure_code(status);return CR_OK;}
-            // The payload was acquired under this RPC's single suspension.
-            if(!snapshots.insert(key,generation,limits(in),std::move(payload),now,token)){out->set_failure_code(3);return CR_OK;}
-        }
-        dfmcp_snapshot::Page page;
-        if(!snapshots.page(key,token,generation,limits(in),in->offset(),in->page_bytes(),now,page)){out->set_failure_code(6);return CR_OK;}
-        out->set_observation(page.bytes);out->set_snapshot_token(page.token);out->set_page_offset(page.offset);
-        out->set_total_bytes(page.total);out->set_payload_sha256(page.digest);out->set_complete(page.complete);out->set_accepted(true);
-    }catch(const std::exception &){
-        // Never expose partial fields after an allocation/serialization failure.
-        out->Clear();out->set_accepted(false);out->set_failure_code(3);out->set_client_nonce(in->client_nonce());
-        out->set_protocol_major(1);out->set_protocol_minor(6);out->set_bridge_generation(0);out->set_df_version("");out->set_dfhack_version("");
+        out->Clear();
+        out->set_accepted(false);
+        out->set_failure_code(5);
+        const auto &nonce = in->client_nonce();
+        out->set_client_nonce(nonce.size() >= 16 && nonce.size() <= 64 ? nonce : "");
+        out->set_protocol_major(1);
+        out->set_protocol_minor(6);
+        out->set_bridge_generation(0);
+        out->set_df_version("");
+        out->set_dfhack_version("");
+        return CR_OK;
+    } catch (...) {
+        out->Clear();
+        return CR_FAILURE;
     }
-    return CR_OK;
+}
+
+command_result Handshake(color_ostream &, const wire::Request *in, wire::Reply *out)
+{
+    try {
+        if (authorize(in, out)) {
+            if (!in->snapshot_token().empty() || in->offset() != 0 || in->release())
+                out->set_failure_code(3);
+            else
+                out->set_accepted(true);
+        }
+        return CR_OK;
+    } catch (...) {
+        return failed_reply(in, out);
+    }
+}
+command_result ReadObservation(color_ostream &, const wire::Request *in, wire::Reply *out)
+{
+    try {
+        if (!authorize(in, out)) return CR_OK;
+        const auto &key = owner(in);
+        const auto cache_limits = limits(in);
+        const auto &requested = in->snapshot_token();
+        using Clock = dfmcp_snapshot::Cache::Clock;
+        if (in->release()) {
+            if (requested.empty() || in->offset() != 0) {
+                out->set_failure_code(3);
+                return CR_OK;
+            }
+            if (!snapshots.release(key, requested, generation, cache_limits, Clock::now())) {
+                out->set_failure_code(6);
+                return CR_OK;
+            }
+            out->set_snapshot_token(requested);
+            out->set_accepted(true);
+            return CR_OK;
+        }
+        dfmcp_snapshot::Cache::FirstPage first(snapshots);
+        if (requested.empty()) {
+            if (in->offset() != 0 || !snapshots.can_capture(in->max_bytes(), Clock::now())) {
+                out->set_failure_code(3);
+                return CR_OK;
+            }
+            std::string payload;
+            const auto status = capture::capture(bounds(in), payload);
+            if (status) {
+                out->set_failure_code(status);
+                return CR_OK;
+            }
+            if (!first.insert(key, generation, cache_limits, std::move(payload), Clock::now())) {
+                out->set_failure_code(3);
+                return CR_OK;
+            }
+        }
+        const auto &token = requested.empty() ? first.token() : requested;
+        dfmcp_snapshot::Page page;
+        if (!snapshots.page(key, token, generation, cache_limits, in->offset(), in->page_bytes(), Clock::now(), page)) {
+            out->set_failure_code(6);
+            return CR_OK;
+        }
+        out->set_snapshot_token(page.token);
+        out->set_page_offset(page.offset);
+        out->set_total_bytes(page.total);
+        out->set_payload_sha256(page.digest);
+        out->set_complete(page.complete);
+        out->set_observation(page.bytes);
+        out->set_accepted(true);
+        first.published();
+        return CR_OK;
+    } catch (...) {
+        return failed_reply(in, out);
+    }
 }
 }
 DFhackCExport command_result plugin_init(color_ostream &,std::vector<PluginCommand> &){return CR_OK;}
 DFhackCExport command_result plugin_shutdown(color_ostream &){snapshots.clear();return CR_OK;}
 DFhackCExport command_result plugin_onstatechange(color_ostream &,state_change_event event){
-    if(event==SC_WORLD_LOADED||event==SC_WORLD_UNLOADED){snapshots.clear();if(generation!=std::numeric_limits<std::uint64_t>::max())++generation;}
+    if (event == SC_WORLD_LOADED || event == SC_WORLD_UNLOADED ||
+        event == SC_MAP_LOADED || event == SC_MAP_UNLOADED){snapshots.clear();if(generation!=std::numeric_limits<std::uint64_t>::max())++generation;}
     return CR_OK;
 }
 DFhackCExport RPCService *plugin_rpcconnect(color_ostream &){auto *s=new RPCService();s->addFunction("Handshake",Handshake,0);s->addFunction("ReadObservation",ReadObservation,0);return s;}

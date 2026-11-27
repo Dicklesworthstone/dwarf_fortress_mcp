@@ -31,10 +31,10 @@ struct world {struct{job_list_link list;}jobs;struct{std::vector<building*>all;}
 namespace global {inline df::world*world=nullptr;inline int32_t*job_next_id=nullptr,*building_next_id=nullptr,*item_next_id=nullptr;}
 }
 namespace DFHack {
-struct color_ostream{};struct PluginCommand{};enum command_result{CR_OK,CR_FAILURE};enum state_change_event{SC_WORLD_LOADED,SC_WORLD_UNLOADED,SC_OTHER};
+struct color_ostream{};struct PluginCommand{};enum command_result{CR_OK,CR_FAILURE};enum state_change_event{SC_WORLD_LOADED,SC_WORLD_UNLOADED,SC_MAP_LOADED,SC_MAP_UNLOADED,SC_OTHER};
 struct VersionInfo{std::string getVersion(){return "df";}};struct Core{std::shared_ptr<VersionInfo>vinfo=std::make_shared<VersionInfo>();bool loaded=true;
  static Core&getInstance(){static Core v;return v;}bool isWorldLoaded(){return loaded;}};
-namespace Version{inline std::string dfhack_version(){return "dfhack";}}
+namespace Version{inline int fault=0;inline const char* dfhack_version(){if(fault==1)throw 42;return fault==2?nullptr:"dfhack";}}
 namespace World{inline uint32_t year=105,tick=3;inline int32_t site=1;inline bool fortress=true,paused=true;inline unsigned reads=0;
  inline bool isFortressMode(){return fortress;}inline uint32_t ReadCurrentYear(){return year;}
  inline uint32_t ReadCurrentTick(){++reads;return tick;}inline int32_t GetCurrentSiteId(){return site;}
@@ -50,12 +50,12 @@ struct Request{std::string token=std::string(32,'t'),nonce=std::string(16,'n'),s
  uint32_t protocol_major()const{return major;}uint32_t protocol_minor()const{return minor;}uint32_t max_jobs()const{return jobs;}
  uint32_t max_buildings()const{return buildings;}uint32_t max_items()const{return items;}uint32_t max_bytes()const{return bytes;}
  uint32_t page_bytes()const{return page;}uint64_t offset()const{return start;}bool release()const{return releasing;}};
-struct Reply{bool accepted=false,complete=false,has_payload=false;uint32_t code=0,major=0,minor=0;uint64_t generation=0,offset=0,total=0;
+struct Reply{inline static bool fail_payload=false;bool accepted=false,complete=false,has_payload=false;uint32_t code=0,major=0,minor=0;uint64_t generation=0,offset=0,total=0;
  std::string nonce,df,dfhack,payload,snapshot,digest;
  void Clear(){*this=Reply();}void set_accepted(bool v){accepted=v;}void set_failure_code(uint32_t v){code=v;}
  void set_client_nonce(const std::string&v){nonce=v;}void set_protocol_major(uint32_t v){major=v;}void set_protocol_minor(uint32_t v){minor=v;}
  void set_bridge_generation(uint64_t v){generation=v;}void set_df_version(const std::string&v){df=v;}void set_dfhack_version(const std::string&v){dfhack=v;}
- void set_observation(const std::string&v){payload=v;has_payload=true;}void set_snapshot_token(const std::string&v){snapshot=v;}
+ void set_observation(const std::string&v){payload=v;has_payload=true;if(fail_payload)throw 42;}void set_snapshot_token(const std::string&v){snapshot=v;}
  void set_offset(uint64_t v){offset=v;}void set_total_bytes(uint64_t v){total=v;}void set_payload_sha256(const std::string&v){digest=v;}void set_complete(bool v){complete=v;}};
 }
 '''
@@ -91,7 +91,27 @@ int main(int argc,char**argv){
  request.releasing=false;rejected();check(World::reads==1);request.snapshot.clear();
  // Starting a new snapshot is explicit, never a continuation fallback.
  read();check(reply.accepted);check(reply.complete);check(reply.snapshot!=token);check(World::reads==2);
- request.snapshot=reply.snapshot;plugin_onstatechange(output,SC_WORLD_UNLOADED);rejected();check(snapshots.count()==0);
+
+ for(auto event:{SC_WORLD_UNLOADED,SC_WORLD_LOADED,SC_MAP_UNLOADED,SC_MAP_LOADED}){
+  const auto old_generation=generation;
+  request.snapshot=reply.snapshot;
+  plugin_onstatechange(output,event);
+  check(generation==old_generation+1);check(snapshots.bytes()==0);rejected();
+  request.snapshot.clear();read();check(reply.accepted);
+ }
+ // An exception building a later page leaves the acknowledged handle usable.
+ request.snapshot=reply.snapshot;wire::Reply::fail_payload=true;rejected();
+ check(reply.snapshot.empty()&&reply.digest.empty()&&reply.generation==0);
+ check(snapshots.count()==1);wire::Reply::fail_payload=false;read();check(reply.accepted);
+ request.releasing=true;read();check(reply.accepted);request.releasing=false;request.snapshot.clear();
+ // An exception building the first page cannot consume a cache slot.
+ wire::Reply::fail_payload=true;rejected();check(snapshots.count()==0&&snapshots.bytes()==0);
+ wire::Reply::fail_payload=false;
+ for(int mode:{1,2}){
+  Version::fault=mode;Handshake(output,&request,&reply);check(!reply.accepted&&reply.code==5);
+  rejected();check(snapshots.count()==0);
+ }
+ Version::fault=0;
  request.snapshot.clear();request.start=1;rejected();request.start=0;
  world.items.all={&items[0]};items[0].container=&items[0];rejected();check(snapshots.count()==0);items[0].container=nullptr;
  world.items.all.push_back(nullptr);rejected();world.items.all.pop_back();

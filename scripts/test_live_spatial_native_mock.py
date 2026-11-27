@@ -42,11 +42,11 @@ struct map_block{df::tiletype tiletype[16][16];tile_designation designation[16][
  map_block(){for(int x=0;x<16;++x)for(int y=0;y<16;++y){tiletype[x][y]=df::tiletype::Floor;walkable[x][y]=1;temperature_1[x][y]=temperature_2[x][y]=10015;}}};
 }
 namespace DFHack {
-struct color_ostream{};struct PluginCommand{};enum command_result{CR_OK,CR_FAILURE};enum state_change_event{SC_WORLD_LOADED,SC_WORLD_UNLOADED,SC_OTHER};
+struct color_ostream{};struct PluginCommand{};enum command_result{CR_OK,CR_FAILURE};enum state_change_event{SC_WORLD_LOADED,SC_WORLD_UNLOADED,SC_MAP_LOADED,SC_MAP_UNLOADED,SC_OTHER};
 struct VersionInfo{std::string getVersion(){return "df";}};
 struct Core{std::shared_ptr<VersionInfo>vinfo=std::make_shared<VersionInfo>();bool loaded=true;
  static Core &getInstance(){static Core c;return c;}bool isWorldLoaded(){return loaded;}};
-namespace Version{inline std::string dfhack_version(){return "dfhack";}}
+namespace Version{inline int fault=0;inline const char* dfhack_version(){if(fault==1)throw 42;return fault==2?nullptr:"dfhack";}}
 namespace World{inline uint32_t year=105,tick=3;inline int32_t site=1;inline bool fortress=true,paused=true;inline std::string folder="region1";
  inline uint32_t ReadCurrentYear(){return year;}inline uint32_t ReadCurrentTick(){return tick;}inline int32_t GetCurrentSiteId(){return site;}
  inline bool isFortressMode(){return fortress;}inline bool ReadPauseState(){return paused;}inline std::string ReadWorldFolder(){return folder;}}
@@ -71,12 +71,12 @@ struct Request{std::string token=std::string(32,'t'),nonce=std::string(16,'n'),s
  const std::string &snapshot_token()const{return snapshot;}bool release()const{return releasing;}
  uint32_t x()const{return ox;}uint32_t y()const{return oy;}uint32_t z()const{return oz;}
  uint32_t width()const{return sx;}uint32_t height()const{return sy;}uint32_t depth()const{return sz;}};
-struct Reply{bool accepted=false,has_payload=false,complete=false;uint32_t code=0,major=0,minor=0;uint64_t generation=0,offset=0,total=0;
+struct Reply{inline static bool fail_payload=false;bool accepted=false,has_payload=false,complete=false;uint32_t code=0,major=0,minor=0;uint64_t generation=0,offset=0,total=0;
  std::string nonce,df,dfhack,payload,token,digest;
  void Clear(){*this=Reply();}void set_accepted(bool v){accepted=v;}void set_failure_code(uint32_t v){code=v;}
  void set_client_nonce(const std::string &v){nonce=v;}void set_protocol_major(uint32_t v){major=v;}void set_protocol_minor(uint32_t v){minor=v;}
  void set_bridge_generation(uint64_t v){generation=v;}void set_df_version(const std::string &v){df=v;}void set_dfhack_version(const std::string &v){dfhack=v;}
- void set_observation(const std::string &v){payload=v;has_payload=true;}void set_snapshot_token(const std::string &v){token=v;}
+ void set_observation(const std::string &v){payload=v;has_payload=true;if(fail_payload)throw 42;}void set_snapshot_token(const std::string &v){token=v;}
  void set_page_offset(uint64_t v){offset=v;}void set_total_bytes(uint64_t v){total=v;}void set_payload_sha256(const std::string &v){digest=v;}
  void set_complete(bool v){complete=v;}};
 }
@@ -122,7 +122,27 @@ int main(){
  barrel.container=&drink;bad();barrel.container=nullptr;drink.stack=-1;bad();drink.stack=5;
  a.job_item_idx=1;bad();a.job_item_idx=0;link.next=&link;bad();link.next=nullptr;
  Maps::missing=true;read();check(p.accepted);check(p.payload.size()<golden.size());Maps::missing=false;snapshots.clear();
- read();check(p.accepted);r.snapshot=p.token;plugin_onstatechange(out,SC_WORLD_UNLOADED);bad();r.snapshot.clear();
+ read();check(p.accepted);
+ for(auto event:{SC_WORLD_UNLOADED,SC_WORLD_LOADED,SC_MAP_UNLOADED,SC_MAP_LOADED}){
+  const auto old_generation=generation;
+  r.snapshot=p.token;
+  plugin_onstatechange(out,event);
+  check(generation==old_generation+1);check(snapshots.bytes()==0);bad();
+  r.snapshot.clear();read();check(p.accepted);
+ }
+ // An exception building a later page leaves the acknowledged handle usable.
+ r.snapshot=p.token;wire::Reply::fail_payload=true;bad();
+ check(p.token.empty()&&p.digest.empty()&&p.generation==0);
+ check(snapshots.count()==1);wire::Reply::fail_payload=false;read();check(p.accepted);
+ r.releasing=true;read();check(p.accepted);r.releasing=false;r.snapshot.clear();
+ // An exception building the first page cannot consume a cache slot.
+ wire::Reply::fail_payload=true;bad();check(snapshots.count()==0&&snapshots.bytes()==0);
+ wire::Reply::fail_payload=false;
+ for(int mode:{1,2}){
+  Version::fault=mode;Handshake(out,&r,&p);check(!p.accepted&&p.code==5);
+  bad();check(snapshots.count()==0);
+ }
+ Version::fault=0;
  // A large immutable capture includes both inventory and terrain before paging.
  std::vector<df::item> many(40000);world.items.all.clear();world.buildings.all.clear();world.jobs.list.next=nullptr;ni=40000;
  for(int i=0;i<40000;++i){many[i].id=i;many[i].type=df::item_type::Wood;many[i].flags.bits.on_ground=true;many[i].pos={1,2,5};world.items.all.push_back(&many[i]);}
