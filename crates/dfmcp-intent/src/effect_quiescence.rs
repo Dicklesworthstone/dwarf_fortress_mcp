@@ -89,7 +89,10 @@ pub(crate) fn validate_reference_work_identity(
             effects::validate_harvest_identity(snapshot, entity_id, action).is_ok()
         }
         Action::DesignateDig { area, mode } => {
-            field(entity, "area_min", snapshot.tick) == Some(&Value::Coord(area.min))
+            // Several original designations produce the same terrain code.
+            matches!(field(entity, "mode", snapshot.tick), Some(Value::Text(name))
+                if name == effects::dig_mode_name(*mode))
+                && field(entity, "area_min", snapshot.tick) == Some(&Value::Coord(area.min))
                 && field(entity, "area_max", snapshot.tick) == Some(&Value::Coord(area.max))
                 && field(entity, "target_tile_code", snapshot.tick)
                     == Some(&Value::U64(u64::from(effects::dig_target_tile_code(*mode))))

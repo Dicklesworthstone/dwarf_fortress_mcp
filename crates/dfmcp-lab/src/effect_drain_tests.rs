@@ -159,7 +159,7 @@ fn set_identity_field(
 fn terminal_identity_refusal(
     action: Action,
     ticks: u64,
-    corrupt: fn(&mut dfmcp_world::EntityRecord, GameTick),
+    corrupt: impl FnOnce(&mut dfmcp_world::EntityRecord, GameTick),
 ) -> Result<()> {
     let (mut adapter, action_id, entity_id) =
         started_with_deadline(action, false, None, GameTick(10_000))?;
@@ -202,6 +202,124 @@ fn terminal_identity_refusal(
         adapter.action_work_state(action_id)?,
         EffectWorkState::Unknown { .. }
     ));
+    Ok(())
+}
+
+#[test]
+fn excavation_proof_requires_the_dispatched_designation_even_when_terrain_matches() -> Result<()> {
+    let at = MapCoord::new(1, 1, 10);
+    let area = MapCuboid::new(at, at)?;
+    for (mode, changed_mode) in [
+        (DigMode::Mine, "remove_construction"),
+        (DigMode::RemoveConstruction, "mine"),
+        (DigMode::UpStair, "down_stair"),
+        (DigMode::DownStair, "up_down_stair"),
+        (DigMode::UpDownStair, "up_stair"),
+    ] {
+        terminal_identity_refusal(
+            Action::DesignateDig { area, mode },
+            effects::DIG_TICKS_PER_TILE,
+            |record, tick| {
+                set_identity_field(record, "mode", Value::Text(changed_mode.into()), tick);
+            },
+        )?;
+    }
+    let dig = Action::DesignateDig {
+        area,
+        mode: DigMode::Mine,
+    };
+    let corruptions: [fn(&mut dfmcp_world::EntityRecord, GameTick); 7] = [
+        |record, _| record.generation += 1,
+        |record, _| record.kind = dfmcp_world::EntityKind::Unit,
+        |record, tick| {
+            set_identity_field(record, "area_max", Value::Coord(MapCoord::new(2, 1, 10)), tick);
+        },
+        |record, tick| {
+            set_identity_field(
+                record,
+                "target_tile_code",
+                Value::U64(u64::from(tile_codes::STAIR)),
+                tick,
+            );
+        },
+        |record, _| {
+            record.fields.remove("mode");
+        },
+        |record, tick| {
+            set_identity_field(
+                record,
+                "mode",
+                Value::Text("mine".to_owned()),
+                GameTick(tick.0 + 1),
+            );
+        },
+        |record, tick| {
+            record.fields.insert(
+                "mode".to_owned(),
+                dfmcp_world::Fact::known(
+                    Value::Text("mine".to_owned()),
+                    tick,
+                    FactSource::AgentAssertion("claimed mode".to_owned()),
+                    Digest32::ZERO,
+                ),
+            );
+        },
+    ];
+    for corrupt in corruptions {
+        terminal_identity_refusal(dig.clone(), effects::DIG_TICKS_PER_TILE, corrupt)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_verified_early_excavation_goal_cannot_drain_a_different_designation() -> Result<()> {
+    let at = MapCoord::new(1, 1, 10);
+    let (mut adapter, action_id, entity_id) = started(
+        Action::DesignateDig {
+            area: MapCuboid::new(at, at)?,
+            mode: DigMode::UpStair,
+        },
+        true,
+        None,
+    )?;
+    adapter.advance_ticks(1)?;
+    let proof = adapter.poll_action(action_id, &context(&adapter))?;
+    assert_eq!(proof.state, CommitState::Verified);
+    let original = adapter.snapshot.clone();
+    let record = adapter
+        .snapshot
+        .graph
+        .entities
+        .get_mut(&entity_id)
+        .ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "test designation missing",
+            )
+        })?;
+    set_identity_field(
+        record,
+        "mode",
+        Value::Text("down_stair".to_owned()),
+        original.tick,
+    );
+    adapter.snapshot.refresh_hash();
+    assert!(matches!(
+        adapter.action_work_state(action_id)?,
+        EffectWorkState::Unknown { .. }
+    ));
+    let before = adapter.snapshot.clone();
+    let transcript = adapter.transcript.clone();
+    let error = refusal(adapter.drain_action_work(action_id, &context(&adapter)))?;
+    assert_eq!(error.code, ErrorCode::CancellationIncomplete);
+    assert_eq!(adapter.snapshot, before);
+    assert_eq!(adapter.transcript, transcript);
+    assert_eq!(adapter.action_receipt(action_id), Some(&proof));
+
+    adapter.snapshot = original;
+    let drained = adapter.drain_action_work(action_id, &context(&adapter))?;
+    assert!(drained.stopped_work && drained.after.is_quiescent());
+    assert_eq!(adapter.action_receipt(action_id), Some(&proof));
     Ok(())
 }
 

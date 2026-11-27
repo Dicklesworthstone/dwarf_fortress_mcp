@@ -115,7 +115,7 @@ pub fn validate_terminal_action_identity(
     let entity = created_entity_id(&step.idempotency_key, 0);
     if matches!(
         step.action,
-        Action::Build { .. } | Action::CreateWorkOrder { .. }
+        Action::DesignateDig { .. } | Action::Build { .. } | Action::CreateWorkOrder { .. }
     ) {
         crate::effect_quiescence::validate_reference_work_identity(snapshot, &step.action, entity)?;
     }
@@ -351,7 +351,7 @@ pub const fn dig_target_tile_code(mode: DigMode) -> u32 {
     }
 }
 
-const fn dig_mode_name(mode: DigMode) -> &'static str {
+pub(crate) const fn dig_mode_name(mode: DigMode) -> &'static str {
     match mode {
         DigMode::Mine => "mine",
         DigMode::Channel => "channel",

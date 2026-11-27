@@ -1,0 +1,1 @@
+Laboratory excavation proof and cancellation now check the dispatched designation mode as well as its terrain target. An up stair can no longer certify another stair direction, and a removal designation cannot stand in for mining.
