@@ -261,3 +261,59 @@ fn current_terrain_can_finish_valid_retained_work_without_rewriting_its_original
     }
     Ok(())
 }
+
+#[test]
+fn cancelling_excavation_requires_the_original_mode_even_for_identical_terrain() -> Result<()> {
+    for (original, replacement) in [
+        (DigMode::Mine, DigMode::RemoveConstruction),
+        (DigMode::DownStair, DigMode::UpDownStair),
+        (DigMode::UpStair, DigMode::DownStair),
+    ] {
+        let mut snapshot = world(false)?;
+        apply_effect(&mut snapshot, &dig(original), DIG_KEY)?;
+        advance(&mut snapshot, 3)?;
+        let before = snapshot.clone();
+        assert!(
+            cancel_effect(&mut snapshot, &dig(replacement), DIG_KEY)
+                .is_err_and(|error| error.code == ErrorCode::PreconditionsFailed)
+        );
+        assert_eq!(snapshot, before);
+        assert!(cancel_effect(&mut snapshot, &dig(original), DIG_KEY)?);
+        assert!(!cancel_effect(&mut snapshot, &dig(original), DIG_KEY)?);
+        advance(&mut snapshot, DIG_TICKS_PER_TILE)?;
+        assert_eq!(snapshot.tile_code_at(AT), Some(tile_codes::SOLID_WALL));
+    }
+    Ok(())
+}
+
+#[test]
+fn inconsistent_excavation_progress_cannot_establish_quiescence() -> Result<()> {
+    let mut active = world(false)?;
+    let action = dig(DigMode::Mine);
+    apply_effect(&mut active, &action, DIG_KEY)?;
+    advance(&mut active, 3)?;
+    let mut complete = active.clone();
+    advance(&mut complete, DIG_TICKS_PER_TILE - 3)?;
+    for (source, field, value) in [
+        (&active, TILES_REMAINING_FIELD, Value::U64(0)),
+        (&active, "tiles_total", Value::U64(2)),
+        (&active, STATUS_FIELD, Value::Text(STATUS_COMPLETE.to_owned())),
+        (&complete, "work_ticks", Value::U64(1)),
+        (&complete, TILES_REMAINING_FIELD, Value::U64(1)),
+        (&complete, STATUS_FIELD, Value::Text(STATUS_CANCELLED.to_owned())),
+    ] {
+        let mut changed = source.clone();
+        let tick = changed.tick;
+        record_mut(&mut changed)?.fields.insert(field.to_owned(), known(value, tick));
+        changed.refresh_hash();
+        let before = changed.clone();
+        assert!(matches!(
+            crate::inspect_effect_work(&changed, &action, DIG_KEY, true)?,
+            crate::EffectWorkState::Unknown { .. }
+        ));
+        assert!(cancel_effect(&mut changed, &action, DIG_KEY).is_err());
+        assert_eq!(changed, before);
+    }
+    assert!(crate::inspect_effect_work(&complete, &action, DIG_KEY, true)?.is_quiescent());
+    Ok(())
+}

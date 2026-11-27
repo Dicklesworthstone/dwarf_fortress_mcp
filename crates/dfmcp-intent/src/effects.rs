@@ -1621,6 +1621,33 @@ fn designation_area(record: &EntityRecord, tick: GameTick) -> Result<MapCuboid> 
     MapCuboid::new(min, max)
 }
 
+/// Validate the retained service counters without equating them to the current
+/// terrain. Another designation may have reached the same tiles since dispatch.
+pub(crate) fn validate_excavation_progress(
+    record: &EntityRecord,
+    tiles: u64,
+    tick: GameTick,
+) -> Result<()> {
+    let remaining = field_u64(record, TILES_REMAINING_FIELD, tick)?;
+    let partial = field_u64(record, "work_ticks", tick)?;
+    if record.generation != 1
+        || field_u64(record, "tiles_total", tick)? != tiles
+        || remaining > tiles
+        || partial >= DIG_TICKS_PER_TILE
+    {
+        return Err(precondition(
+            "excavation requires its original generation and bounded tile and service counters",
+        ));
+    }
+    match field_text(record, STATUS_FIELD, tick) {
+        Some(STATUS_ACTIVE | STATUS_CANCELLED) if remaining > 0 => Ok(()),
+        Some(STATUS_COMPLETE) if remaining == 0 && partial == 0 => Ok(()),
+        _ => Err(precondition(
+            "excavation lifecycle disagrees with its retained tiles or partial service",
+        )),
+    }
+}
+
 /// A retained target must agree with its qualified registered mode, both for
 /// progress and for deciding whether construction can share its footprint.
 /// Binding that pair to a sealed original action remains the adapter's duty.
@@ -1768,23 +1795,9 @@ impl EffectTimeline {
                 {
                     let area = designation_area(record, snapshot.tick)?;
                     let tiles = validate_region(area)?;
-                    let remaining = field_u64(record, TILES_REMAINING_FIELD, snapshot.tick)?;
-                    if record.generation != 1
-                        || field_u64(record, "tiles_total", snapshot.tick)? != tiles
-                        || remaining == 0
-                        || remaining > tiles
-                    {
-                        return Err(precondition(
-                            "active excavation requires its original generation and canonical tile counters",
-                        ));
-                    }
+                    validate_excavation_progress(record, tiles, snapshot.tick)?;
                     budget.charge(tiles)?;
                     let target = designation_target(record, snapshot.tick)?;
-                    if field_u64(record, "work_ticks", snapshot.tick)? >= DIG_TICKS_PER_TILE {
-                        return Err(precondition(
-                            "active dig designation has noncanonical progress counters",
-                        ));
-                    }
                     let mut pending = BTreeSet::new();
                     for coord in region_tiles(area) {
                         let code = snapshot.tile_code_at(coord).ok_or_else(|| {

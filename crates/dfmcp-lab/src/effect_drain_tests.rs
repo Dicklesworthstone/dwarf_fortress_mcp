@@ -228,7 +228,10 @@ fn excavation_proof_requires_the_dispatched_designation_even_when_terrain_matche
         area,
         mode: DigMode::Mine,
     };
-    let corruptions: [fn(&mut dfmcp_world::EntityRecord, GameTick); 7] = [
+    let corruptions: [fn(&mut dfmcp_world::EntityRecord, GameTick); 10] = [
+        |record, tick| set_identity_field(record, "work_ticks", Value::U64(1), tick),
+        |record, tick| set_identity_field(record, effects::TILES_REMAINING_FIELD, Value::U64(1), tick),
+        |record, tick| set_identity_field(record, "tiles_total", Value::U64(2), tick),
         |record, _| record.generation += 1,
         |record, _| record.kind = dfmcp_world::EntityKind::Unit,
         |record, tick| {

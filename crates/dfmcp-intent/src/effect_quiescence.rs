@@ -89,6 +89,8 @@ pub(crate) fn validate_reference_work_identity(
             effects::validate_harvest_identity(snapshot, entity_id, action).is_ok()
         }
         Action::DesignateDig { area, mode } => {
+            let tiles = dfmcp_world::terrain::validate_region(*area)?;
+            effects::validate_excavation_progress(entity, tiles, snapshot.tick)?;
             // Several original designations produce the same terrain code.
             matches!(field(entity, "mode", snapshot.tick), Some(Value::Text(name))
                 if name == effects::dig_mode_name(*mode))
