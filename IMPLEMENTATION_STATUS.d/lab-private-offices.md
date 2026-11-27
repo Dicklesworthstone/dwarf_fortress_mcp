@@ -1,1 +1,3 @@
 The laboratory office compiler retains a solid perimeter except at the doorway, refuses conflicting workshop setup and uses original item-backed chair placements. Native zoning and citizen assignment require separate evidence.
+
+Nine focused Rust tests executed against the reference MemoryAdapter and the production, room and intent modules. A two-office request produced and installed both original chairs. Opening a perimeter wall falsified both the room objective and the sealed terminal predicate. Restoring that wall restored the original room objective. The same run passed eight workshop and workforce regressions. The harness omitted the FastMCP transport and native game bridge.

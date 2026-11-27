@@ -172,8 +172,16 @@ fn private_offices_produce_and_install_chairs_and_keep_their_walls() -> Result<(
     assert_eq!(original.semantic_goal_truth(&finished)?, PredicateTruth::True);
     let wall = layout.office_walls()[0].min;
     finished.set_tile_code(wall, tile_codes::FLOOR)?;
+    finished.refresh_hash();
     assert_eq!(original.semantic_goal_truth(&finished)?, PredicateTruth::False);
+    assert_eq!(
+        PredicateEvidence::laboratory(&finished)?.evaluate(&intent.terminal_condition)?,
+        PredicateTruth::False
+    );
     assert!(original.compile_residual(IntentId::new(977), &finished, "").is_err());
+    finished.set_tile_code(wall, tile_codes::SOLID_WALL)?;
+    finished.refresh_hash();
+    assert_eq!(original.semantic_goal_truth(&finished)?, PredicateTruth::True);
     Ok(())
 }
 
