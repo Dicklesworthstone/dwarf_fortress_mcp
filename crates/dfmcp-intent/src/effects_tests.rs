@@ -1991,3 +1991,98 @@ fn ineligible_threat_counters_never_create_a_combat_outcome() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn malformed_finite_orders_cannot_multiply_stock_or_drain_another_order() -> Result<()> {
+    let mut original = with_ledger(0, 100);
+    equip_brewery(&mut original);
+    let action = Action::CreateWorkOrder {
+        name: "one batch".to_owned(),
+        job_token: "BREW_DRINK".to_owned(),
+        amount: 1,
+        conditions: Vec::new(),
+    };
+    let key = "one-batch";
+    apply_effect(&mut original, &action, key)?;
+    let id = created_entity_id(key, 0);
+    for (field, value) in [
+        (AMOUNT_REMAINING_FIELD, Value::U64(2)),
+        ("amount_total", Value::U64(0)),
+        ("amount_total", Value::U64(u64::from(u32::MAX) + 1)),
+        ("work_ticks", Value::U64(WORK_ORDER_TICKS_PER_UNIT)),
+    ] {
+        let mut source = original.clone();
+        set_test_field(&mut source, id, field, value)?;
+        source.refresh_hash();
+        let before = source.graph.clone();
+        assert!(matches!(
+            crate::inspect_effect_work(&source, &action, key, true)?,
+            crate::EffectWorkState::Unknown { .. }
+        ));
+        assert!(cancel_effect(&mut source, &action, key).is_err());
+        assert!(advance(&mut source, WORK_ORDER_TICKS_PER_UNIT * 2).is_err());
+        assert_eq!(source.graph, before, "{field}");
+    }
+
+    let other = conditional_order("same key, different order", 1, Vec::new());
+    let before = original.graph.clone();
+    assert!(cancel_effect(&mut original, &other, key).is_err());
+    assert_eq!(original.graph, before);
+    advance(&mut original, WORK_ORDER_TICKS_PER_UNIT)?;
+    assert_eq!(ledger_u64(&original, STOCK_DRINK_FIELD)?, 5);
+    original.refresh_hash();
+    assert!(crate::inspect_effect_work(&original, &action, key, true)?.is_quiescent());
+    assert!(!cancel_effect(&mut original, &action, key)?);
+    Ok(())
+}
+
+#[test]
+fn inconsistent_completed_order_cannot_release_dependent_work() -> Result<()> {
+    let mut source = world();
+    let first = conditional_order("first", 1, Vec::new());
+    let second = conditional_order(
+        "second",
+        1,
+        vec![WorkOrderCondition::CompletedOrder {
+            order_name: "first".to_owned(),
+        }],
+    );
+    apply_effect(&mut source, &first, "first")?;
+    advance(&mut source, WORK_ORDER_TICKS_PER_UNIT)?;
+    apply_effect(&mut source, &second, "second")?;
+    let predecessor = created_entity_id("first", 0);
+    let dependent = created_entity_id("second", 0);
+    for (field, value) in [
+        ("amount_total", Value::U64(0)),
+        ("work_ticks", Value::U64(1)),
+        (AMOUNT_REMAINING_FIELD, Value::U64(1)),
+    ] {
+        let mut changed = source.clone();
+        set_test_field(&mut changed, predecessor, field, value)?;
+        changed.refresh_hash();
+        assert!(matches!(
+            crate::inspect_effect_work(&changed, &first, "first", true)?,
+            crate::EffectWorkState::Unknown { .. }
+        ));
+        advance(&mut changed, WORK_ORDER_TICKS_PER_UNIT)?;
+        assert_eq!(
+            field_u64(
+                &changed.graph.entities[&dependent],
+                AMOUNT_REMAINING_FIELD,
+                changed.tick
+            )?,
+            1,
+            "{field}"
+        );
+    }
+    advance(&mut source, WORK_ORDER_TICKS_PER_UNIT)?;
+    assert_eq!(
+        field_u64(
+            &source.graph.entities[&dependent],
+            AMOUNT_REMAINING_FIELD,
+            source.tick
+        )?,
+        0
+    );
+    Ok(())
+}

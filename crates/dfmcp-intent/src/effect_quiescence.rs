@@ -123,6 +123,7 @@ pub(crate) fn validate_reference_work_identity(
             amount,
             conditions,
         } => {
+            effects::validate_finite_order_progress(entity, snapshot.tick)?;
             let expected_conditions = effects::work_order_conditions_value(conditions)?;
             field(entity, effects::WORK_ORDER_NAME_FIELD, snapshot.tick)
                 == Some(&Value::Text(name.clone()))

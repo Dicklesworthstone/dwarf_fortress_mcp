@@ -919,7 +919,7 @@ All conditions must hold. Their closed JSON forms and reference meanings are:
 |---|---|---|
 | `item_count_below` | `item_token`, `threshold` | The selected exact unsigned stock count is strictly below the threshold. |
 | `material_available` | `material_token`, `minimum` | The selected exact unsigned material count is at least the minimum. This is an availability gate; it consumes and reserves nothing. |
-| `completed_order` | `order_name` | Exactly one other work order has this established semantic name, `status="complete"`, and `amount_remaining=0`. |
+| `completed_order` | `order_name` | Exactly one other original finite work order has this established semantic name, a complete lifecycle, and zero remaining units and partial work. |
 
 `DRINK` and `FOOD` item tokens use the existing `stock.drink` and `stock.food`
 fields. Other exact item tokens use `stock.item.<TOKEN>`; material tokens use
@@ -941,6 +941,14 @@ Previously earned partial-unit work is retained, but blocked elapsed ticks are
 discarded. A later stock or dependency event can release work for subsequent
 time in the same advance. Completing the requested amount ends the order;
 conditions do not create recurring orders.
+
+Each dispatched reference order starts in generation one with a positive total
+that fits its original unsigned 32-bit amount. Active and cancelled orders retain
+between one and that total remaining units, with fewer than 50 partial ticks.
+Completed orders retain zero units and zero partial ticks. Inconsistent active
+work refuses the advance before any inventory changes. An inconsistent terminal
+record cannot release another order or establish physical quiescence. Direct
+cancellation checks the retained order against the requested action.
 
 Named dependencies use the source-qualified `order_name` field, never display
 labels. Missing or ambiguous names, self-reference, cancelled predecessors, and

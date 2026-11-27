@@ -1,0 +1,1 @@
+Finite laboratory work orders now validate their original generation, total, remaining units and partial work before another unit can be produced, a dependent order can start or an action can be drained.

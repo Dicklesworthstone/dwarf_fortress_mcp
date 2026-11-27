@@ -1258,6 +1258,9 @@ fn cancel_effect_inner(
         // Never dispatched (for example, still waiting on a dependency).
         return Ok(false);
     };
+    if created.kind == EntityKind::WorkOrder || matches!(action, Action::CreateWorkOrder { .. }) {
+        crate::effect_quiescence::validate_reference_work_identity(snapshot, action, id)?;
+    }
     match field_text(created, field, snapshot.tick) {
         Some(value) if active.contains(&value) => {}
         Some(STATUS_COMPLETE | STATUS_CANCELLED) => return Ok(false),
@@ -1718,21 +1721,7 @@ impl EffectTimeline {
                     validate_condition_text(job)?;
                     budget.charge(64)?;
                     carpentry::validate_active_inventory(snapshot, record)?;
-                    let work = field_u64(record, "work_ticks", snapshot.tick)?;
-                    let remaining = field_u64(record, AMOUNT_REMAINING_FIELD, snapshot.tick)?;
-                    if work >= WORK_ORDER_TICKS_PER_UNIT || remaining == 0 {
-                        return Err(precondition(
-                            "active work order has noncanonical progress counters",
-                        ));
-                    }
-                    if staffed
-                        && work_order_requirements(job).is_some()
-                        && remaining > field_u64(record, "amount_total", snapshot.tick)?
-                    {
-                        return Err(precondition(
-                            "staffed production has noncanonical amount counters",
-                        ));
-                    }
+                    validate_finite_order_progress(record, snapshot.tick)?;
                     let conditions = match field_value(record, WORK_ORDER_CONDITIONS_FIELD, snapshot.tick) {
                         Some(stored) => match decode_conditions(stored) {
                             Ok(conditions) => ConditionRecord::Known(conditions),
@@ -2511,6 +2500,33 @@ enum ProductionGate {
     Blocked(String),
 }
 
+/// The reference engine dispatches finite, generation-one work orders. Check
+/// their qualified physical counters wherever retained state supplies evidence,
+/// including a terminal predecessor that is no longer on the active timeline.
+pub(crate) fn validate_finite_order_progress(order: &EntityRecord, tick: GameTick) -> Result<&str> {
+    let total = field_u64(order, "amount_total", tick)?;
+    let remaining = field_u64(order, AMOUNT_REMAINING_FIELD, tick)?;
+    let partial = field_u64(order, "work_ticks", tick)?;
+    if order.kind != EntityKind::WorkOrder
+        || order.generation != 1
+        || total == 0
+        || total > u64::from(u32::MAX)
+        || remaining > total
+        || partial >= WORK_ORDER_TICKS_PER_UNIT
+    {
+        return Err(precondition(
+            "finite work order requires its original generation and bounded total, remaining and partial work",
+        ));
+    }
+    match field_text(order, STATUS_FIELD, tick) {
+        Some(status @ (STATUS_ACTIVE | STATUS_CANCELLED)) if remaining > 0 => Ok(status),
+        Some(STATUS_COMPLETE) if remaining == 0 && partial == 0 => Ok(STATUS_COMPLETE),
+        _ => Err(precondition(
+            "finite work-order lifecycle disagrees with its remaining or partial work",
+        )),
+    }
+}
+
 fn completed_order_blocker(
     snapshot: &WorldSnapshot,
     dependent: EntityId,
@@ -2544,9 +2560,7 @@ fn completed_order_blocker(
             "completed order {name:?} refers to this work order itself"
         ));
     }
-    if field_text(order, STATUS_FIELD, snapshot.tick) != Some(STATUS_COMPLETE)
-        || field_value(order, AMOUNT_REMAINING_FIELD, snapshot.tick) != Some(&Value::U64(0))
-    {
+    if validate_finite_order_progress(order, snapshot.tick).ok() != Some(STATUS_COMPLETE) {
         return Some(format!(
             "order {name:?} completion with zero remaining work is not established"
         ));

@@ -1,0 +1,1 @@
+The reference timeline and physical-work inspection reject inconsistent retained work-order counters. All 293 dfmcp-intent library tests passed in the isolated component workspace, including regressions for overproduction, cancellation and dependent orders. Owns part of df-lab-conditional-production-c4p and df-predicate-evidence-authority-r7m.
