@@ -8,6 +8,7 @@ use dfmcp_world::WorldSnapshot;
 use serde::{Deserialize, Deserializer, Serialize};
 
 pub(super) const CURRENT_PLANNER: &str = "furnished_blueprint_v2";
+const WORKSHOP_PLANNER: &str = "equipped_workshop_hub_v1";
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(tag = "template", rename_all = "snake_case", deny_unknown_fields)]
@@ -42,6 +43,12 @@ enum Request {
             deserialize_with = "present",
             skip_serializing_if = "Option::is_none"
         )]
+        workshops: Option<Vec<String>>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
         planner: Option<String>,
     },
     StockpileVault {
@@ -58,11 +65,12 @@ enum Request {
     },
 }
 
-fn present<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
+fn present<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
 where
     D: Deserializer<'de>,
+    T: Deserialize<'de>,
 {
-    String::deserialize(deserializer).map(Some)
+    T::deserialize(deserializer).map(Some)
 }
 
 fn invalid(message: impl Into<String>) -> DfmcpError {
@@ -88,6 +96,21 @@ impl Request {
         }
     }
 
+    fn workshops(&self) -> Option<&[String]> {
+        match self {
+            Self::WorkshopHub { workshops, .. } => workshops.as_deref(),
+            _ => None,
+        }
+    }
+
+    fn current_planner(&self) -> &'static str {
+        if self.workshops().is_some() {
+            WORKSHOP_PLANNER
+        } else {
+            CURRENT_PLANNER
+        }
+    }
+
     fn json(&self) -> Result<String> {
         let encoded = serde_json::to_string(self)
             .map_err(|error| invalid(format!("cannot encode blueprint source: {error}")))?;
@@ -106,6 +129,18 @@ impl Request {
         // representation cannot hide duplicate fields or a null planner marker.
         let mut geometry = self.clone();
         *geometry.planner_mut() = None;
+        if let Self::WorkshopHub {
+            bays, workshops, ..
+        } = &mut geometry
+            && let Some(names) = workshops.take()
+        {
+            if names.len() != *bays as usize {
+                return Err(invalid(
+                    "workshop_hub requires exactly one workshop per bay",
+                ));
+            }
+            BlueprintPlanner::validate_workshop_hub(&names)?;
+        }
         crate::lab_world::parse_blueprint(&geometry.json()?)
     }
 }
@@ -128,14 +163,16 @@ pub(super) fn canonical_current(raw: &str) -> Result<String> {
     if request
         .planner()
         .as_deref()
-        .is_some_and(|planner| planner != CURRENT_PLANNER)
+        .is_some_and(|planner| planner != request.current_planner())
     {
-        return Err(invalid(
-            "ordinary blueprint requires furnished_blueprint_v2",
-        ));
+        return Err(invalid(format!(
+            "ordinary blueprint requires {}",
+            request.current_planner()
+        )));
     }
     request.geometry()?;
-    *request.planner_mut() = Some(CURRENT_PLANNER.to_owned());
+    let planner = request.current_planner();
+    *request.planner_mut() = Some(planner.to_owned());
     request.json()
 }
 
@@ -146,13 +183,26 @@ pub(super) fn compile(id: IntentId, snapshot: &WorldSnapshot, raw: &str) -> Resu
     if request
         .planner()
         .as_deref()
-        .is_some_and(|planner| planner != CURRENT_PLANNER)
+        .is_some_and(|planner| planner != request.current_planner())
     {
         return Err(invalid("stored blueprint names an unsupported compiler"));
     }
     let (origin, template) = request.geometry()?;
+    if request.workshops().is_some() && request.planner().is_none() {
+        return Err(invalid(
+            "stored equipped workshop hub lacks its planner identity",
+        ));
+    }
     let index = crate::lab_world::spatial_index(snapshot)?;
-    if request.planner().is_none() {
+    if let Some(workshops) = request.workshops() {
+        BlueprintPlanner.compile_workshop_hub_intent(
+            id,
+            snapshot.anchor(),
+            origin,
+            workshops,
+            &index,
+        )
+    } else if request.planner().is_none() {
         BlueprintPlanner.compile_furnished_blueprint_intent_legacy(
             id,
             snapshot.anchor(),

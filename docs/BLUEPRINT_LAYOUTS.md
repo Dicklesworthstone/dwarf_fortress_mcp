@@ -44,8 +44,30 @@ require one completed bed in each room; dining halls require a completed table
 and chair. Their original goal requires all excavation plus the exact generated
 building identities, kinds, positions, footprints and completed construction
 stages. Finishing excavation alone cannot mark a furnished goal achieved.
-Workshops and stockpile vaults retain excavation-only semantics; their templates
-do not request workshop construction or stockpile configuration.
+An ordinary `workshop_hub` can also construct production facilities. Supply one
+registered workshop per bay in west-to-east order. This example creates a still,
+kitchen and carpenter's workshop in the laboratory.
+
+```json
+{
+  "template": "workshop_hub",
+  "origin": [2, 6, 10],
+  "bays": 3,
+  "workshops": ["workshop:Still", "workshop:Kitchen", "workshop:Carpenters"]
+}
+```
+
+Each build follows excavation of its own bay and occupies the middle 3x3 tiles
+of a 5x5 room. The original goal requires all excavations and every specified
+workshop's exact identity, kind, location, footprint and completed stage.
+Repeated workshop kinds create distinct facilities. The list accepts 1..20
+entries within the 64-action limit. The ordinary planning checks for guarded
+construction, active material models and shared labor apply. Production orders
+remain separately reviewed actions.
+
+Requests with a workshop list retain the `equipped_workshop_hub_v1` compiler
+marker. Omitting the list retains the excavation-only workshop template. A
+stockpile vault continues to request excavation for the named category.
 
 New ordinary requests leave synthetic step deadlines to the planner. On a
 `shared-workforce/1` scenario, its conservative deadline floor includes queued

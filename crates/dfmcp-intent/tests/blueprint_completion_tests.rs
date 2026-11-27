@@ -407,3 +407,51 @@ fn legacy_furnished_sources_keep_exact_excavation_goals_and_deadlines() -> TestR
     );
     Ok(())
 }
+
+#[test]
+fn equipped_hub_requires_each_distinct_workshop_in_its_own_completed_bay() -> TestResult {
+    let mut world = source(false)?;
+    let workshops = [
+        "workshop:Still".to_owned(),
+        "workshop:Carpenters".to_owned(),
+        "workshop:Still".to_owned(),
+    ];
+    let intent = BlueprintPlanner.compile_workshop_hub_intent(
+        IntentId::new(501),
+        world.anchor(),
+        MapCoord::new(2, 6, 10),
+        &workshops,
+        &index(&world)?,
+    )?;
+    let plan = prepare(&world, &intent)?;
+    let (dig, builds) = plan.steps.split_at(8);
+    assert_eq!(builds.len(), 3);
+    for step in dig {
+        dispatch(&mut world, &step.action, &step.idempotency_key)?;
+    }
+    advance(&mut world, 250)?;
+    for step in dig {
+        assert!(established(&world, &step.postconditions[0])?);
+    }
+    for (i, step) in builds.iter().enumerate() {
+        assert!(!established(&world, &plan.terminal_condition)?);
+        dispatch(&mut world, &step.action, &step.idempotency_key)?;
+        advance(&mut world, effects::BUILD_TICKS)?;
+        let id = effects::created_entity_id(&step.idempotency_key, 0);
+        let record = world.graph.entities.get(&id).ok_or("missing workshop")?;
+        assert_eq!(
+            record.fields["building_kind"].value,
+            Value::Text(workshops[i].clone())
+        );
+        assert_eq!(
+            record.fields["footprint_min"].value,
+            Value::Coord(MapCoord::new(3 + 6 * i as i32, 7, 10))
+        );
+        assert_eq!(
+            record.fields["footprint_max"].value,
+            Value::Coord(MapCoord::new(5 + 6 * i as i32, 9, 10))
+        );
+    }
+    assert!(established(&world, &plan.terminal_condition)?);
+    Ok(())
+}

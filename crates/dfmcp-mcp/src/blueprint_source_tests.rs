@@ -104,6 +104,20 @@ fn durable_ordinary_sources_keep_their_original_compiler_and_exact_goal() -> Tes
 
 #[test]
 fn public_ordinary_blueprint_wait_does_not_achieve_goal_before_furniture() -> TestResult {
+    verify_construction_wait(room(), CURRENT_PLANNER, 90)
+}
+
+#[test]
+fn public_workshop_hub_wait_requires_the_new_workshop_after_excavation() -> TestResult {
+    verify_construction_wait(
+        json!({"template":"workshop_hub", "origin":[2,6,10], "bays":1,
+            "workshops":["workshop:Still"]}),
+        WORKSHOP_PLANNER,
+        250,
+    )
+}
+
+fn verify_construction_wait(request: Value, marker: &str, dig_ticks: u64) -> TestResult {
     let _serial = crate::test_serial();
     let opened = parsed(&facade::fortress_open_session(
         Some(false),
@@ -142,7 +156,7 @@ fn public_ordinary_blueprint_wait_does_not_achieve_goal_before_furniture() -> Te
         None,
         None,
         None,
-        Some(room().to_string()),
+        Some(request.to_string()),
     ))?;
     assert_eq!(planned["ok"], true, "{planned}");
     let digest = planned["plan_digest"]
@@ -157,14 +171,17 @@ fn public_ordinary_blueprint_wait_does_not_achieve_goal_before_furniture() -> Te
         else {
             return Err("ordinary blueprint source missing".into());
         };
-        assert_eq!(parsed(raw)?["planner"], CURRENT_PLANNER);
+        assert_eq!(parsed(raw)?["planner"], marker);
     }
     let committed = parsed(&facade::fortress_commit(
         Some(session_id.clone()),
         digest.clone(),
     ))?;
     assert_eq!(committed["ok"], true, "{committed}");
-    let excavated = parsed(&facade::fortress_wait(Some(session_id.clone()), Some(90)))?;
+    let excavated = parsed(&facade::fortress_wait(
+        Some(session_id.clone()),
+        Some(dig_ticks),
+    ))?;
     assert_eq!(excavated["ok"], true, "{excavated}");
     {
         let guard = session.lock().map_err(|_| "session poisoned")?;
@@ -180,8 +197,98 @@ fn public_ordinary_blueprint_wait_does_not_achieve_goal_before_furniture() -> Te
     assert!(
         details["achieved_tick"]
             .as_u64()
-            .is_some_and(|tick| tick >= 590),
+            .is_some_and(|tick| tick >= dig_ticks + 500),
         "{details}"
     );
+    Ok(())
+}
+
+#[test]
+fn equipped_workshop_hubs_seal_the_ordered_builds_and_restore_their_exact_goal() -> TestResult {
+    use dfmcp_intent::{Action, BuildingKind};
+
+    let snapshot =
+        crate::lab_world::scenario_snapshot("starter_fortress", FortressId::new(459_103), false)?;
+    let request = json!({
+        "template":"workshop_hub", "origin":[2,6,10], "bays":3,
+        "workshops":["workshop:Still", "workshop:Kitchen", "workshop:Carpenters"]
+    });
+    let raw = canonical_current(&request.to_string())?;
+    assert_eq!(canonical_current(&raw)?, raw);
+    assert_eq!(parsed(&raw)?["planner"], WORKSHOP_PLANNER);
+    let source = PlanSource::Blueprint {
+        summary: "Equip workshops".to_owned(),
+        raw,
+    };
+    let id = IntentId::new(502);
+    let intent = source.intent(id, &snapshot)?;
+    assert_eq!(intent.requested_actions.len(), 11);
+    assert_eq!(
+        PlanSource::from_durable(&source.durable()).intent(id, &snapshot)?,
+        intent
+    );
+    for (i, name) in ["Still", "Kitchen", "Carpenters"].into_iter().enumerate() {
+        let build = &intent.requested_actions[8 + i];
+        let Action::Build {
+            kind,
+            location,
+            footprint,
+            ..
+        } = &build.action
+        else {
+            return Err("missing workshop construction".into());
+        };
+        assert_eq!(*kind, BuildingKind::Workshop(name.to_owned()));
+        let x = 2 + 6 * i as i32;
+        assert_eq!(*location, dfmcp_core::MapCoord::new(x + 2, 8, 10));
+        assert_eq!(footprint.min, dfmcp_core::MapCoord::new(x + 1, 7, 10));
+        assert_eq!(footprint.max, dfmcp_core::MapCoord::new(x + 3, 9, 10));
+        assert_eq!(build.depends_on.len(), 1);
+        let Action::DesignateDig { area, .. } =
+            intent.requested_actions[build.depends_on[0] as usize].action
+        else {
+            return Err("workshop lacks its excavation prerequisite".into());
+        };
+        assert!(area.contains(footprint.min) && area.contains(footprint.max));
+        let dfmcp_world::Predicate::All(required) = &intent.terminal_condition else {
+            return Err("expected complete workshop goal".into());
+        };
+        assert_eq!(build.postconditions.len(), 6);
+        assert!(
+            build
+                .postconditions
+                .iter()
+                .all(|proof| required.contains(proof))
+        );
+    }
+
+    // Neither an unversioned stored source nor the previous compiler can
+    // silently acquire the new effect family during recovery.
+    assert!(compile(id, &snapshot, &request.to_string()).is_err());
+    let mut wrong = request.clone();
+    wrong["planner"] = json!(CURRENT_PLANNER);
+    assert!(canonical_current(&wrong.to_string()).is_err());
+    assert!(compile(id, &snapshot, &wrong.to_string()).is_err());
+    for workshops in [
+        json!([]),
+        json!(null),
+        json!(["workshop:Still"]),
+        json!(["workshop:Still", "workshop:Kitchen", "workshop:Forge"]),
+    ] {
+        wrong = request.clone();
+        wrong["workshops"] = workshops;
+        assert!(canonical_current(&wrong.to_string()).is_err());
+    }
+    let bare = json!({"template":"workshop_hub", "origin":[2,6,10], "bays":3});
+    for source in [bare.to_string(), canonical_current(&bare.to_string())?] {
+        let previous = compile(id, &snapshot, &source)?;
+        assert_eq!(previous.requested_actions.len(), 8);
+        assert!(
+            previous
+                .requested_actions
+                .iter()
+                .all(|step| matches!(step.action, Action::DesignateDig { .. }))
+        );
+    }
     Ok(())
 }

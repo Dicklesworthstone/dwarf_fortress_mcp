@@ -230,6 +230,91 @@ impl BlueprintPlanner {
 const MAX_HAZARD_TILES: u64 = 131_072;
 
 impl BlueprintPlanner {
+    /// Validate the workshop list without inspecting terrain or constructing actions.
+    pub fn validate_workshop_hub(workshops: &[String]) -> Result<()> {
+        // Two excavations and one build per bay, plus the corridor and spine.
+        let count = workshops.len();
+        if count == 0 || count > (layout::MAX_BLUEPRINT_ACTIONS - 2) / 3 {
+            return Err(invalid(
+                "equipped workshop hubs require 1..20 workshop bays",
+            ));
+        }
+        if workshops.iter().any(|kind| {
+            !matches!(
+                kind.as_str(),
+                "workshop:Still" | "workshop:Kitchen" | "workshop:Carpenters"
+            )
+        }) {
+            return Err(invalid(
+                "workshop hubs accept workshop:Still, workshop:Kitchen and workshop:Carpenters",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Excavate a row of 5x5 bays and construct one registered production
+    /// workshop in the central 3x3 of each bay, in the requested west-east order.
+    pub fn compile_workshop_hub_intent(
+        &self,
+        intent_id: IntentId,
+        anchor: StateAnchor,
+        origin: MapCoord,
+        workshops: &[String],
+        spatial_index: &ChunkSpatialIndex,
+    ) -> Result<Intent> {
+        Self::validate_workshop_hub(workshops)?;
+        let count = workshops.len();
+        let layout = self.layout(
+            origin,
+            BlueprintTemplate::WorkshopHub {
+                bays_count: count as u32,
+            },
+        )?;
+        let mut intent =
+            self.compile_layout_intent(intent_id, anchor, &layout, spatial_index, None)?;
+        let mut terminal = vec![intent.terminal_condition];
+        let bays = layout
+            .excavations()
+            .iter()
+            .enumerate()
+            .filter(|(_, part)| part.role == ExcavationRole::Room);
+        for ((index, part), workshop) in bays.zip(workshops) {
+            let offset = |distance| {
+                checked_coord_offset(part.area.min, distance, distance, 0)
+                    .ok_or_else(|| invalid("workshop footprint coordinate overflow"))
+            };
+            let subtype = workshop
+                .strip_prefix("workshop:")
+                .ok_or_else(|| invalid("expected workshop kind"))?;
+            let action = Action::Build {
+                kind: crate::BuildingKind::Workshop(subtype.to_owned()),
+                location: offset(2)?,
+                footprint: MapCuboid::new(offset(1)?, offset(3)?)?,
+                material: crate::MaterialSelector::default(),
+            };
+            let key = crate::derive_step_idempotency_key(
+                intent_id,
+                anchor,
+                StepId::new(intent.requested_actions.len() as u32),
+                &action,
+            );
+            let proof = furnishing_goal(&action, &key, anchor);
+            terminal.extend(proof.iter().cloned());
+            intent.requested_actions.push(RequestedAction {
+                action,
+                preconditions: Vec::new(),
+                postconditions: proof,
+                compensation: None,
+                obligation: None,
+                depends_on: vec![index as u32],
+            });
+        }
+        intent.summary = format!("excavate and equip {count} workshop bays");
+        intent.terminal_condition = Predicate::All(terminal).normalized();
+        intent.terminal_condition.validate_shape()?;
+        Ok(intent)
+    }
+
     /// Compile a blueprint and furnish its rooms: a bed in every bedroom, and a
     /// table with a chair in a dining hall. The original goal requires both the
     /// complete terrain and each exact completed furnishing. Omitted obligations
