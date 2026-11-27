@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Discover retained action and obligation progress
+
+- Add a bounded session work catalog and independently addressable action and
+  obligation resources, available without MCP Tasks.
+- Preserve exact original-plan custody and keep historical proof, physical
+  progress, recovery and next eligible monitor observations separate.
+- Pin pages and details to complete current progress, including cancellation
+  without a clock change; enforce current authority and immutable reads.
+- Add nine resource regressions and document discovery, pagination and recovery.
+
 ## Unreleased — Keep excavation and room plans grounded in observed terrain
 
 - Reject excavation that would create ground from void or erase unsupported,

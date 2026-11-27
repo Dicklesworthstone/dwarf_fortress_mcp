@@ -39,6 +39,7 @@ pub(crate) mod goals;
 pub(crate) mod plans;
 mod replay;
 pub(crate) mod state;
+pub(crate) mod work;
 
 /// One template serves every session view. The pinned fastmcp router admits
 /// at most one template per compatible leading literal (`df://session/`), so
@@ -46,7 +47,7 @@ pub(crate) mod state;
 /// `view` capture keeps the documented URIs exactly.
 const SESSION_VIEW_TEMPLATE: &str = "df://session/{session_id}/{view}";
 /// Views served under `df://session/{session_id}/{view}`.
-pub const SESSION_VIEWS: [&str; 9] = [
+pub const SESSION_VIEWS: [&str; 10] = [
     "summary",
     "capabilities",
     "handoff",
@@ -56,6 +57,7 @@ pub const SESSION_VIEWS: [&str; 9] = [
     "state",
     "plans",
     "checkpoints",
+    "work",
 ];
 const DOCTOR_BUNDLE_TEMPLATE: &str = "df://doctor/{session_id}";
 
@@ -411,6 +413,7 @@ pub(crate) fn session_handoff(session_id_hex: &str, uri: &str) -> McpResult<Vec<
         }
         let mut payload = crate::server::handoff_json(guard);
         payload["resource"] = json!(uri);
+        payload["work_catalog"] = json!(format!("df://session/{}/work", guard.session_id));
         Ok(text_content(uri, payload.to_string()))
     })
 }
@@ -789,7 +792,10 @@ const SESSION_VIEW_DESCRIPTION: &str = "Session views: summary (bounded snapshot
      (retained original goal source and historical custody, with exact source pages; \
      requires current whole-fortress observe and query), checkpoints (retained laboratory recovery metadata), \
      checkpoints-{catalog_digest}~{offset} (exact catalog continuation), checkpoint-{checkpoint_id} \
-     (one retained checkpoint and its original state; current whole-fortress observe required; no restore authority)";
+     (one retained checkpoint and its original state; current whole-fortress observe required; no restore authority), \
+     work and work-{catalog_digest}~{offset} (bounded retained live and recovered work, independent of MCP Tasks), \
+     action-{progress_digest} and obligation-{progress_digest} (exact retained proof and separate physical progress; \
+     current whole-fortress observe and query required; no polling or dispatch authority)";
 
 impl ResourceHandler for SessionViewResource {
     fn definition(&self) -> Resource {
@@ -855,6 +861,9 @@ impl ResourceHandler for SessionViewResource {
                 plans::read(raw, uri, plan)
             }
             goal if goal.starts_with("goal-") => goals::read(raw, uri, goal),
+            "work" => work::read(raw, uri, view),
+            progress if progress.starts_with("work-") || progress.starts_with("action-")
+                || progress.starts_with("obligation-") => work::read(raw, uri, progress),
             page if page.starts_with("tasks-") => {
                 let offset = page[6..].parse::<usize>().map_err(|_| {
                     McpError::invalid_params("task page offset must be a nonnegative integer")
@@ -1195,7 +1204,8 @@ mod tests {
                 "tasks",
                 "state",
                 "plans",
-                "checkpoints"
+                "checkpoints",
+                "work"
             ]
         );
         let doctor = DoctorBundleResource.template().expect("doctor template");

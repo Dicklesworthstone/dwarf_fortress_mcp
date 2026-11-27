@@ -1,5 +1,11 @@
 # Implementation Status
 
+## Unreleased — Inspect retained actions and obligations through resources
+
+Session work catalogs and exact action/obligation details now expose original
+custody, retained proof and separate physical progress without MCP Tasks or
+monitor sampling. See [implementation and verification scope](IMPLEMENTATION_STATUS.d/retained-work-resources.md).
+
 ## Unreleased — Preserve real terrain through excavation and room planning
 
 Excavation and blueprint compilation share a closed source-to-target rule,

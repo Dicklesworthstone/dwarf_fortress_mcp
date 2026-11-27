@@ -52,6 +52,10 @@ continuity metadata immutable.
 | `tasks`, `tasks-{offset}` | Bounded modern task discovery |
 | `task-{task_id}` | Original plan progress, cancellation drain, and final evidence |
 | `task-{task_id}~evidence-{offset}` | Digest-checked UTF-8 pages of retained task evidence |
+| `work` | Bounded retained live-action and recovered-step progress, independent of MCP Task opt-in |
+| `work-{catalog_digest}~{offset}` | Continuation pinned to the complete retained progress catalog and current anchor |
+| `action-{progress_digest}` | Exact retained action receipt or recovered original-step progress, with separate physical-work state |
+| `obligation-{progress_digest}` | That step's original temporal requirements, last retained monitor status and next eligible observation tick |
 | `state` | Current immutable-world manifest, including section counts and exact-version page URIs |
 | `state-{state_hash}` | Manifest of precisely that retained world version |
 | `state-{state_hash}~{section}~{offset}` | Bounded canonical records from precisely that retained version |
@@ -87,6 +91,81 @@ the replay CLI. Version 3 adds [explicit semantic result coverage](LAB_REPLAY_RE
 The same read authority is required for each page. A changed
 transcript gives `cursor_gap` and requires a fresh read of `replay`.
 The full source still has to fit the session's record, byte and time budgets.
+
+## Inspecting work without MCP Tasks
+
+Read `df://session/{session_id}/work` to discover retained live receipts and
+recovered original steps. The handoff resource also supplies this address as
+`work_catalog`. Ordinary commits need no MCP Task opt-in to appear here. A
+fresh agent can inspect ongoing excavation, deferred dependencies, historical
+terminal receipts and recovered work without finding old action IDs in the
+conversation or starting a background task.
+
+The `dfmcp.lab-work-catalog/1` response orders rows by original plan digest,
+step ID and exact progress digest. A row carries its original semantic plan
+digest and typed archive object digest when available, the original step ID,
+source kind, action kind, receipt/proof state and proof anchor, and a separate
+`physical_work` record. Its `action` link resolves to
+`dfmcp.lab-action-progress/1`. Temporal steps also have an `obligation` link
+to `dfmcp.lab-obligation-progress/1`. Missing original custody remains explicit
+as `original_unavailable`; the resource does not infer a missing obligation
+specification from current game state. Contradictory retained originals refuse
+with `corrupt_ledger`.
+
+Read these distinct facts together:
+
+| Field | Meaning |
+| --- | --- |
+| `proof_state`, `proof_terminal`, `proof_anchor` | Last retained action or recovered-step proof, at its own observation frontier |
+| `physical_work.state`, `physical_work.observed_anchor`, `physical_work.current` | Physical work inspection, with explicit freshness relative to `current_anchor` |
+| `physical_work.quiescent` | True or false when known; null when physical state is unknown |
+| `obligation.monitor` | Last retained reference-runtime status, including stability streak, failure or fulfillment evidence |
+| `obligation.next_observation_tick` | Next eligible sample of an active retained monitor; a scheduling hint, never a clock grant |
+| `owner_session_id`, `owned_by_current_session` | Original goal ownership when known; shared-world visibility does not transfer ownership |
+| `current_goal_truth` | Always `not_evaluated` by these resources |
+
+A failed or verified proof can coexist with running physical work. A cancelled
+deferred step can be terminal without ever having dispatched. Inspection does
+not turn either situation into proof of current goal achievement or complete
+fortress quiescence. Detail responses link the exact original plan and original
+goal source for further inspection; effectful wait, cancellation and continuation
+remain separately authorized semantic tool calls.
+
+Recovered rows use `source: "recovered_original_step"` and `action_id: null`.
+Their identity remains the original plan and step; recovery does not create a
+replacement ActionId. Details distinguish retained proof, recovery, last monitor
+observation and physical-work anchors. An unfinished obligation begins with its
+post-recovery stability streak, preserving the original absolute deadline and
+cadence. The archived frontier is not a positive observation. Reads neither
+register nor observe monitors and never reset or advance their streaks.
+Historical physical state remains explicitly noncurrent when the world has
+advanced beyond its retained inspection anchor.
+
+Catalog pages contain at most eight intact rows and shrink to the complete
+escaped response allowance. Follow `next` until null; `complete` means the end
+of this retained catalog, while `complete_catalog` additionally requires offset
+zero. Continuation hashes bind every progress record, the inspecting session
+and the complete current anchor. Detail hashes additionally bind all retained
+receipt, monitor, recovery and physical-progress fields and the exact original
+typed object. Cancelling a deferred step invalidates its old handle even if
+the world anchor does not change. Any changed source or current anchor returns
+`cursor_gap`; refresh `work` instead of joining two generations. Handles pin no
+retention and confer no dispatch authority.
+
+Every page and detail rechecks the durable-owner fence and current
+whole-fortress Observe **and** Query grants before inspecting existence. Reads
+charge the complete current world, retained source index, original typed plans,
+steps, receipt evidence and monitor metadata even when returning a small page.
+The negotiated record and byte budgets, a 16 MiB complete-source ceiling, and
+one wall deadline apply through projection and full escaped-response accounting.
+Oversized indivisible rows or details refuse instead of dropping evidence.
+Resource reads create no observations, requests, task handles, goal achievements,
+replay events or durable writes.
+
+Coverage is limited to retained work visible in the authorized session view,
+including peer-owned originals in a shared world. Uncommitted pending reviews,
+untracked fortress work, collected receipts and current goal truth are outside
+that boundary. An empty catalog does not prove absence of work in the fortress.
 
 ## Reading an immutable world
 
@@ -396,7 +475,8 @@ resource semantics described above.
 
 ## Bounds, retention, and refusals
 
-A page starts with at most 25 records and reduces its row count to fit the
+A state, plan or checkpoint page starts with at most 25 records; a work page
+starts with at most eight. Each reduces its row count to fit the
 minimum of the session byte budget, four bytes per output token, and a 60,000
 byte resource transport ceiling. Measurement includes the escaped inner JSON,
 resource wrapper, and reserved JSON-RPC envelope space, including the pinned
@@ -449,11 +529,23 @@ retrieval. Session `goal` detail/source pages provide independently bounded
 original requests and historical custody. Session `anchor`, `handoff`, and task evidence provide useful views of
 identity and active work, but do not claim implementation of
 every planned independently addressable receipt or cognition resource.
+Session `work`, `action` and `obligation` now provide independently bounded
+retained progress without MCP Task opt-in; fortress-only action and obligation
+URIs remain unregistered.
 Session checkpoint catalog/detail now supplies passive recovery-point discovery;
 fortress-only checkpoint URIs remain unregistered. Knowledge and memory URIs still have no registered resource consumer.
 The `.11` roadmap bead consequently remains open.
 
 ## Verification
+
+The work-resource tests use the actual planning/commit/wait/cancel facade and
+registered resource handler. They cover active, deferred, terminal and recovered
+progress, unchanged monitor/custody state on reads, failed proof with continuing
+physical work, same-anchor cancellation, stale anchor and foreign-session pins,
+lossless catalog traversal, current full-grant denial before existence, complete
+source/output limits and a late wall deadline. Execution results are recorded
+separately in the implementation status; the older qualification receipt below
+does not cover this consumer.
 
 The goal-resource tests exercise the actual public planning/commit facade and
 registered session resource handler, including lossless default-budget source

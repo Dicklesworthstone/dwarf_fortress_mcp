@@ -347,6 +347,18 @@ impl MemoryAdapter {
         self.actions.get(&action_id).map(|action| &action.receipt)
     }
 
+    /// Borrow the reference runtime's last retained temporal-proof status.
+    /// This never registers a monitor, samples the world, or advances a proof.
+    /// Deferred and non-temporal actions have no retained obligation status.
+    #[must_use]
+    pub fn action_obligation_status(&self, action_id: ActionId) -> Option<&ObligationStatus> {
+        self.actions
+            .get(&action_id)?
+            .obligation_runtime
+            .as_ref()?
+            .get_status(action_id)
+    }
+
     /// Next eligible sample for an already-dispatched active temporal proof.
     /// This is a read-only scheduling hint, not a poll or clock grant. Deferred
     /// actions have no monitor until their actual authorized dispatch, while

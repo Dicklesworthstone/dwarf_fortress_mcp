@@ -1033,6 +1033,10 @@ df://session/{id}/replay
 df://session/{id}/anchor
 df://session/{id}/tasks
 df://session/{id}/task-{task_id}
+df://session/{id}/work
+df://session/{id}/work-{catalog_digest}~{offset}
+df://session/{id}/action-{progress_digest}
+df://session/{id}/obligation-{progress_digest}
 df://session/{id}/entity-{entity_id}~{generation}~{anchor_digest}
 
 df://session/{id}/state
@@ -1078,6 +1082,19 @@ fallback. The resource enforces the negotiated byte and token bounds including
 the resource wrapper; an oversized record is refused without silent field loss.
 Inspection preserves semantic request IDs and does not certify objectives,
 retain versions or run the durable-persistence postlude, including after denial.
+
+The session `work` catalog and action/obligation details expose retained live
+receipts and recovered original steps independently of MCP Task opt-in. Current
+whole-fortress Observe and Query authority precede existence checks. Bounded
+pages and exact progress handles bind the inspecting session, complete current
+anchor, original typed-plan object and retained progress; same-anchor proof
+changes invalidate old handles too. Proof state and its observation anchor stay
+separate from physical work and its freshness. Failed or verified proof does
+not imply physical quiescence or current goal truth. Recovered rows retain
+original plan/step identity with no replacement ActionId, original deadlines
+and post-recovery stability. Reads never poll monitors, advance time, create
+tasks or publish durable custody. Handoff supplies the work catalog link;
+details retain original ownership metadata for shared-world visibility.
 
 Retained laboratory checkpoints are discoverable through `checkpoints` and its
 catalog-pinned pages. Exact detail preserves retained labels, checkpoint IDs,
