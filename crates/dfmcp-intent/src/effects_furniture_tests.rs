@@ -263,6 +263,36 @@ fn original_furniture_inventory_survives_an_unrelated_default_ledger() -> Result
 }
 
 #[test]
+fn ordinary_build_cannot_cancel_an_exact_furniture_placement() -> Result<()> {
+    let mut snapshot = world()?;
+    let item = produce(&mut snapshot, FurnitureKind::Bed, 1, "bed-supply")?[0];
+    let placement = place(FurnitureKind::Bed, item, TARGET);
+    apply(&mut snapshot, &placement, "install-bed")?;
+    let mut material = crate::MaterialSelector::default();
+    material.required_tokens.insert("WOOD".to_owned());
+    let ordinary = Action::Build {
+        kind: BuildingKind::Furniture("Bed".to_owned()),
+        location: TARGET,
+        footprint: MapCuboid::new(TARGET, TARGET)?,
+        material,
+    };
+    let before = snapshot.clone();
+    assert!(
+        cancel_effect(&mut snapshot, &ordinary, "install-bed")
+            .is_err_and(|error| error.code == ErrorCode::PreconditionsFailed)
+    );
+    assert_eq!(snapshot, before);
+    assert!(cancel_effect(&mut snapshot, &placement, "install-bed")?);
+    assert_eq!(count(&snapshot, STOCK_BED_FIELD)?, 1);
+    assert_eq!(
+        loose_furniture_items(&snapshot, FurnitureKind::Bed)?,
+        vec![item]
+    );
+    assert!(!cancel_effect(&mut snapshot, &placement, "install-bed")?);
+    Ok(())
+}
+
+#[test]
 fn inventory_replacement_refuses_placement_progress_and_refund_without_writes() -> Result<()> {
     for phase in 0..3 {
         for variant in 0..4 {

@@ -171,7 +171,7 @@ fn reference_item(
     Ok(owner)
 }
 
-pub(super) fn has_placement_fields(record: &EntityRecord) -> bool {
+pub(crate) fn has_placement_fields(record: &EntityRecord) -> bool {
     [
         FURNITURE_PLACEMENT_MODEL_FIELD,
         FURNITURE_SOURCE_ITEM_FIELD,

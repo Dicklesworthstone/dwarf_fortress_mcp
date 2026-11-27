@@ -1886,6 +1886,91 @@ fn ineligible_resource_quantities_are_not_reissued_as_reference_stock() -> Resul
 }
 
 #[test]
+fn ordinary_cancellation_requires_its_original_work_and_preserves_idempotency() -> Result<()> {
+    let key = "ordinary-cancellation";
+    let id = created_entity_id(key, 0);
+    for (action, _) in temporal_cases()? {
+        let mut original = world();
+        assert!(!cancel_effect(&mut original, &action, key)?);
+        apply_effect(&mut original, &action, key)?;
+        let mut substituted = action.clone();
+        match &mut substituted {
+            Action::CreateWorkOrder { amount, .. } => *amount += 1,
+            Action::Build { location, .. } => location.y += 1,
+            Action::DesignateDig { area, .. } => area.max.x += 1,
+            _ => return Err(precondition("unexpected temporal test action")),
+        }
+        let before = original.clone();
+        assert!(
+            cancel_effect(&mut original, &substituted, key)
+                .is_err_and(|error| error.code == ErrorCode::PreconditionsFailed)
+        );
+        assert_eq!(original, before);
+
+        for replace_kind in [false, true] {
+            let mut replaced = before.clone();
+            let record = replaced.graph.entities.get_mut(&id).unwrap();
+            if replace_kind {
+                record.kind = EntityKind::Item;
+            } else {
+                record.generation += 1;
+            }
+            let before = replaced.clone();
+            assert!(
+                cancel_effect(&mut replaced, &action, key)
+                    .is_err_and(|error| error.code == ErrorCode::PreconditionsFailed)
+            );
+            assert_eq!(replaced, before);
+        }
+        assert!(cancel_effect(&mut original, &action, key)?);
+        let stopped = original.clone();
+        assert!(!cancel_effect(&mut original, &action, key)?);
+        assert_eq!(original, stopped);
+    }
+    Ok(())
+}
+
+#[test]
+fn ordinary_build_cancellation_honors_observed_required_materials() -> Result<()> {
+    let key = "original-material";
+    let location = MapCoord::new(16, 0, 10);
+    let mut action = Action::Build {
+        kind: BuildingKind::Workshop("Carpenters".to_owned()),
+        location,
+        footprint: MapCuboid::new(location, location)?,
+        material: crate::MaterialSelector::default(),
+    };
+    let mut snapshot = world();
+    apply_effect(&mut snapshot, &action, key)?;
+    let original = action.clone();
+    if let Action::Build { material, .. } = &mut action {
+        material.required_tokens.insert("WOOD".to_owned());
+    }
+    // Older records can omit the field for an unconstrained build. Neither
+    // absence nor an explicit empty list establishes a requirement for WOOD.
+    for legacy in [false, true] {
+        let mut source = snapshot.clone();
+        if legacy {
+            source
+                .graph
+                .entities
+                .get_mut(&created_entity_id(key, 0))
+                .unwrap()
+                .fields
+                .remove("material_tokens");
+        }
+        let before = source.clone();
+        assert!(
+            cancel_effect(&mut source, &action, key)
+                .is_err_and(|error| error.code == ErrorCode::PreconditionsFailed)
+        );
+        assert_eq!(source, before);
+        assert!(cancel_effect(&mut source, &original, key)?);
+    }
+    Ok(())
+}
+
+#[test]
 fn cancellation_requires_an_eligible_observed_lifecycle() -> Result<()> {
     for (action, _) in temporal_cases()? {
         let mut original = world();

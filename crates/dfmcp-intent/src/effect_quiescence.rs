@@ -101,9 +101,27 @@ pub(crate) fn validate_reference_work_identity(
             kind,
             location,
             footprint,
-            ..
+            material,
         } => {
-            field(entity, "position", snapshot.tick) == Some(&Value::Coord(*location))
+            // Legacy abstract construction recorded only required tokens. An
+            // omitted list cannot establish a positive material requirement.
+            let materials_match = match entity.fields.get("material_tokens") {
+                None => material.required_tokens.is_empty(),
+                Some(fact) => {
+                    let expected = Value::List(
+                        material
+                            .required_tokens
+                            .iter()
+                            .cloned()
+                            .map(Value::Text)
+                            .collect(),
+                    );
+                    laboratory_fact_value(fact, snapshot.tick) == Some(&expected)
+                }
+            };
+            !effects::has_placement_fields(entity)
+                && materials_match
+                && field(entity, "position", snapshot.tick) == Some(&Value::Coord(*location))
                 && field(entity, "footprint_min", snapshot.tick)
                     == Some(&Value::Coord(footprint.min))
                 && field(entity, "footprint_max", snapshot.tick)

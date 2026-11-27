@@ -1,0 +1,1 @@
+Cancelling ordinary construction, excavation or a work order now checks the original work record before changing its lifecycle. Exact-item furniture placements retain their item and refund path when presented with an unrelated build cancellation.

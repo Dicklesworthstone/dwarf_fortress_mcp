@@ -87,6 +87,7 @@ pub use workforce::{
     laboratory_workforce_remaining_ticks, laboratory_workforce_report,
 };
 
+pub(crate) use furniture::has_placement_fields;
 pub use furniture::{
     FURNITURE_ALLOCATED_TO_FIELD, FURNITURE_ATTACHMENT_STATE_FIELD,
     FURNITURE_INVENTORY_STATE_FIELD, FURNITURE_PLACEMENT_MODEL, FURNITURE_PLACEMENT_MODEL_FIELD,
@@ -1258,9 +1259,7 @@ fn cancel_effect_inner(
         // Never dispatched (for example, still waiting on a dependency).
         return Ok(false);
     };
-    if created.kind == EntityKind::WorkOrder || matches!(action, Action::CreateWorkOrder { .. }) {
-        crate::effect_quiescence::validate_reference_work_identity(snapshot, action, id)?;
-    }
+    crate::effect_quiescence::validate_reference_work_identity(snapshot, action, id)?;
     match field_text(created, field, snapshot.tick) {
         Some(value) if active.contains(&value) => {}
         Some(STATUS_COMPLETE | STATUS_CANCELLED) => return Ok(false),
