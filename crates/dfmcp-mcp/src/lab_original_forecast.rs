@@ -69,6 +69,19 @@ fn reserve_handoff(next: &mut Value, pursuits: &[ReservePursuit], now: u64) {
         next["reason"] = json!(
             "capture these exact reserve endpoints now, then refresh the forecast before advancing time"
         );
+    } else if let Some(distance) = capture.ticks_until_next_endpoint {
+        // The original evidence deadline is an absolute source tick. A caller
+        // following this handoff must not advance beyond it: later observation
+        // cannot reconstruct an exact missed sample.
+        next["arguments"]["max_game_ticks"] = json!(distance);
+        next["reason"] = json!(
+            "advance no farther than the earliest unsampled reserve endpoint, then refresh and capture its exact originals with a zero-tick selected wait"
+        );
+    }
+    if capture.past_endpoints_missing > 0 {
+        next["reserve_evidence_warning"] = json!(
+            "one or more original reserve endpoints were passed without a retained exact sample; later waits cannot retroactively establish their evidence"
+        );
     }
     next["reserve_capture"] = json!(capture);
 }
