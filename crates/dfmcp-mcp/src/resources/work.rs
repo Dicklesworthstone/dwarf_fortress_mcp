@@ -323,7 +323,7 @@ fn progress(
     source: &mut SourceWork,
 ) -> Result<Value> {
     let current = session.adapter.snapshot().anchor();
-    let (plan_digest, step_id, mut detail, step) = match entry {
+    let (plan_digest, step_id, detail) = match entry {
         WorkEntry::Live {
             plan_digest,
             plan_id,
@@ -395,7 +395,7 @@ fn progress(
                 "physical_work":work_json(&physical, Some(current)),
                 "obligation":obligation_json(step, status_json(status), next),
                 "scheduling_error":scheduling_error});
-            (plan_digest, Some(receipt.step_id), detail, step)
+            (plan_digest, Some(receipt.step_id), detail)
         }
         WorkEntry::Recovered {
             plan_digest,
@@ -483,10 +483,28 @@ fn progress(
                     "after":work_json(&drain.after, Some(drain.observed_anchor)),
                     "stopped_work":drain.stopped_work, "evidence":evidence_json(&drain.evidence)})),
                 "blind_retry_allowed":false});
-            (Some(plan_digest), step_id, detail, step)
+            (Some(plan_digest), step_id, detail)
         }
     };
+    Ok(finish_progress(
+        session,
+        originals,
+        plan_digest,
+        step_id,
+        detail,
+    ))
+}
+
+fn finish_progress(
+    session: &LabSession,
+    originals: &BTreeMap<Digest32, Original<'_>>,
+    plan_digest: Option<Digest32>,
+    step_id: Option<dfmcp_core::StepId>,
+    mut detail: Value,
+) -> Value {
+    let current = session.adapter.snapshot().anchor();
     let original = plan_digest.and_then(|digest| originals.get(&digest));
+    let step = step_id.and_then(|id| original?.plan.steps.iter().find(|step| step.id == id));
     detail["plan_digest"] = json!(plan_digest.map(|digest| digest.to_hex()));
     detail["step_id"] = json!(step_id.map(|step| step.get()));
     detail["original_custody"] = json!(if step.is_some() {
@@ -522,7 +540,102 @@ fn progress(
         json!(detail["physical_work"]["observed_anchor"] == anchor_json(&current));
     detail["historical_proof_updated"] = json!(false);
     detail["dispatch_authority"] = json!(false);
-    Ok(detail)
+    detail
+}
+
+fn append_archived_progress(
+    session: &LabSession,
+    originals: &BTreeMap<Digest32, Original<'_>>,
+    entries: &mut Vec<Value>,
+    source: &mut SourceWork,
+    elapsed: &mut impl FnMut() -> Duration,
+) -> Result<()> {
+    // Exact live and carried identities take precedence. Never let an older
+    // archived disposition replace a retained post-recovery proof transition.
+    let mut present: std::collections::BTreeSet<_> = entries
+        .iter()
+        .map(|row| {
+            (
+                row["plan_digest"].as_str().map(str::to_owned),
+                row["step_id"].as_u64(),
+            )
+        })
+        .collect();
+    for entry in plan_resources::entries(session).filter(|entry| entry.retention != "pending_plan")
+    {
+        deadline(session.budget, elapsed)?;
+        let original = originals.get(&entry.digest);
+        let Some(history) = plan_resources::action_history(
+            session,
+            entry.digest,
+            original.map(|original| original.seal),
+        ) else {
+            continue;
+        };
+        match history {
+            Ok(history) => {
+                source.charge(
+                    history.len(),
+                    history
+                        .bytes()
+                        .saturating_add(history.len().saturating_mul(1_024)),
+                    session.budget,
+                )?;
+                for recorded in history.iter() {
+                    deadline(session.budget, elapsed)?;
+                    if !present.insert((
+                        Some(entry.digest.to_hex()),
+                        Some(u64::from(recorded.step.get())),
+                    )) {
+                        continue;
+                    }
+                    let step = original.and_then(|original| {
+                        original
+                            .plan
+                            .steps
+                            .iter()
+                            .find(|step| step.id == recorded.step)
+                    });
+                    let detail = json!({"source":"recovered_archived_disposition", "action_id":null,
+                        "historical_only":true, "proof_state":recorded.state,
+                        "proof_terminal":recorded.terminal, "proof_anchor":anchor_json(&recorded.recorded_anchor),
+                        "archived_disposition":recorded.json(),
+                        "physical_work":{"state":"not_resampled", "quiescent":null, "observed_anchor":null},
+                        "obligation":obligation_json(step,json!({"state":"not_retained", "historical_only":true}),None),
+                        "blind_retry_allowed":false});
+                    entries.push(finish_progress(
+                        session,
+                        originals,
+                        Some(entry.digest),
+                        Some(recorded.step),
+                        detail,
+                    ));
+                }
+            }
+            Err(error) => {
+                source.charge(1, 1_024, session.budget)?;
+                source.text(&error.message, session.budget)?;
+                if !present.insert((Some(entry.digest.to_hex()), None)) {
+                    continue;
+                }
+                let detail = json!({"source":"recovered_archive_unavailable", "action_id":null,
+                    "historical_only":true, "proof_state":"unknown", "proof_terminal":null,
+                    "proof_anchor":null, "obligation":null,
+                    "archive_custody":{"status":if error.code==ErrorCode::CorruptLedger {"unverifiable"} else {"unavailable"},
+                        "error_code":error.code.as_str(), "reason":error.message},
+                    "physical_work":{"state":"not_resampled", "quiescent":null, "observed_anchor":null},
+                    "blind_retry_allowed":false});
+                entries.push(finish_progress(
+                    session,
+                    originals,
+                    Some(entry.digest),
+                    None,
+                    detail,
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn read(session: &str, uri: &str, view: &str) -> McpResult<Vec<ResourceContent>> {
@@ -577,7 +690,16 @@ fn read_with_elapsed(
                 let mut entries = Vec::new();
                 for entry in plan_resources::work_entries(guard) {
                     deadline(guard.budget, &mut elapsed)?;
-                    let mut detail = progress(guard, entry, &originals, &mut source)?;
+                    entries.push(progress(guard, entry, &originals, &mut source)?);
+                }
+                append_archived_progress(
+                    guard,
+                    &originals,
+                    &mut entries,
+                    &mut source,
+                    &mut elapsed,
+                )?;
+                for detail in &mut entries {
                     let pin = Digest32::of_bytes(json!({"domain":"dfmcp.work-resource-progress/1",
                     "session_id":guard.session_id.to_string(), "current_anchor":anchor_json(&context.anchor),
                     "progress":detail}).to_string().as_bytes());
@@ -592,7 +714,6 @@ fn read_with_elapsed(
                             guard.session_id
                         ))
                     };
-                    entries.push(detail);
                 }
                 entries.sort_by(|a, b| {
                     (
@@ -708,6 +829,7 @@ fn catalog(
             "owner_session_id":row["owner_session_id"], "owned_by_current_session":row["owned_by_current_session"],
             "action_kind":row["action_kind"], "proof_state":row["proof_state"],
             "proof_terminal":row["proof_terminal"], "proof_anchor":row["proof_anchor"],
+            "historical_only":row["historical_only"], "archive_custody":row["archive_custody"],
             "physical_work":row["physical_work"], "original_custody":row["original_custody"],
             "progress_digest":row["progress_digest"], "action":row["canonical_uri"],
             "obligation":row["obligation_uri"]})
@@ -717,7 +839,7 @@ fn catalog(
             "canonical_uri":format!("df://session/{session}/work-{hash}~{start}"),
             "offset":start, "returned":returned, "total":total, "rows":rows,
             "complete":end==total, "complete_catalog":start==0 && end==total, "next":next,
-            "retention":{"pins_work":false, "scope":"retained live receipts and recovered original steps"},
+            "retention":{"pins_work":false, "scope":"retained live receipts, carried steps and verified archived dispositions"},
             "coverage":coverage(next.as_deref())});
         if let Some(text) = render(payload, session, uri, current, budget, source, elapsed)? {
             return Ok(text);

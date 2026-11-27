@@ -52,7 +52,7 @@ continuity metadata immutable.
 | `tasks`, `tasks-{offset}` | Bounded modern task discovery |
 | `task-{task_id}` | Original plan progress, cancellation drain, and final evidence |
 | `task-{task_id}~evidence-{offset}` | Digest-checked UTF-8 pages of retained task evidence |
-| `work` | Bounded retained live-action and recovered-step progress, independent of MCP Task opt-in |
+| `work` | Bounded live-action, carried-step and verified archived-disposition progress, independent of MCP Task opt-in |
 | `work-{catalog_digest}~{offset}` | Continuation pinned to the complete retained progress catalog and current anchor |
 | `action-{progress_digest}` | Exact retained action receipt or recovered original-step progress, with separate physical-work state |
 | `obligation-{progress_digest}` | That step's original temporal requirements, last retained monitor status and next eligible observation tick |
@@ -140,6 +140,33 @@ cadence. The archived frontier is not a positive observation. Reads neither
 register nor observe monitors and never reset or advance their streaks.
 Historical physical state remains explicitly noncurrent when the world has
 advanced beyond its retained inspection anchor.
+
+Completed recovered originals also retain independently readable action history
+after their live handles and carried monitors are gone. Rows with
+`source: "recovered_archived_disposition"` expose the already-verified atomic
+step map, including terminal maps retained through compaction and repeated
+reopening. `historical_only: true`, original proof anchors, recovery anchor and
+custody digest identify that history. The consumer additionally matches the
+exact typed original object captured during verification. Live receipts and
+carried steps take precedence for the same original plan and step; an older
+archived disposition cannot overwrite later recovered progress.
+
+Archived physical work is always `not_resampled`, with null quiescence and
+`current: false`, including historical `not_dispatched` records. Archived
+temporal requirements remain inspectable, but no current monitor or eligible
+sample tick is invented. The typed original-goal Explain step pages use the
+same historical fallback. These reads never run a zero-tick wait to manufacture
+proof or renew pursuit eligibility.
+
+The ordinary recovery verifier does not capture a fresh action map for an
+original that was already withdrawn or restore-abandoned before reopening.
+Previously captured history can remain readable through a later in-memory
+restore, while that original remains ineligible for selected waiting. On a
+subsequent reopen, absent captured history is explicit: a
+`recovered_archive_unavailable` row reports unavailable or unverifiable custody
+and its error code, with unknown proof and no physical-quiescence claim. Legacy
+missing atomic receipt maps remain unavailable as well; original goal
+achievement cannot reconstruct them.
 
 Catalog pages contain at most eight intact rows and shrink to the complete
 escaped response allowance. Follow `next` until null; `complete` means the end

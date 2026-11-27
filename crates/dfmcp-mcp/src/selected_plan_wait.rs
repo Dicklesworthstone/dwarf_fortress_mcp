@@ -25,7 +25,7 @@ pub(super) const SEMANTIC_GOAL_NODE_RESERVE: u64 = 65;
 
 #[path = "recovered_plan_wait.rs"]
 mod recovered;
-pub(super) use recovered::{RecoveredPlanCustody, RecoveredStepCustody};
+pub(super) use recovered::{ArchivedDispositions, RecoveredPlanCustody, RecoveredStepCustody};
 
 fn refused(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::Conflict, message)

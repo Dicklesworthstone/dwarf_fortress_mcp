@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Keep completed originals visible after recovery
+
+- Show verified archived step dispositions in work resources and original-goal
+  Explain after live handles and carried monitors are gone.
+- Bind historical rows to the exact typed original, preserve their proof anchors
+  and prefer later live/carried records without inventing current physical proof.
+- Keep unavailable legacy or abandoned-reopen history explicit; reading old
+  completion does not restore action handles or waiting eligibility.
+- Add durable compaction/reopen/restore regressions and verify the terrain and
+  blueprint changes with 476 passing scoped tests.
+
 ## Unreleased — Discover retained action and obligation progress
 
 - Add a bounded session work catalog and independently addressable action and

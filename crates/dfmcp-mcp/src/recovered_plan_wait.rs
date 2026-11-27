@@ -102,6 +102,9 @@ struct Receipt {
 #[derive(Clone, Debug)]
 struct VerifiedCustody {
     plan_digest: Digest32,
+    // Exact typed original identity for passive history consumers. This is
+    // process-local verified metadata, not a new custody hash or journal field.
+    plan_object_digest: Digest32,
     recovery_anchor: StateAnchor,
     archived_after_retirement: bool,
     receipts: Vec<Receipt>,
@@ -131,6 +134,65 @@ pub(crate) struct RecoveredStepCustody {
 #[derive(Clone, Debug)]
 pub(crate) struct RecoveredPlanCustody {
     verified: Result<VerifiedCustody>,
+}
+
+/// One already-verified historical disposition. No present physical work,
+/// current goal truth, observation eligibility or ActionId is implied.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ArchivedDisposition {
+    pub(crate) step: StepId,
+    pub(crate) state: &'static str,
+    pub(crate) terminal: bool,
+    pub(crate) recorded_anchor: StateAnchor,
+    pub(crate) recovery_anchor: StateAnchor,
+    pub(crate) custody_digest: Digest32,
+    pub(crate) archived_after_retirement: bool,
+}
+
+impl ArchivedDisposition {
+    pub(crate) fn json(self) -> Value {
+        json!({"schema":"dfmcp.archived-action-disposition/1", "step":self.step.get(),
+            "recorded_state":self.state, "terminal_at_recorded_anchor":self.terminal,
+            "recorded_anchor":anchor_json(&self.recorded_anchor),
+            "recovery_anchor":anchor_json(&self.recovery_anchor),
+            "custody_digest":self.custody_digest.to_hex(),
+            "action_record_origin":if self.archived_after_retirement {
+                "archived_retired_commit" } else { "retained_commit_at_recovery" },
+            "historical_only":true, "action_id":null,
+            "dispatch_handles_restored":false, "current_physical_work":"not_resampled"})
+    }
+}
+
+/// Borrowed complete disposition map; callers admit its full size before
+/// projecting any subset. Original proof anchors remain immutable history.
+#[derive(Debug)]
+pub(crate) struct ArchivedDispositions<'a> {
+    custody: &'a VerifiedCustody,
+}
+
+impl ArchivedDispositions<'_> {
+    pub(crate) fn len(&self) -> usize {
+        self.custody.receipts.len()
+    }
+
+    pub(crate) fn bytes(&self) -> usize {
+        self.custody.canonical_bytes.saturating_add(32)
+    }
+
+    pub(crate) fn iter(&self) -> impl ExactSizeIterator<Item = ArchivedDisposition> + '_ {
+        self.custody
+            .receipts
+            .iter()
+            .map(|receipt| ArchivedDisposition {
+                step: receipt.step,
+                state: receipt.state.name(),
+                terminal: receipt.state != State::Dispatched,
+                recorded_anchor: receipt.anchor,
+                recovery_anchor: self.custody.recovery_anchor,
+                custody_digest: self.custody.digest,
+                archived_after_retirement: self.custody.archived_after_retirement,
+            })
+    }
 }
 
 impl RecoveredPlanCustody {
@@ -166,6 +228,13 @@ impl RecoveredPlanCustody {
                 "recovered wait has no exact bounded original plan seal",
             ));
         }
+        let (_, original_seal) = dfmcp_intent::plan_archive::encode(
+            plan,
+            dfmcp_intent::plan_archive::ArchiveLimits {
+                max_steps: MAX_STEPS,
+                ..dfmcp_intent::plan_archive::ArchiveLimits::default()
+            },
+        )?;
         let (commit, archived_after_retirement) = match (
             store.commit(retained.fortress_id, retained.plan_digest),
             store.retired_commit(retained.fortress_id, retained.plan_digest),
@@ -280,6 +349,7 @@ impl RecoveredPlanCustody {
         }
         Ok(VerifiedCustody {
             plan_digest: plan.digest,
+            plan_object_digest: original_seal.object_digest,
             recovery_anchor: recovery.active_anchor(),
             archived_after_retirement,
             receipts,
@@ -292,6 +362,34 @@ impl RecoveredPlanCustody {
 
     fn checked(&self) -> Result<&VerifiedCustody> {
         self.verified.as_ref().map_err(Clone::clone)
+    }
+
+    /// Borrow recorded history after the consumer admits and encodes the exact
+    /// original. This does not invoke current selected-wait eligibility: a
+    /// later withdrawal or restore cannot rewrite already verified history.
+    pub(crate) fn archived_dispositions(
+        &self,
+        plan: &PreparedPlan,
+        admitted_seal: dfmcp_intent::plan_archive::PlanArchiveSeal,
+    ) -> Result<ArchivedDispositions<'_>> {
+        let custody = self.checked()?;
+        if admitted_seal.plan_digest != custody.plan_digest
+            || admitted_seal.object_digest != custody.plan_object_digest
+            || plan.digest != custody.plan_digest
+            || !plan.digest_is_valid()
+            || !plan.id_is_valid()
+            || custody.receipts.len() != plan.steps.len()
+            || custody
+                .receipts
+                .iter()
+                .zip(&plan.steps)
+                .any(|(receipt, step)| receipt.step != step.id)
+        {
+            return Err(corrupt(
+                "archived action dispositions no longer bind their exact typed original",
+            ));
+        }
+        Ok(ArchivedDispositions { custody })
     }
 
     pub(crate) fn validate(
@@ -404,13 +502,17 @@ impl RecoveredPlanCustody {
             if receipt.state == "verified" && receipt.work.is_quiescent() {
                 continue;
             }
-            let carried = session.carried.iter().find(|row| {
-                row.plan_digest == plan.digest && row.step == Some(receipt.step)
-            });
+            let carried = session
+                .carried
+                .iter()
+                .find(|row| row.plan_digest == plan.digest && row.step == Some(receipt.step));
             if predecessor
                 || receipt.recorded_state != "dispatched"
                 || receipt.state != "dispatched"
-                || !matches!(receipt.work, EffectWorkState::Active { .. } | EffectWorkState::Quiescent { .. })
+                || !matches!(
+                    receipt.work,
+                    EffectWorkState::Active { .. } | EffectWorkState::Quiescent { .. }
+                )
                 || carried.is_none_or(|row| {
                     row.observation_error.is_some()
                         || row.monitor.as_ref().is_none_or(|monitor| {
@@ -456,7 +558,13 @@ impl RecoveredPlanCustody {
             }
             if let Some(row) = carried.get(&step.id) {
                 inspect_carried(
-                    row, receipt, step, plan.anchor.tick, custody, snapshot.anchor(), &mut actions,
+                    row,
+                    receipt,
+                    step,
+                    plan.anchor.tick,
+                    custody,
+                    snapshot.anchor(),
+                    &mut actions,
                 )?;
             } else if receipt.state == State::Dispatched {
                 return Err(unavailable(
@@ -593,7 +701,10 @@ fn inspect_carried(
                         || !precedes(anchor, current)
                 })
                 || !super::super::recovered_step_progress::monitor_matches(
-                    row, custody.plan_digest, registered_tick, step,
+                    row,
+                    custody.plan_digest,
+                    registered_tick,
+                    step,
                 )
             {
                 return Err(corrupt(

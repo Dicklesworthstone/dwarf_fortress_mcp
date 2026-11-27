@@ -1,5 +1,11 @@
 # Implementation Status
 
+## Unreleased — Preserve completed action history in passive recovery views
+
+Work resources and original-goal Explain can now read verified archived step
+dispositions after completion, compaction and recovery, with historical proof
+kept separate from current physical state. See [implementation and verification scope](IMPLEMENTATION_STATUS.d/archived-action-history.md).
+
 ## Unreleased — Inspect retained actions and obligations through resources
 
 Session work catalogs and exact action/obligation details now expose original

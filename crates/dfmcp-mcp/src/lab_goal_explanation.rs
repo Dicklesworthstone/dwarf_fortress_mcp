@@ -239,6 +239,7 @@ fn steps(
     plan: &PreparedPlan,
     session: &LabSession,
     pending: bool,
+    archived: Option<&Result<super::selected_plan_wait::ArchivedDispositions<'_>>>,
     started: Instant,
 ) -> Result<Vec<Value>> {
     let mut rows = Vec::with_capacity(plan.steps.len());
@@ -271,6 +272,24 @@ fn steps(
             row["recovered_evidence"] = carried.to_json();
             row["physical_work"] = json!({"state":"not_resampled", "quiescent":null,
                 "reason":"recovered evidence keeps its recorded anchor; inspection does not poll it"});
+        } else if let Some(history) = archived {
+            match history {
+                Ok(history) => {
+                    let recorded=history.iter().find(|recorded|recorded.step==step.id).ok_or_else(||
+                        DfmcpError::new(ErrorCode::CorruptLedger,"archived explanation lost an exact original step"))?;
+                    row["dispatch_status"]=json!("archived_historical_receipt");
+                    row["recovered_evidence"]=recorded.json();
+                }
+                Err(error) => {
+                    row["dispatch_status"]=json!(if error.code==ErrorCode::CorruptLedger {
+                        "archived_custody_unverifiable" } else { "archived_custody_unavailable" });
+                    row["recovered_evidence"]=json!({"available":false,
+                        "error_code":error.code.as_str(), "reason":error.message});
+                }
+            }
+            row["physical_work"]=json!({"state":"not_resampled", "quiescent":null,
+                "observed_anchor":null, "current":false,
+                "reason":"archived action history does not establish current physical work"});
         } else {
             row["dispatch_status"] = json!(if pending {
                 "prepared_not_dispatched"
@@ -512,7 +531,24 @@ fn inspect(session: &LabSession, raw: &str, started: Instant) -> Result<String> 
     };
     let evidence = PredicateEvidence::laboratory(session.adapter.snapshot())?;
     let requirements = requirements(plan, &evidence, session, started)?;
-    let steps = steps(plan, session, is_pending, started)?;
+    let archived=super::plan_resources::action_history(session,target.plan,Some(seal));
+    if let Some(history)=&archived {
+        match history {
+            Ok(history) => {
+                records=records.saturating_add(history.len() as u64);
+                input_bytes=input_bytes.saturating_add(history.bytes() as u64);
+            }
+            Err(error) => {
+                records=records.saturating_add(1);
+                input_bytes=input_bytes.saturating_add(error.message.len() as u64);
+            }
+        }
+        if records>u64::from(context.budget.max_entities)
+            || input_bytes.saturating_add(archive.len() as u64)>context.budget.max_bytes.min(MAX_SOURCE_BYTES) {
+            return Err(exhausted("original explanation exceeds its complete archived action-history budget"));
+        }
+    }
+    let steps = steps(plan, session, is_pending, archived.as_ref(), started)?;
     let current_stale = plan.anchor != context.anchor || plan.expires_at_tick < context.anchor.tick;
     let session_id = session.session_id.to_string();
     // The world anchor alone cannot pin an explanation: receipt verification,

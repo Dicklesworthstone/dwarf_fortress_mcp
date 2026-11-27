@@ -476,8 +476,13 @@ fn public_work_resources_inspect_recovery_without_handles_sampling_or_custody_wr
     let (_, rows) = all_rows(&second);
     let recovered = rows
         .iter()
-        .find(|row| row["plan_digest"] == digest)
+        .find(|row| row["plan_digest"] == digest && row["source"] == "recovered_original_step")
         .expect("recovered original");
+    assert_eq!(
+        rows.len(),
+        2,
+        "archived verified pause and active carried dig appear exactly once each"
+    );
     assert_eq!(recovered["source"], "recovered_original_step");
     assert!(recovered["action_id"].is_null());
     assert_eq!(recovered["step_id"], live_dig["step_id"]);
@@ -525,3 +530,6 @@ fn public_work_resources_inspect_recovery_without_handles_sampling_or_custody_wr
         "reads cannot republish durable custody"
     );
 }
+
+#[path = "archive_tests.rs"]
+mod archived_history;

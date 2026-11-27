@@ -31,11 +31,17 @@ reusing the original single decode and 256-unit charge; the existing 500,000-uni
 regression cap and assertions are unchanged. Two new world tests cover guard
 atomicity, no-ops, revisions, and malformed or unknown source rejection.
 
-Independent source reviews found no remaining blocker. Final checked-writer,
-intent and blueprint test runs are pending at this publication checkpoint.
+The optimized final terrain sources pass all 158 world library tests, all 306
+intent library tests, all five new public blueprint terrain tests and the seven
+existing blueprint layout/planner tests: 476 scoped tests, no failures or ignored
+tests. This includes the unchanged 500,000-unit large-excavation regression.
+The pure-component workspace uses the actual repository manifests and sources;
+it does not substitute runtime or transport implementations. Independent source
+reviews found no remaining blocker.
+
 Repository verification passed its initial static gates, then stopped because
 `br` is unavailable. The local qualification entry refused the in-progress dirty
-worktree. Neither attempt establishes full qualification.
+worktree. Neither attempt establishes full workspace qualification.
 
 The installed toolchain is nightly-2026-08-31 (rustc 1.100.0-nightly), not a claim
 of current-latest-nightly qualification. This is deterministic laboratory

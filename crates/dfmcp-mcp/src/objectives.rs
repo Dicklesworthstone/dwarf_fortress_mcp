@@ -133,6 +133,27 @@ impl Objective {
         super::plan_resources::source_kind(&self.source)
     }
 
+    /// Passive historical action custody, independent of present pursuit
+    /// eligibility. Newly reopened abandoned/withdrawn originals may lack this
+    /// captured map; that absence never becomes proof of nondispatch or quiet.
+    pub(super) fn resource_action_history(
+        &self,
+        admitted_seal: Option<dfmcp_intent::plan_archive::PlanArchiveSeal>,
+    ) -> Option<Result<super::selected_plan_wait::ArchivedDispositions<'_>>> {
+        if self.originating_process {
+            return None;
+        }
+        Some((|| {
+            let plan=self.resource_plan().ok_or_else(||DfmcpError::new(
+                ErrorCode::CorruptLedger, "the recovered original source is unavailable for action history"))?;
+            let seal=admitted_seal.ok_or_else(||DfmcpError::new(
+                ErrorCode::CorruptLedger, "the exact original archive was not admitted for action history"))?;
+            let custody=self.recovered_wait_custody.as_ref().ok_or_else(||DfmcpError::new(
+                ErrorCode::Conflict, "this recovered original has no captured historical action map"))?;
+            custody.archived_dispositions(plan,seal)
+        })())
+    }
+
     /// Export only borrowed original source and retained history. In
     /// particular, resource inspection never calls `projection`, evaluates a
     /// predicate, checks continuation eligibility, or certifies achievement.

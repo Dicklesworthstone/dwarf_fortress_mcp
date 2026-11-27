@@ -45,6 +45,18 @@ pub(crate) fn goal(session: &LabSession, digest: Digest32) -> Option<GoalEntry<'
         .map(|objective| objective.resource_goal(session))
 }
 
+pub(crate) fn action_history(
+    session: &LabSession,
+    digest: Digest32,
+    admitted_seal: Option<dfmcp_intent::plan_archive::PlanArchiveSeal>,
+) -> Option<dfmcp_core::Result<super::selected_plan_wait::ArchivedDispositions<'_>>> {
+    session
+        .objectives
+        .iter()
+        .find(|objective| objective.plan_digest == digest)?
+        .resource_action_history(admitted_seal)
+}
+
 pub(crate) fn count(session: &LabSession) -> usize {
     session.objectives.len() + usize::from(session.pending.is_some())
 }

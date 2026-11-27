@@ -1095,6 +1095,12 @@ original plan/step identity with no replacement ActionId, original deadlines
 and post-recovery stability. Reads never poll monitors, advance time, create
 tasks or publish durable custody. Handoff supplies the work catalog link;
 details retain original ownership metadata for shared-world visibility.
+Verified archived step dispositions remain visible after ordinary completed
+reopen and compaction, even without live handles or carried monitors. These
+rows and the original-goal Explain fallback are historical only: they preserve
+the exact typed source and proof anchors, with current physical work explicitly
+not resampled. Missing or invalid captured history remains explicit; an
+already-withdrawn or abandoned original does not gain new recovery eligibility.
 
 Retained laboratory checkpoints are discoverable through `checkpoints` and its
 catalog-pinned pages. Exact detail preserves retained labels, checkpoint IDs,
