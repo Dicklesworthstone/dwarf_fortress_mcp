@@ -33,8 +33,19 @@ placement custody, or subsequent completion evidence. It is a recipe proposal,
 
 The IDs and coordinates are illustrative. Each named area has an explicit origin.
 Bedrooms use the existing geometry policy's four-room rows, separating walls,
-south doorways, row corridors and west connecting spine. Each room requests one
-bed, chair and table. Interiors are 3..7 tiles in each horizontal dimension.
+south doorways, row corridors and west connecting spine. By default each room requests one
+bed, chair and table and its interior spans 3..7 tiles per horizontal dimension.
+
+For early private housing, a bedroom template can select only beds. For example,
+`{"kind":"bedroom_cluster","furnishings":"bed_only","rooms_count":7,"room_size":[1,2]}`
+requests seven beds for seven separate bedrooms. Each interior has one free cell
+beside its bed. The wall ring, south doorway and row corridor rotate with each
+bedroom. A bed-only request allows 1..13 rooms and 1..7 tiles per horizontal
+dimension, with at least two interior cells. Only bed item constraints apply.
+The same template works in the fixed-origin, automatic layout, observed terrain
+survey and inventory allocation workflows. A completed physical layout still
+needs native room zoning and ownership assignment to provide private bedrooms
+in the game.
 Dining areas request chair/table pairs in rows of 1..4 pairs with clear aisles.
 For shared sleeping space, use `{"kind":"dormitory","bed_count":7,"columns":4}`.
 This requests seven beds in a single excavation and leaves a walking aisle beside
@@ -86,7 +97,7 @@ Returned JSON objects do not alias retained plan bytes.
 
 Whole-request limits are 8 areas, 32 furniture slots, 32 excavation parts,
 512 excavation tiles and one bounding capture of at most 1,024 cells (each axis
-at most 128). An area allows up to 10 bedrooms, 16 dining pairs or 32 dormitory beds, but global
+at most 128). An area allows up to 10 fully furnished bedrooms, 13 bed-only bedrooms, 16 dining pairs or 32 dormitory beds, but global
 limits still apply. Larger dimensions/counts cannot silently drop rooms or use a
 bounding-box excavation. Input and normalized intent are at most 16 KiB; the
 complete plan is at most 48 KiB. All target coordinates leave the existing native

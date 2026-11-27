@@ -174,17 +174,57 @@
         "rooms_count": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 10
+          "maximum": 13
         },
         "room_size": {
           "type": "array",
           "items": {
             "type": "integer",
-            "minimum": 3,
+            "minimum": 1,
             "maximum": 7
           },
           "minItems": 2,
           "maxItems": 2
+        },
+        "furnishings": {
+          "enum": [
+            "bed_only",
+            "bed_chair_table"
+          ]
+        }
+      },
+      "if": {
+        "required": [
+          "furnishings"
+        ],
+        "properties": {
+          "furnishings": {
+            "const": "bed_only"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "room_size": {
+            "not": {
+              "const": [
+                1,
+                1
+              ]
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "rooms_count": {
+            "maximum": 10
+          },
+          "room_size": {
+            "items": {
+              "minimum": 3
+            }
+          }
         }
       }
     },
@@ -354,11 +394,25 @@
           "if": {
             "properties": {
               "template": {
-                "properties": {
-                  "kind": {
-                    "const": "dormitory"
+                "anyOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "dormitory"
+                      }
+                    }
+                  },
+                  {
+                    "required": [
+                      "furnishings"
+                    ],
+                    "properties": {
+                      "furnishings": {
+                        "const": "bed_only"
+                      }
+                    }
                   }
-                }
+                ]
               }
             }
           },
