@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Align workforce plans with executable source identities
+
+- Share complete, budgeted entity/edge identity admission between physical
+  advancement, workforce reports, remaining-service estimates and planning.
+- Refuse NIL/zero-generation records, lookup aliases and physical named-kind
+  aliases before they can certify capacity, including unchanged-anchor aliases.
+- Preserve valid later generations, read-only source immutability and the
+  existing advancement source-time checks.
+- Add four public regression groups. The pre-fix run reproduced three failures
+  with the valid control passing. Final changed-source tests remain unverified
+  after execution-host loss; independent source review completed.
+
 ## Unreleased — Keep retained excavation and production capacity source-qualified
 
 - Admit matching nonzero entity/edge lookup identities and positive entity

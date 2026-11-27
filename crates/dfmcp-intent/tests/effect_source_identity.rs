@@ -7,17 +7,23 @@
 use std::collections::BTreeMap;
 
 use dfmcp_core::{
-    DfmcpError, Digest32, EdgeId, EntityId, ErrorCode, FortressId, GameTick, ObservationCursor,
-    Result,
+    Capability, CapabilityGrant, CapabilityScope, DfmcpError, Digest32, EdgeId, EntityId,
+    ErrorCode, FortressId, GameTick, IntentId, ObservationCursor, OperationContext, RequestId,
+    Result, RiskTier, SessionId, WorkBudget,
 };
 use dfmcp_intent::effects::{
-    AMOUNT_REMAINING_FIELD, CONSTRUCTION_STAGE_FIELD, EffectAdvanceLimits, METABOLISM_TICKS_FIELD,
-    STATUS_ACTIVE, STATUS_COMPLETE, STATUS_FIELD, STOCK_DRINK_FIELD, STOCK_FOOD_FIELD,
-    STOCK_LEDGER_KIND, WORK_ORDER_CONDITIONS_FIELD, WORK_ORDER_NAME_FIELD,
-    WORK_ORDER_TICKS_PER_UNIT, advance_effects_with_limits, work_order_conditions_value,
+    AMOUNT_REMAINING_FIELD, CONSTRUCTION_STAGE_FIELD, EffectAdvanceLimits, FORTRESS_SETTINGS_KIND,
+    LABORATORY_WORKFORCE_MODEL, LABORATORY_WORKFORCE_MODEL_FIELD,
+    LABORATORY_WORKFORCE_TASK_MODEL_FIELD, METABOLISM_TICKS_FIELD, STATUS_ACTIVE, STATUS_COMPLETE,
+    STATUS_FIELD, STOCK_DRINK_FIELD, STOCK_FOOD_FIELD, STOCK_LEDGER_KIND,
+    WORK_ORDER_CONDITIONS_FIELD, WORK_ORDER_NAME_FIELD, WORK_ORDER_TICKS_PER_UNIT,
+    advance_effects_with_limits, fortress_settings_entity_id, laboratory_workforce_remaining_ticks,
+    laboratory_workforce_report, work_order_conditions_value,
 };
+use dfmcp_intent::workforce_planning::LaboratoryWorkforcePlanning;
+use dfmcp_intent::{Action, Constraint, Intent, PreparedPlan, RequestedAction, StaticPlanner};
 use dfmcp_world::{
-    EdgeKind, EdgeRecord, EntityKind, EntityRecord, Fact, FactSource, Value, WorldGraph,
+    EdgeKind, EdgeRecord, EntityKind, EntityRecord, Fact, FactSource, Predicate, Value, WorldGraph,
     WorldSnapshot,
 };
 
@@ -136,6 +142,115 @@ fn world() -> Result<WorldSnapshot> {
         false,
         graph,
     ))
+}
+
+fn shared_world() -> Result<WorldSnapshot> {
+    let mut source = world()?;
+    let settings = fortress_settings_entity_id(source.fortress_id);
+    source.graph.entities.insert(
+        settings,
+        record(
+            settings,
+            EntityKind::Other(FORTRESS_SETTINGS_KIND.to_owned()),
+            &[(
+                LABORATORY_WORKFORCE_MODEL_FIELD,
+                Value::Text(LABORATORY_WORKFORCE_MODEL.to_owned()),
+            )],
+        ),
+    );
+    for id in [FIRST_ORDER, SECOND_ORDER] {
+        source
+            .graph
+            .entities
+            .get_mut(&id)
+            .ok_or_else(missing)?
+            .fields
+            .insert(
+                LABORATORY_WORKFORCE_TASK_MODEL_FIELD.to_owned(),
+                Fact::known(
+                    Value::Text(LABORATORY_WORKFORCE_MODEL.to_owned()),
+                    source.tick,
+                    FactSource::Derived("dfmcp.reference-effects/1".to_owned()),
+                    Digest32::ZERO,
+                ),
+            );
+    }
+    source.refresh_hash();
+    Ok(source)
+}
+
+fn prepare_work(source: &WorldSnapshot) -> Result<PreparedPlan> {
+    let intent = Intent {
+        id: IntentId::new(71),
+        anchor: source.anchor(),
+        summary: "plan work against the exact current workforce".to_owned(),
+        terminal_condition: Predicate::EntityExists(EntityId::new(987_654)),
+        constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+        requested_actions: vec![RequestedAction {
+            action: Action::CreateWorkOrder {
+                name: "additional-brew".to_owned(),
+                job_token: "BREW_DRINK".to_owned(),
+                amount: 1,
+                conditions: Vec::new(),
+            },
+            preconditions: Vec::new(),
+            postconditions: Vec::new(),
+            obligation: None,
+            compensation: None,
+            depends_on: Vec::new(),
+        }],
+    };
+    let context = OperationContext {
+        session_id: SessionId::new(1),
+        request_id: RequestId::new(1),
+        anchor: source.anchor(),
+        budget: WorkBudget::default(),
+        grants: vec![CapabilityGrant {
+            capability: Capability::Plan,
+            scope: CapabilityScope::default(),
+            max_risk: RiskTier::ReadOnly,
+            expires_at_tick: None,
+            remaining_uses: None,
+        }],
+        cancellation_requested: false,
+    };
+    StaticPlanner::default().prepare_laboratory(source, &intent, &context)
+}
+
+fn assert_workforce_refused(
+    source: &WorldSnapshot,
+    case: &str,
+    planning_error: ErrorCode,
+) -> Result<()> {
+    let before = source.clone();
+    let report = laboratory_workforce_report(source);
+    assert!(
+        matches!(&report, Err(error) if error.code == ErrorCode::PreconditionsFailed),
+        "{case}: invalid source produced workforce evidence: {report:?}",
+    );
+    let remaining = laboratory_workforce_remaining_ticks(source);
+    assert!(
+        matches!(&remaining, Err(error) if error.code == ErrorCode::PreconditionsFailed),
+        "{case}: invalid source produced a remaining-work estimate: {remaining:?}",
+    );
+    let workload = LaboratoryWorkforcePlanning::capture(source);
+    assert!(
+        matches!(&workload, Err(error) if error.code == ErrorCode::PreconditionsFailed),
+        "{case}: invalid source became a planning workload: {workload:?}",
+    );
+    // PredicateEvidence rejects mismatched lookup keys before the planner
+    // reaches workforce inspection. Keep that existing error classification
+    // exact; other malformed identities reach the shared source admission.
+    let plan = prepare_work(source);
+    assert!(
+        matches!(&plan, Err(error) if error.code == planning_error),
+        "{case}: invalid source became a sealed plan: {plan:?}",
+    );
+    assert_eq!(
+        source, &before,
+        "{case}: read-only inspection changed the source"
+    );
+    assert_refused_before_progress(source, case)
 }
 
 fn number(snapshot: &WorldSnapshot, id: EntityId, field: &str) -> Result<u64> {
@@ -316,6 +431,178 @@ fn malformed_edge_identity_cannot_be_ignored_by_unrelated_physical_progress() ->
         };
         source.refresh_hash();
         assert_refused_before_progress(&source, description)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn workforce_reports_planning_and_progress_agree_on_valid_later_generations() -> Result<()> {
+    let mut source = shared_world()?;
+    source
+        .graph
+        .entities
+        .get_mut(&WORKER)
+        .ok_or_else(missing)?
+        .generation = 7;
+    source
+        .graph
+        .entities
+        .get_mut(&EntityId::new(51))
+        .ok_or_else(missing)?
+        .generation = 9;
+    source.refresh_hash();
+    let before = source.clone();
+    let report = laboratory_workforce_report(&source)?.ok_or_else(missing)?;
+    assert_eq!(report.eligible_workers, 1);
+    assert_eq!(report.active_activities, 2);
+    assert_eq!(report.assignments.len(), 1);
+    assert_eq!(report.assignments[0].worker, WORKER);
+    assert_eq!(report.assignments[0].work, FIRST_ORDER);
+    assert_eq!(report.remaining_service_ticks, 2 * WORK_ORDER_TICKS_PER_UNIT);
+    assert_eq!(
+        laboratory_workforce_remaining_ticks(&source)?,
+        Some(report.remaining_service_ticks),
+    );
+    let workload = LaboratoryWorkforcePlanning::capture(&source)?.ok_or_else(missing)?;
+    assert_eq!(workload.queued_service_ticks, report.remaining_service_ticks);
+    assert_eq!(workload.queued_activities, report.active_activities);
+    assert!(prepare_work(&source)?.digest_is_valid());
+    assert_eq!(number(&advance(&source)?, LEDGER, STOCK_DRINK_FIELD)?, 5);
+    assert_eq!(source, before);
+    Ok(())
+}
+
+#[test]
+fn workforce_reports_and_plans_refuse_invalid_complete_entity_identity() -> Result<()> {
+    for case in 0..7 {
+        let mut source = shared_world()?;
+        let description = match case {
+            0 => {
+                source
+                    .graph
+                    .entities
+                    .get_mut(&WORKER)
+                    .ok_or_else(missing)?
+                    .generation = 0;
+                "zero-generation worker cannot supply advisory capacity"
+            }
+            1 => {
+                source
+                    .graph
+                    .entities
+                    .get_mut(&EntityId::new(51))
+                    .ok_or_else(missing)?
+                    .generation = 0;
+                "zero-generation workshop cannot supply advisory capacity"
+            }
+            2 => {
+                source
+                    .graph
+                    .entities
+                    .get_mut(&IDLE)
+                    .ok_or_else(missing)?
+                    .generation = 0;
+                "unrelated zero-generation record is part of the complete source"
+            }
+            3 => {
+                let mut worker = source.graph.entities.remove(&WORKER).ok_or_else(missing)?;
+                worker.id = EntityId::NIL;
+                source.graph.entities.insert(EntityId::NIL, worker);
+                "matching NIL worker identity cannot supply advisory capacity"
+            }
+            4 => {
+                source.graph.entities.get_mut(&IDLE).ok_or_else(missing)?.id = EntityId::NIL;
+                "unrelated NIL record is part of the complete source"
+            }
+            5 => {
+                let original = source.clone();
+                let idle = source.graph.entities.remove(&IDLE).ok_or_else(missing)?;
+                source.graph.entities.insert(EntityId::new(901), idle);
+                assert_eq!(source.canonical_bytes(), original.canonical_bytes());
+                "same-byte unrelated lookup alias cannot enter a planning census"
+            }
+            _ => {
+                let worker = source.graph.entities.get(&WORKER).ok_or_else(missing)?.clone();
+                source.graph.entities.insert(SECOND_WORKER, worker);
+                "a duplicate worker cannot supply two advisory workers"
+            }
+        };
+        source.refresh_hash();
+        let planning_error = if case >= 4 {
+            ErrorCode::InternalInvariantViolation
+        } else {
+            ErrorCode::PreconditionsFailed
+        };
+        assert_workforce_refused(&source, description, planning_error)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn workforce_reports_and_plans_refuse_same_hash_physical_kind_aliases() -> Result<()> {
+    for id in [WORKER, EntityId::new(51), FIRST_ORDER] {
+        let original = shared_world()?;
+        let mut source = original.clone();
+        let row = source.graph.entities.get_mut(&id).ok_or_else(missing)?;
+        row.kind = EntityKind::Other(row.kind.as_str().to_owned());
+        source.refresh_hash();
+        assert_eq!(source.canonical_bytes(), original.canonical_bytes());
+        assert_eq!(source.anchor(), original.anchor());
+        assert_workforce_refused(
+            &source,
+            "same-anchor named-kind alias",
+            ErrorCode::PreconditionsFailed,
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn workforce_reports_and_plans_refuse_invalid_complete_edge_identity() -> Result<()> {
+    let mut valid = shared_world()?;
+    let edge = EdgeRecord {
+        id: EdgeId::new(701),
+        revision: 1,
+        kind: EdgeKind::AssignedTo,
+        from: WORKER,
+        to: EntityId::new(51),
+        fields: BTreeMap::new(),
+    };
+    valid.graph.edges.insert(edge.id, edge.clone());
+    valid.refresh_hash();
+    assert_eq!(
+        laboratory_workforce_report(&valid)?
+            .ok_or_else(missing)?
+            .assignments
+            .len(),
+        1,
+    );
+    assert!(prepare_work(&valid)?.digest_is_valid());
+    for case in 0..3 {
+        let mut source = valid.clone();
+        let description = match case {
+            0 => {
+                source.graph.edges.get_mut(&edge.id).ok_or_else(missing)?.id = EdgeId::new(702);
+                "mismatched edge lookup identity"
+            }
+            1 => {
+                let mut nil = source.graph.edges.remove(&edge.id).ok_or_else(missing)?;
+                nil.id = EdgeId::NIL;
+                source.graph.edges.insert(EdgeId::NIL, nil);
+                "matching NIL lookup and edge identity"
+            }
+            _ => {
+                source.graph.edges.insert(EdgeId::new(702), edge.clone());
+                "same edge behind two lookup keys"
+            }
+        };
+        source.refresh_hash();
+        let planning_error = if case == 1 {
+            ErrorCode::PreconditionsFailed
+        } else {
+            ErrorCode::InternalInvariantViolation
+        };
+        assert_workforce_refused(&source, description, planning_error)?;
     }
     Ok(())
 }

@@ -1,5 +1,32 @@
 # Implementation Status
 
+## Unreleased — Keep workforce planning consistent with physical execution
+
+Workforce reports, remaining-service estimates and synthesized plans now admit
+the same complete keyed entity and edge identities as physical advancement.
+Zero generations, NIL identities, mismatched lookup keys and physical named-kind
+aliases cannot certify workers, workshop capacity or remaining work. This
+includes aliases whose canonical bytes and apparent anchor have not changed.
+Valid later worker and workshop generations remain supported.
+
+One shared bounded census preserves advancement's original start-time fact
+guard and single scan. Reports remain read-only and charge the census before
+assignment or workload evidence. Four new public regression groups cover
+reports, remaining service, workload capture, actual StaticPlanner seals and
+physical progress, including a valid later-generation control.
+
+Before the production fix, the four new regression groups executed on current
+nightly: the valid control passed and all three malformed-source groups failed
+by returning workforce evidence. The final intent/laboratory run started but
+its result was not observed before the execution host became unavailable.
+Scoped formatting and whitespace checks completed before that loss; final
+reconstructed source, including the test error-class correction, was reviewed
+through GitHub but could not be compiled or rerun. This is source-level progress,
+not full Rust, MCP, native/live or compatibility qualification.
+
+Owners: `df-predicate-evidence-authority-r7m` and
+`df-lab-shared-workforce-8n4` (broader acceptance remains in progress).
+
 ## Unreleased — Validate physical work identity before simulation advances
 
 The complete entity and edge census now requires matching nonzero lookup and

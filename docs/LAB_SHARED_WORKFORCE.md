@@ -161,6 +161,15 @@ not persistent reservations or observed native worker assignments. Pending
 physical work remains pending when its action proof has failed or timed out;
 the existing cancellation/drain rules still govern cleanup.
 
+Reports, remaining-service estimates and planning admit the same complete keyed
+entity and edge identities as physical advancement. Lookup keys must match
+nonzero record identities, entity generations must be positive, and physical
+unit/building/order/creature kinds must use their canonical named variants.
+Malformed unrelated records also refuse the census; an unchanged state hash
+cannot hide a lookup or kind alias. Valid later worker and workshop generations
+remain supported. The census is charged before assignment or workload evidence
+is produced, and read-only inspection leaves its source unchanged.
+
 ## Planning against the common queue
 
 `LaboratoryWorkforcePlanning` inspects all current registered activities,

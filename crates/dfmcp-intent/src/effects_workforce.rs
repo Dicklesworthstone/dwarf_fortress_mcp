@@ -641,6 +641,7 @@ pub fn laboratory_workforce_remaining_ticks(snapshot: &WorldSnapshot) -> Result<
     budget.charge(
         snapshot.graph.entities.len() as u64 * 4 + snapshot.graph.edges.len() as u64 * 2 + 1,
     )?;
+    validate_effect_source(snapshot, None, &mut budget)?;
     let timeline = EffectTimeline::new(snapshot, 0, &mut budget)?;
     Ok(Some(remaining_ticks(snapshot, &timeline, &mut budget)?))
 }
@@ -657,6 +658,7 @@ pub fn laboratory_workforce_report(
     budget.charge(
         snapshot.graph.entities.len() as u64 * 4 + snapshot.graph.edges.len() as u64 * 2 + 1,
     )?;
+    validate_effect_source(snapshot, None, &mut budget)?;
     let timeline = EffectTimeline::new(snapshot, 0, &mut budget)?;
     let remaining_service_ticks = remaining_ticks(snapshot, &timeline, &mut budget)?;
     let selection = select(snapshot, &timeline, &mut budget)?;

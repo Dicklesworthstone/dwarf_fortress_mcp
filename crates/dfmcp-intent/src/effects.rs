@@ -1472,6 +1472,23 @@ pub fn advance_effects_with_limits(
     // The caller advanced only the clock. Validate original authority before
     // rewinding it: a fact from inside the proposed interval must not become
     // legitimate simply because the destination clock has reached it.
+    validate_effect_source(snapshot, Some(GameTick(start)), &mut budget)?;
+    snapshot.tick = GameTick(start);
+    let result = advance_timeline(snapshot, destination, elapsed, &mut budget);
+    snapshot.tick = destination;
+    result
+}
+
+/// Admit one complete keyed source for physical work or its advisory census.
+/// Reports use the same identity and named-kind rules as execution, so a
+/// same-anchor alias cannot silently add or remove modeled workers or work.
+/// Advancement additionally checks every known fact against its original
+/// source tick in this same scan, before rewinding the caller's clock.
+fn validate_effect_source(
+    snapshot: &WorldSnapshot,
+    advance_from: Option<GameTick>,
+    budget: &mut EffectAdvanceBudget,
+) -> Result<()> {
     budget.charge(snapshot.graph.entities.len() as u64 + snapshot.graph.edges.len() as u64)?;
     for (id, record) in &snapshot.graph.entities {
         // Canonical bytes encode each record's identity, not its lookup key.
@@ -1497,7 +1514,9 @@ pub fn advance_effects_with_limits(
                 record.id.get()
             )));
         }
-        validate_advance_source_fields(&record.fields, start, &mut budget)?;
+        if let Some(start) = advance_from {
+            validate_advance_source_fields(&record.fields, start.0, budget)?;
+        }
     }
     for (id, record) in &snapshot.graph.edges {
         if *id != record.id || id.get() == 0 {
@@ -1505,12 +1524,11 @@ pub fn advance_effects_with_limits(
                 "reference advancement requires matching nonzero edge identities",
             ));
         }
-        validate_advance_source_fields(&record.fields, start, &mut budget)?;
+        if let Some(start) = advance_from {
+            validate_advance_source_fields(&record.fields, start.0, budget)?;
+        }
     }
-    snapshot.tick = GameTick(start);
-    let result = advance_timeline(snapshot, destination, elapsed, &mut budget);
-    snapshot.tick = destination;
-    result
+    Ok(())
 }
 
 fn validate_advance_source_fields(
