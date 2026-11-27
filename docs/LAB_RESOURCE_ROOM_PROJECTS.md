@@ -293,3 +293,22 @@ Original room/connected compilers and continuation `/1` retain their canonical
 source and semantics. No top-level tool, native RPC or live mutation capability
 is added. Current execution evidence and remaining qualification limits are
 recorded in [implementation status](../IMPLEMENTATION_STATUS.md).
+
+## Furnish private offices
+
+In a laboratory session, pass this blueprint to `fortress_plan` to request two
+private offices. Inspect the resulting production, excavation and chair placement
+steps before committing the plan.
+
+```json
+{"template":"provisioned_room","layout":{"template":"office_cluster",
+ "origin":[2,6,10],"rooms":2,"room_size":[3,3]}}
+```
+
+The compiler checks that solid walls surround each interior except for its
+doorway. Its original goal retains those walls, each planned floor and the exact
+installed chair in every office. Available chair items count toward the request.
+The existing procurement planner produces any shortage. An interior must be at
+least two tiles wide and two deep. In a connected-room request, the path planner
+also keeps the walls intact. An office in this model is a physical room. Native
+office zoning and assignment to a noble are separate operations.

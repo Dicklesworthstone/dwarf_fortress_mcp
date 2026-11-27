@@ -41,6 +41,11 @@ enum RoomLayout {
         rooms: u32,
         room_size: [u8; 2],
     },
+    OfficeCluster {
+        origin: [i32; 3],
+        rooms: u32,
+        room_size: [u8; 2],
+    },
     Dormitory {
         origin: [i32; 3],
         bed_count: u8,
@@ -74,6 +79,13 @@ impl RoomLayout {
             } => (
                 coordinate(*origin),
                 BlueprintTemplate::BedroomCluster {
+                    rooms_count: *rooms,
+                    room_size: (room_size[0], room_size[1]),
+                },
+            ),
+            Self::OfficeCluster { origin, rooms, room_size } => (
+                coordinate(*origin),
+                BlueprintTemplate::OfficeCluster {
                     rooms_count: *rooms,
                     room_size: (room_size[0], room_size[1]),
                 },
@@ -124,6 +136,10 @@ impl RoomLayout {
                 "template":"bedroom_cluster", "origin":origin,
                 "rooms":rooms, "room_size":room_size,
             }),
+            Self::OfficeCluster { origin, rooms, room_size } => json!({
+                "template":"office_cluster", "origin":origin,
+                "rooms":rooms, "room_size":room_size,
+            }),
             Self::Dormitory {
                 origin,
                 bed_count,
@@ -151,6 +167,7 @@ impl RoomLayout {
 
     fn furniture(&self) -> &'static [FurnitureKind] {
         match self {
+            Self::OfficeCluster { .. } => &[FurnitureKind::Chair],
             Self::BedroomCluster { .. } | Self::Dormitory { .. } => &[FurnitureKind::Bed],
             Self::DiningHall { .. } | Self::DiningPairs { .. } => &[FurnitureKind::Table, FurnitureKind::Chair],
         }
@@ -376,11 +393,12 @@ impl ProvisionedRoomRequest {
         let retained = retained_installations(snapshot, &layout, &slots, true)?;
         let mut terrain_complete = true;
         let mut terrain_unknown = false;
-        for part in layout.excavations() {
-            match evidence.evaluate(&Predicate::RegionTerrain {
-                area: part.area,
-                tile_code: effects::dig_target_tile_code(part.mode),
-            })? {
+        let terrain = layout.excavations().iter().map(|part| Predicate::RegionTerrain {
+            area: part.area,
+            tile_code: effects::dig_target_tile_code(part.mode),
+        }).chain(layout.office_wall_conditions());
+        for condition in terrain {
+            match evidence.evaluate(&condition)? {
                 PredicateTruth::True => {}
                 PredicateTruth::False => terrain_complete = false,
                 PredicateTruth::Unknown => terrain_unknown = true,
@@ -479,6 +497,14 @@ impl ProvisionedRoomRequest {
         }
         let (origin, template) = self.layout.geometry();
         let layout = BlueprintPlanner.layout(origin, template.clone())?;
+        if !layout.office_walls().is_empty() {
+            let evidence = PredicateEvidence::laboratory(snapshot)?;
+            for condition in layout.office_wall_conditions() {
+                if evidence.evaluate(&condition)? != PredicateTruth::True {
+                    return Err(invalid("private office requires observed solid walls around each room"));
+                }
+            }
+        }
         let slots = furniture_slots(&layout, self.layout.furniture())?;
         if self.is_resource_aware() {
             validate_complete_occupancy(snapshot, &layout)?;
@@ -1047,6 +1073,16 @@ fn seal_summary(label: &str, digest: Digest32) -> Result<String> {
 }
 
 fn reject_workshop_overlap(layout: &BlueprintLayout, actions: &[RequestedAction]) -> Result<()> {
+    if actions.iter().any(|step| {
+        let area = match step.action {
+            Action::DesignateDig { area, .. } => area,
+            Action::Build { footprint, .. } => footprint,
+            _ => return false,
+        };
+        layout.office_walls().iter().any(|wall| overlap(area, *wall))
+    }) {
+        return Err(precondition("workshop preparation would breach an original office wall"));
+    }
     if actions.iter().any(|step| {
         matches!(step.action, Action::Build { footprint, .. }
             if layout.excavations().iter().any(|part| overlap(footprint, part.area)))

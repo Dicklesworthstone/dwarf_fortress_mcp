@@ -28,6 +28,10 @@ pub enum BlueprintTemplate {
         rooms_count: u32,
         room_size: (u8, u8),
     },
+    OfficeCluster {
+        rooms_count: u32,
+        room_size: (u8, u8),
+    },
     Dormitory {
         bed_count: u8,
         columns: u8,
@@ -202,6 +206,7 @@ impl BlueprintPlanner {
                         area: part.area,
                         tile_code: crate::effects::dig_target_tile_code(part.mode),
                     })
+                    .chain(layout.office_wall_conditions())
                     .collect(),
             )
             .normalized(),
@@ -406,6 +411,7 @@ impl BlueprintPlanner {
     ) -> Result<Intent> {
         let furniture = match &template {
             BlueprintTemplate::BedroomCluster { .. } => vec!["Bed"],
+            BlueprintTemplate::OfficeCluster { .. } => vec!["Chair"],
             BlueprintTemplate::DiningHall { .. } => vec!["Table", "Chair"],
             BlueprintTemplate::DiningPairs { table_count, .. } => {
                 ["Chair", "Table"].repeat(usize::from(*table_count))

@@ -111,6 +111,9 @@
             },
             {
               "$ref": "#/$defs/dining_pairs"
+            },
+            {
+              "$ref": "#/$defs/office_cluster"
             }
           ]
         },
@@ -282,6 +285,39 @@
           "minimum": 1,
           "maximum": 4,
           "default": 4
+        }
+      }
+    },
+    "office_cluster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template",
+        "origin",
+        "rooms",
+        "room_size"
+      ],
+      "properties": {
+        "template": {
+          "const": "office_cluster"
+        },
+        "origin": {
+          "$ref": "#/$defs/coordinate"
+        },
+        "rooms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "room_size": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 255
+          }
         }
       }
     }

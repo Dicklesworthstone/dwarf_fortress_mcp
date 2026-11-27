@@ -35,6 +35,7 @@ pub struct BlueprintLayout {
     tile_count: u64,
     access_point: Option<MapCoord>,
     reserved_crossing: Option<MapCuboid>,
+    office_walls: Vec<MapCuboid>,
     dormitory_beds: Vec<MapCoord>,
     dining_pairs: Vec<(MapCoord, MapCoord)>,
 }
@@ -67,6 +68,20 @@ impl BlueprintLayout {
         self.reserved_crossing
     }
 
+    /// Original office wall strips, excluding the south doorway of each interior.
+    #[must_use]
+    pub fn office_walls(&self) -> &[MapCuboid] {
+        &self.office_walls
+    }
+
+    /// Terrain that must still enclose the finished offices.
+    pub fn office_wall_conditions(&self) -> impl Iterator<Item = dfmcp_world::Predicate> + '_ {
+        self.office_walls.iter().map(|&area| dfmcp_world::Predicate::RegionTerrain {
+            area,
+            tile_code: dfmcp_world::tile_codes::SOLID_WALL,
+        })
+    }
+
     /// Bed locations inside the single shared room, in row-major order.
     /// Each selected tile has a free approach directly north of it.
     #[must_use]
@@ -87,6 +102,7 @@ impl BlueprintLayout {
             tile_count: 0,
             access_point: None,
             reserved_crossing: None,
+            office_walls: Vec::new(),
             dormitory_beds: Vec::new(),
             dining_pairs: Vec::new(),
         };
@@ -97,6 +113,28 @@ impl BlueprintLayout {
             } => {
                 layout.cluster(origin, rooms_count, room_size, 4)?;
                 layout.summary = format!("excavate {rooms_count} bedroom units");
+            }
+            BlueprintTemplate::OfficeCluster { rooms_count, room_size } => {
+                if room_size.0 < 2 || room_size.1 < 2 {
+                    return Err(invalid("each office needs a two-by-two or larger interior for chair access"));
+                }
+                layout.cluster(origin, rooms_count, room_size, 4)?;
+                for room in layout.excavations.iter().filter(|part| part.role == ExcavationRole::Room) {
+                    let a = room.area;
+                    let northwest = offset(a.min, -1, -1)?;
+                    let southeast = offset(a.max, 1, 1)?;
+                    let south_door = offset(a.min, i64::from(room_size.0 - 1) / 2, i64::from(room_size.1))?;
+                    let west = offset(a.min, -1, 0)?;
+                    let east = offset(a.max, 1, 0)?;
+                    layout.office_walls.extend([
+                        MapCuboid::new(northwest, MapCoord::new(southeast.x, northwest.y, northwest.z))?,
+                        MapCuboid::new(west, MapCoord::new(west.x, east.y, west.z))?,
+                        MapCuboid::new(MapCoord::new(east.x, west.y, east.z), east)?,
+                        MapCuboid::new(MapCoord::new(west.x, southeast.y, west.z), offset(south_door, -1, 0)?)?,
+                        MapCuboid::new(offset(south_door, 1, 0)?, southeast)?,
+                    ]);
+                }
+                layout.summary = format!("excavate {rooms_count} private office interiors");
             }
             BlueprintTemplate::WorkshopHub { bays_count } => {
                 layout.cluster(origin, bays_count, (5, 5), MAX_BLUEPRINT_ROOMS)?;

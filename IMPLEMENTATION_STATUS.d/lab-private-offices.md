@@ -1,0 +1,1 @@
+The laboratory office compiler retains a solid perimeter except at the doorway, refuses conflicting workshop setup and uses original item-backed chair placements. Native zoning and citizen assignment require separate evidence.

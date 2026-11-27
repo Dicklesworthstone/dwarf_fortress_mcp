@@ -154,6 +154,30 @@ fn fact(value: Value, tick: GameTick) -> Fact {
 }
 
 #[test]
+fn private_offices_produce_and_install_chairs_and_keep_their_walls() -> Result<()> {
+    let request = ProvisionedRoomRequest::parse_current(
+        &json!({"template":"provisioned_room","layout":{
+            "template":"office_cluster", "origin":[2,6,10], "rooms":2, "room_size":[3,3],
+        }}).to_string(),
+    )?;
+    let original = ProvisionedRoomRequest::parse(&request.canonical_json())?;
+    let (layout, targets) = original.access_geometry()?;
+    assert_eq!(targets, [MapCoord::new(3, 7, 10), MapCoord::new(7, 7, 10)]);
+    let source = source()?;
+    let (intent, analysis) = original.compile(IntentId::new(976), &source, "")?;
+    assert_eq!(analysis["inventory"][0]["item"], "CHAIR");
+    assert_eq!(analysis["inventory"][0]["new_items_required"], 2);
+    assert_eq!(original.semantic_goal_truth(&source)?, PredicateTruth::False);
+    let (mut finished, _) = execute(source, &intent)?;
+    assert_eq!(original.semantic_goal_truth(&finished)?, PredicateTruth::True);
+    let wall = layout.office_walls()[0].min;
+    finished.set_tile_code(wall, tile_codes::FLOOR)?;
+    assert_eq!(original.semantic_goal_truth(&finished)?, PredicateTruth::False);
+    assert!(original.compile_residual(IntentId::new(977), &finished, "").is_err());
+    Ok(())
+}
+
+#[test]
 fn dormitory_produces_and_installs_every_exact_bed_in_the_shared_room() -> Result<()> {
     let room = ProvisionedRoomRequest::parse_current(
         &json!({"template":"provisioned_room","layout":{

@@ -1,0 +1,1 @@
+Laboratory provisioned-room and connected-room plans accept office clusters. The original objective covers the enclosing walls, excavation and each installed chair. Finite procurement covers missing chairs.
