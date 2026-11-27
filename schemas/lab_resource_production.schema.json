@@ -49,6 +49,7 @@
             "properties": {
               "building": {"enum": ["workshop:Still", "workshop:Kitchen", "workshop:Carpenters"]},
               "location": {"$ref": "#/$defs/coordinate"},
+              "preparation": {"const": "mine_rock_v1"},
               "min": {"$ref": "#/$defs/coordinate"},
               "max": {"$ref": "#/$defs/coordinate"}
             }

@@ -167,6 +167,9 @@
                   "location": {
                     "$ref": "#/$defs/coordinate"
                   },
+                  "preparation": {
+                    "const": "mine_rock_v1"
+                  },
                   "min": {
                     "$ref": "#/$defs/coordinate"
                   },
