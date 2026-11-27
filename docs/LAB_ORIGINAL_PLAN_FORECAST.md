@@ -438,13 +438,19 @@ continuity partial and predictions ineligible as mutation evidence.
 To obtain actual laboratory progress and proof, explicitly call the existing
 selected-plan `fortress.wait` with the original digests and a chosen tick
 allowance. The default forecast's next-step link identifies those originals.
-Complete-project advice identifies the latest already committed stage of each
-selected root, so waiting can progress an active continuation. It also lists
-each root or descendant with reserve endpoint custody. Waiting for a tip does
-not retain its predecessors' samples: at the original absolute tick, explicitly
-capture every required pursuit with zero-tick selected waits, in groups of at
-most eight, before advancing time again. No advice implies an automatic wait
-or authorizes the predicted horizon.
+Complete-project advice normally selects the latest committed stage of each root.
+The `next_step.reserve_capture` object identifies the earliest outstanding
+endpoint at or after the actual source tick, the ticks remaining, the number
+of missing samples at that endpoint and the first batch of wait selectors.
+A caller choosing to advance time can use this distance to limit its request
+while the source anchor is current. Past missing samples are counted separately.
+
+At the exact endpoint, the returned wait arguments select up to eight unsampled
+originals with `max_game_ticks: 0`, including predecessor stages. Execute that
+wait and refresh the forecast. If more than eight samples are due, the next
+forecast selects the next outstanding batch. A retained false or unknown sample
+is already recorded and is never selected for recapture. The forecast itself
+does not advance time, capture evidence or grant clock authority.
 
 ## Implementation and verification
 

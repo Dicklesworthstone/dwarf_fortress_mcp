@@ -325,3 +325,75 @@ fn complete_project_rejects_unsupported_originals_missing_sources_and_clipped_ou
     assert_eq!(view(&owner,|session|Ok(format!("{:?}",session.adapter)))?,before);
     Ok(())
 }
+
+#[test]
+fn exact_reserve_handoff_batches_only_outstanding_current_originals() {
+    let mut pursuits: Vec<_> = (0..12)
+        .rev()
+        .map(|id| ReservePursuit {
+            plan_digest: format!("{id:064x}"),
+            wait_digest: format!("{:064x}", id + 100),
+            reserve_until_tick: 70,
+            sample_retained: id == 0,
+        })
+        .collect();
+    pursuits[0].reserve_until_tick = 69;
+    pursuits[1].reserve_until_tick = 80;
+    let tips = json!(["a latest committed continuation"]);
+    let mut next = json!({"arguments":{"plan_digests":tips}});
+    reserve_handoff(&mut next, &pursuits, 70);
+    let first: Vec<_> = (101..109).map(|n| format!("{n:064x}")).collect();
+    assert_eq!(next["arguments"]["plan_digests"], json!(first));
+    assert_eq!(next["arguments"]["max_game_ticks"], 0);
+    assert_eq!(next["reserve_capture"]["missing_at_next_endpoint"], 9);
+    assert_eq!(next["reserve_capture"]["past_endpoints_missing"], 1);
+    for pursuit in &mut pursuits {
+        if first.contains(&pursuit.wait_digest) {
+            pursuit.sample_retained = true;
+        }
+    }
+    reserve_handoff(&mut next, &pursuits, 70);
+    assert_eq!(next["arguments"]["plan_digests"], json!([format!("{:064x}", 109)]));
+    let mut after = json!({"arguments":{"plan_digests":tips}});
+    reserve_handoff(&mut after, &pursuits, 71);
+    assert_eq!(after["arguments"]["plan_digests"], tips);
+    assert_eq!(after["reserve_capture"]["past_endpoints_missing"], 2);
+    assert_eq!(after["reserve_capture"]["ticks_until_next_endpoint"], 9);
+}
+
+#[test]
+fn public_forecast_handoff_captures_actual_reserve_and_moves_to_next_frontier() -> TestResult {
+    let _serial = crate::test_serial();
+    let owner = open("8161109", "starter_fortress", false)?;
+    let mut originals = Vec::new();
+    for (item, minimum, tick) in [("DRINK", 40, 1_234), ("FOOD", 65, 1_511)] {
+        originals.push(commit(&owner, None, Some(json!({
+            "template":"production","quotas":[{"item":item,"minimum":minimum}],
+            "reserve_until_tick":tick,
+        })))?);
+    }
+    let before = complete_query(&owner, &originals, 2_000)?;
+    assert_eq!(before["ok"], true, "{before}");
+    let distance = before["next_step"]["reserve_capture"]["ticks_until_next_endpoint"]
+        .as_u64().ok_or("first reserve frontier missing")?;
+    let advanced = parsed(&facade::fortress_wait(Some(owner.0.clone()), Some(distance)))?;
+    assert_eq!(advanced["game_tick"], 1_234, "{advanced}");
+    let at = complete_query(&owner, &originals, 0)?;
+    assert_eq!(at["ok"], true, "{at}");
+    let args = &at["next_step"]["arguments"];
+    assert_eq!(args["plan_digests"], json!([originals[0]]));
+    assert_eq!(args["max_game_ticks"], 0);
+    let captured = parsed(&facade::fortress_wait_for_plans(
+        args["session_id"].as_str().map(str::to_owned),
+        args["max_game_ticks"].as_u64(),
+        serde_json::from_value(args["plan_digests"].clone())?,
+        None,
+    ))?;
+    assert_eq!(captured["ok"], true, "{captured}");
+    assert_eq!(captured["advanced_game_ticks"], 0);
+    let next = complete_query(&owner, &originals, 0)?;
+    assert_eq!(next["ok"], true, "{next}");
+    assert_eq!(next["next_step"]["reserve_capture"]["next_endpoint_tick"], 1_511);
+    assert_eq!(next["next_step"]["reserve_capture"]["past_endpoints_missing"], 0);
+    Ok(())
+}

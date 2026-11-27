@@ -17,6 +17,62 @@ pub(super) mod model;
 mod admission;
 pub(super) use admission::{AdmittedProjectSet, admit_complete_projects};
 
+const MAX_ORIGINALS: usize = 8;
+
+#[derive(serde::Serialize)]
+struct ReservePursuit {
+    plan_digest: String,
+    #[serde(skip)]
+    wait_digest: String,
+    reserve_until_tick: u64,
+    sample_retained: bool,
+}
+
+#[derive(serde::Serialize)]
+struct ReserveCapture<'a> {
+    source_tick: u64,
+    next_endpoint_tick: Option<u64>,
+    ticks_until_next_endpoint: Option<u64>,
+    missing_at_next_endpoint: usize,
+    first_batch: Vec<&'a str>,
+    past_endpoints_missing: usize,
+}
+
+/// Only actual retained samples remove an original from this frontier.
+fn next_reserve_capture(pursuits: &[ReservePursuit], now: u64) -> ReserveCapture<'_> {
+    let pending = pursuits.iter().filter(|pursuit| !pursuit.sample_retained);
+    let past_endpoints_missing = pending.clone().filter(|p| p.reserve_until_tick < now).count();
+    let earliest = pending
+        .clone()
+        .map(|p| p.reserve_until_tick)
+        .filter(|&tick| tick >= now)
+        .min();
+    let mut frontier: Vec<_> = pending
+        .filter(|p| Some(p.reserve_until_tick) == earliest)
+        .collect();
+    frontier.sort_unstable_by(|left, right| left.plan_digest.cmp(&right.plan_digest));
+    ReserveCapture {
+        source_tick: now,
+        next_endpoint_tick: earliest,
+        ticks_until_next_endpoint: earliest.map(|tick| tick - now),
+        missing_at_next_endpoint: frontier.len(),
+        first_batch: frontier.iter().take(MAX_ORIGINALS).map(|p| p.wait_digest.as_str()).collect(),
+        past_endpoints_missing,
+    }
+}
+
+fn reserve_handoff(next: &mut Value, pursuits: &[ReservePursuit], now: u64) {
+    let capture = next_reserve_capture(pursuits, now);
+    if capture.next_endpoint_tick == Some(now) {
+        next["arguments"]["plan_digests"] = json!(capture.first_batch);
+        next["arguments"]["max_game_ticks"] = json!(0);
+        next["reason"] = json!(
+            "capture these exact reserve endpoints now, then refresh the forecast before advancing time"
+        );
+    }
+    next["reserve_capture"] = json!(capture);
+}
+
 #[derive(Deserialize)]
 struct Selector {
     mode: String,
@@ -74,7 +130,7 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
     let request: Request = serde_json::from_str(raw)
         .map_err(|error| invalid(format!("invalid original forecast request: {error}")))?;
     let Mode::ForecastOriginals = request.mode;
-    if request.plan_digests.is_empty() || request.plan_digests.len() > 8 {
+    if request.plan_digests.is_empty() || request.plan_digests.len() > MAX_ORIGINALS {
         return Err(invalid(
             "forecast_originals requires one to eight plan_digests",
         ));
@@ -202,11 +258,6 @@ pub(super) fn execute(
     )?;
     let remaining = remaining(context, started)?;
     let work = super::query_work_json(&remaining);
-    if started.elapsed() >= Duration::from_millis(context.budget.max_wall_millis) {
-        return Err(exhausted(
-            "joint forecast exhausted its deadline before publication",
-        ));
-    }
     let mut response = json!({
         "ok":true,"mode":"forecast_originals","schema":"dfmcp.lab-original-forecast/1",
         "session_id":session.session_id.to_string(),
@@ -242,6 +293,11 @@ pub(super) fn execute(
         response["next_step"]["reserve_capture_rule"] = json!(
             "each pursuit retains its own exact endpoint; a tip wait does not retain predecessor samples; use explicit zero-tick selected waits in groups of at most eight at that absolute tick before advancing again"
         );
+        reserve_handoff(
+            &mut response["next_step"],
+            &admitted.reserve_endpoint_pursuits,
+            context.anchor.tick.0,
+        );
         if !admitted.recovered_goals.is_empty() {
             response["schema"] = json!(if admitted.unfinished_recovered_steps > 0 {
                 "dfmcp.lab-original-forecast/4"
@@ -258,6 +314,11 @@ pub(super) fn execute(
             response["source_work"]["fixed_structural_bytes"] = json!(admitted.fixed_shape.0);
             response["source_work"]["fixed_structural_work"] = json!(admitted.fixed_shape.1);
         }
+    }
+    if started.elapsed() >= Duration::from_millis(context.budget.max_wall_millis) {
+        return Err(exhausted(
+            "joint forecast exhausted its deadline before publication",
+        ));
     }
     Ok(response)
 }

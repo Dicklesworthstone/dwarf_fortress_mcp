@@ -17,7 +17,7 @@ use super::super::{
     objectives::Objective,
     selected_plan_wait::{PlanSetSource, SelectedPlanWait},
 };
-use super::{exhausted, invalid, model, remaining};
+use super::{ReservePursuit, exhausted, invalid, model, remaining};
 
 /// One admitted set shared by the original query and portfolio comparisons.
 /// Fixed custody excludes the current world, which every private source check
@@ -55,7 +55,7 @@ pub(in crate::server) struct AdmittedProjectSet<'a> {
     pub(super) carried_custody_records: u64,
     pub(super) carried_custody_bytes: u64,
     pub(super) next_wait_digests: Vec<String>,
-    pub(super) reserve_endpoint_pursuits: Vec<Value>,
+    pub(super) reserve_endpoint_pursuits: Vec<ReservePursuit>,
 }
 
 impl AdmittedProjectSet<'_> {
@@ -414,10 +414,12 @@ pub(super) fn admit_originals<'a>(
                 |(digest, _)| digest.to_hex(),
             ));
             if let Some(until) = root_reserve {
-                reserve_endpoint_pursuits.push(json!({
-                    "plan_digest":selected.actual.to_hex(),"reserve_until_tick":until,
-                    "sample_retained":original.selected_wait_reserve_observation.is_some(),
-                }));
+                reserve_endpoint_pursuits.push(ReservePursuit {
+                    plan_digest: selected.actual.to_hex(),
+                    wait_digest: member.requested_digest().to_hex(),
+                    reserve_until_tick: until,
+                    sample_retained: original.selected_wait_reserve_observation.is_some(),
+                });
             }
             for (index, (digest, parent)) in descendants.iter().enumerate() {
                 remaining(context, started)?;
@@ -435,10 +437,12 @@ pub(super) fn admit_originals<'a>(
                     ));
                 }
                 if let Some(until) = reserve_until {
-                    reserve_endpoint_pursuits.push(json!({
-                        "plan_digest":digest.to_hex(),"reserve_until_tick":until,
-                        "sample_retained":objective.selected_wait_reserve_observation.is_some(),
-                    }));
+                    reserve_endpoint_pursuits.push(ReservePursuit {
+                        plan_digest: digest.to_hex(),
+                        wait_digest: digest.to_hex(),
+                        reserve_until_tick: until,
+                        sample_retained: objective.selected_wait_reserve_observation.is_some(),
+                    });
                 }
                 let plan = objective
                     .resource_plan()

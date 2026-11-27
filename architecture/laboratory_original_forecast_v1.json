@@ -171,7 +171,7 @@
     "request_and_replay_metadata": "ordinary query metadata remains",
     "continuity": "partial",
     "eligible_as_mutation_evidence": false,
-    "complete_project_next_step": "explicit selected wait targets the latest admitted committed tip per root; reserve_endpoint_pursuits lists each independent exact sample obligation; capture remaining samples by zero-tick selected waits of at most eight pursuits at the original endpoint before advancing again",
+    "complete_project_next_step": "selected waits normally target the latest committed tips; reserve_capture reports the earliest unsampled frontier from the actual anchor and past missing count. At the exact tick the next wait explicitly captures up to eight outstanding original endpoints in actual digest order with zero time. Refresh after each capture.",
     "recovered_monitor_state_changed": false,
     "predicted_recovered_proof_published": false
   },
