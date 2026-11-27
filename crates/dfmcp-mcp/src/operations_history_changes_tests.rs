@@ -700,6 +700,8 @@ fn furniture_arrivals_separate_new_ids_from_stock_changes_and_bound_only_example
                 _ => {}
             }
         }
+        let expected_source = json!({"df_version":second.jobs.df_version,
+            "dfhack_version":second.jobs.dfhack_version,"paused":second.jobs.paused});
         let fixture = archive(profile, first, vec![second], 8192)?;
         assert_eq!(observe(&fixture.session)?["ok"], true);
         let rows = listing(&fixture.session)?["rows"].clone();
@@ -707,6 +709,7 @@ fn furniture_arrivals_separate_new_ids_from_stock_changes_and_bound_only_example
             "to":record(&rows[1]),"furniture_kind":"bed","material":[0,1]});
         let result = ask(&fixture.session, query.clone())?;
         assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["target_source"], expected_source);
         assert_eq!(result["before_item_count"], 3);
         assert_eq!(result["after_item_count"], 11);
         assert_eq!(result["net_item_count_change"], 8);
@@ -737,6 +740,7 @@ fn furniture_arrivals_separate_new_ids_from_stock_changes_and_bound_only_example
         assert_eq!(chair["new_item_examples"][0]["native_item_id"], 45);
         query["from"] = record(&rows[1]);
         let same = ask(&fixture.session, query.clone())?;
+        assert_eq!(same["target_source"], expected_source);
         assert_eq!(same["new_item_count"], 0);
         assert_eq!(same["source_work"]["distinct_endpoints"], 1);
         query["from"]["record_digest"] = json!("0".repeat(64));

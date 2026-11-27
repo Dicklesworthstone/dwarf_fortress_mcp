@@ -347,3 +347,34 @@ is not execution of the Rust code or verification of the world projector. JSON
 Schema meta-validation and source-byte checks are also development checks only.
 No Rust, Clippy, rustfmt, stdio, real storage crash campaign, live DFHack or full
 repository qualification receipt is claimed for this source generation.
+
+### Independently inspect selected furniture materials
+
+For a paused target endpoint, the operator can resolve the material of each
+returned example in the running fortress. Copy
+`bridge/oracles/dfmcp-furniture-materials.lua` into DFHack's `hack/scripts/`
+directory. Save the decoded successful arrivals result as `arrivals.json`.
+Print the command for its selected native item IDs with:
+
+```bash
+python scripts/verify_furniture_materials.py arrivals.json
+```
+
+Run the printed command at the DFHack console while the fortress remains paused.
+Save its JSON output as `materials.json` and compare the two observations:
+
+```bash
+python scripts/verify_furniture_materials.py arrivals.json materials.json
+```
+
+The script reads at most eight selected items under one DFHack suspension.
+It resolves each numeric material pair through `dfhack.matinfo.decode` and
+reports the raw material token, mode and WOOD flag. The comparison requires
+matching DF and DFHack versions, fortress identity, paused clock, item ID
+frontier and exact selected item IDs, kinds, subtypes and material pairs. A
+mismatch refuses the comparison. Undecodable raws retain an unknown classification.
+A plant material with its WOOD flag set contributes to the selected wood count.
+
+The resulting classification describes the independent read. The two calls
+cannot establish continuous process identity, production by an original order,
+or the materials of additional items omitted by the eight-example limit.
