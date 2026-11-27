@@ -13,7 +13,7 @@ import hashlib
 import excavation_observer as e
 from furniture_allocation import Guard, idle
 from furniture_plan import canonical, require
-from room_provisioning import MAX_PARTS, MAX_PLAN_BYTES, MAX_TILES, Point, RoomPlan
+from room_provisioning import PRIVATE_ROOM_TEMPLATES, MAX_PARTS, MAX_PLAN_BYTES, MAX_TILES, Point, RoomPlan
 
 SCHEMA = 'dfmcp.room-terrain-survey/1'
 POLICY = 'dfmcp.room-remaining-walls/1'
@@ -70,7 +70,7 @@ def selection(plan: RoomPlan, guard: Guard = idle) -> Selection:
     kinds = {area['name']: area['template']['kind'] for area in body['intent']['areas']}
     walls: set[Point] = set()
     for area in body['areas']:
-        if kinds[area['name']] != 'bedroom_cluster':
+        if kinds[area['name']] not in PRIVATE_ROOM_TEMPLATES:
             continue
         for unit in area['units']:
             x, y, z = unit['origin']

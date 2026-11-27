@@ -17,7 +17,7 @@ from room_access import Access
 from room_connections import WorkLimit as ConnectionWorkLimit
 from room_orientation import ROTATIONS, rotation
 from room_provisioning import (
-    INTENT_SCHEMA, MAX_AREAS, MAX_CAPTURE_VOLUME, MAX_PARTS, MAX_PLAN_BYTES,
+    PRIVATE_ROOM_TEMPLATES, INTENT_SCHEMA, MAX_AREAS, MAX_CAPTURE_VOLUME, MAX_PARTS, MAX_PLAN_BYTES,
     MAX_TILES, RoomPlan, _json, _object, _vector,
 )
 
@@ -133,7 +133,7 @@ def _profile(area: dict, folder: str, site: int, level: int, work: _Work) -> _Pr
             for xx in range(x, x + width):
                 work()
                 floors.add(relative((xx, yy, z)))
-    if normalized['template']['kind'] == 'bedroom_cluster':
+    if normalized['template']['kind'] in PRIVATE_ROOM_TEMPLATES:
         for unit in body['areas'][0]['units']:
             x, y, z = unit['origin']
             width, height, _ = unit['size']

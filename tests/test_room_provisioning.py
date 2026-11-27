@@ -235,7 +235,7 @@ class RoomProvisioningTests(unittest.TestCase):
             doc=intent();doc['areas'][0][key]=value;cases.append(doc)
         for key,value in [('rooms_count',True),('rooms_count',0),('rooms_count',11),
                           ('room_size',[2,3]),('room_size',[3,8]),('room_size',[3,3,3]),
-                          ('columns',4),('kind','workshop')]:
+                          ('columns',9),('kind','workshop')]:
             doc=intent();doc['areas'][0]['template'][key]=value;cases.append(doc)
         for doc in cases:
             with self.subTest(doc=doc),self.assertRaises((ValueError,TypeError)):RoomPlan.compile(doc)

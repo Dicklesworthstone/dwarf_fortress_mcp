@@ -224,3 +224,24 @@ placement process, completion monitor, Rust/MCP, real SDK or live-game campaigns
 It verifies the room-to-inventory-handoff boundary, not those downstream stages
 or production qualification. All existing source dependencies used in these
 Python tests were verified against their Git blob hashes.
+
+## Private offices
+
+Use an `office_cluster` to excavate a private room and place a chair in it for
+each requested office. For example, this area in a provisioning request plans
+two separate three-by-three interiors.
+
+```json
+{"name":"administration","origin":[40,40,2],
+ "template":{"kind":"office_cluster","rooms_count":2,"room_size":[3,3]},
+ "item_constraints":{"chair":{"material":[7,-1]}}}
+```
+
+Omit the material constraint to accept any otherwise eligible chair. Use
+`scripts/plan_rooms.py compile` for fixed coordinates or omit the origin in
+a `scripts/layout_rooms.py` request to search an allowed region. Each chair
+has a walkable approach. The survey, corridor router and furniture handoff
+retain each separating wall except the designated doorway. The furniture
+handoff requires enough matching chairs for the entire request. This produces
+the physical rooms and furniture plan. Manager appointment, native office-zone
+designation and assignment to a citizen are separate game operations.

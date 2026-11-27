@@ -22,6 +22,7 @@ INTENT_SCHEMA = 'dfmcp.room-provisioning-request/1'
 PLAN_SCHEMA = 'dfmcp.room-provisioning-plan/1'
 POLICY = 'dfmcp.connected-room-furnishings/1'
 MAX_PLAN_BYTES = 49152
+PRIVATE_ROOM_TEMPLATES = ('bedroom_cluster', 'office_cluster')
 MAX_AREAS = 8
 MAX_PARTS = 32
 MAX_TILES = 512
@@ -150,21 +151,26 @@ def _area(value: object, guard: Guard) -> tuple[dict, list[_Rect], list[dict], l
                       'doorway': None if doorway is None else list(doorway),
                       'slots': [unit_name + '.' + item_kind for item_kind, _ in items]})
 
-    if kind == 'bedroom_cluster':
-        _object(template, {'kind', 'rooms_count', 'room_size'}, {'furnishings', 'columns'})
-        furnishings = template.get('furnishings', 'bed_chair_table')
-        require(furnishings in ('bed_only', 'bed_chair_table'), 'unsupported bedroom furnishings')
-        bed_only = furnishings == 'bed_only'
+    if kind in PRIVATE_ROOM_TEMPLATES:
+        office = kind == 'office_cluster'
+        allowed = {'columns'} if office else {'furnishings', 'columns'}
+        _object(template, {'kind', 'rooms_count', 'room_size'}, allowed)
+        if office:
+            kinds = ('chair',)
+        else:
+            furnishings = template.get('furnishings', 'bed_chair_table')
+            require(furnishings in ('bed_only', 'bed_chair_table'), 'unsupported bedroom furnishings')
+            kinds = ('bed',) if furnishings == 'bed_only' else ('bed', 'chair', 'table')
+        single_item = len(kinds) == 1
         columns = integer(template.get('columns', 4), 1, 8)
-        count = integer(template['rooms_count'], 1, 14 if bed_only else 10)
+        count = integer(template['rooms_count'], 1, 14 if single_item else 10)
         rows = (count + columns - 1) // columns
         # Each room needs an interior and a door, plus one corridor per row and a spine.
-        require(2 * count + rows + 1 <= MAX_PARTS, 'bedroom rows exceed excavation part limit')
+        require(2 * count + rows + 1 <= MAX_PARTS, 'private room rows exceed excavation part limit')
         size = template['room_size']
-        require(type(size) is list and len(size) == 2, 'bedroom interior requires width and height')
-        width, height = (integer(n, 1 if bed_only else 3, 7) for n in size)
-        require(width * height >= 2, 'bedroom needs an interior approach beside its bed')
-        kinds = ('bed',) if bed_only else ('bed', 'chair', 'table')
+        require(type(size) is list and len(size) == 2, 'private room interior requires width and height')
+        width, height = (integer(n, 1 if single_item else 3, 7) for n in size)
+        require(width * height >= 2, 'private room needs an interior approach beside its furniture')
         constraints = _constraints(value.get('item_constraints', {}), kinds)
         for row in range(rows):
             in_row = min(columns, count - row * columns)
@@ -175,9 +181,9 @@ def _area(value: object, guard: Guard) -> tuple[dict, list[_Rect], list[dict], l
                 rectangle(px, py, width, height, 'room')
                 rectangle(doorway[0], doorway[1], 1, 1, 'doorway')
                 # In a shallow room keep the cell immediately inside the door clear.
-                bed_x = px + width - 1 if height == 1 else px
-                items = (('bed', (bed_x, py, z)),)
-                if not bed_only:
+                item_x = px + width - 1 if height == 1 else px
+                items = ((kinds[0], (item_x, py, z)),)
+                if not single_item:
                     items += (('chair', (px + width - 1, py, z)),
                               ('table', (px + width - 1, py + 1, z)))
                 unit(row * columns + column + 1, px, py, width, height, doorway, items)
@@ -187,8 +193,8 @@ def _area(value: object, guard: Guard) -> tuple[dict, list[_Rect], list[dict], l
         normalized_template = {'kind': kind, 'rooms_count': count, 'room_size': [width, height]}
         if columns != 4:
             normalized_template['columns'] = columns
-        if bed_only:
-            normalized_template['furnishings'] = furnishings
+        if kinds == ('bed',):
+            normalized_template['furnishings'] = 'bed_only'
     elif kind == 'dormitory':
         _object(template, {'kind', 'bed_count'}, {'columns'})
         count = integer(template['bed_count'], 1, 32)
@@ -235,7 +241,7 @@ def _connect_project(compiled, floors: set[Point], targets: set[Point],
     protected = set(targets)
     high = tuple(a + n for a, n in zip(low, extent))
     for area, _, units, _, _ in compiled:
-        if area['template']['kind'] != 'bedroom_cluster':
+        if area['template']['kind'] not in PRIVATE_ROOM_TEMPLATES:
             continue
         for unit in units:
             x, y, z = unit['origin']
@@ -344,7 +350,7 @@ class RoomPlan:
         # Enforce separating room walls across ALL areas, not merely within each
         # cluster. A corridor from another area cannot open a bedroom wall.
         for area, _, units, _, _ in compiled:
-            if area['template']['kind'] != 'bedroom_cluster':
+            if area['template']['kind'] not in PRIVATE_ROOM_TEMPLATES:
                 continue
             for unit in units:
                 px, py, pz = unit['origin']
@@ -355,10 +361,10 @@ class RoomPlan:
                         guard()
                         if xx in (px - 1, px + width) or yy in (py - 1, py + height):
                             require((xx, yy, pz) == door or (xx, yy, pz) not in floors,
-                                    'another excavation opens a required bedroom wall')
+                                    f"another excavation opens a required {area['template']['kind'].split('_')[0]} wall")
                             if site_mask is not None and (xx, yy, pz) != door:
                                 require(site_mask.permits_wall((xx, yy, pz)),
-                                        'required bedroom wall forbidden by site mask')
+                                        f"required {area['template']['kind'].split('_')[0]} wall forbidden by site mask")
         geometry = []
         for area, group, units, slots, entrance in compiled:
             floor = set().union(*(set(part.points(guard)) for part in group))

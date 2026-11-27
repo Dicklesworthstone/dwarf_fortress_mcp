@@ -1,0 +1,1 @@
+The room planner can lay out, survey and provision a cluster of private offices with one accessible chair per room. Material constraints, separating walls and the original chair selections survive into the furniture handoff.

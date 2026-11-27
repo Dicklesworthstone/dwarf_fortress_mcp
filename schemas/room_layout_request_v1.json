@@ -365,6 +365,9 @@
             },
             {
               "$ref": "#/$defs/dormitory"
+            },
+            {
+              "$ref": "#/$defs/office"
             }
           ]
         },
@@ -451,6 +454,28 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "properties": {
+                  "kind": {
+                    "const": "office_cluster"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "item_constraints": {
+                "propertyNames": {
+                  "const": "chair"
+                }
+              }
+            }
+          }
         }
       ]
     },
@@ -499,6 +524,67 @@
           "maximum": 8
         }
       }
+    },
+    "office": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "rooms_count",
+        "room_size"
+      ],
+      "properties": {
+        "kind": {
+          "const": "office_cluster"
+        },
+        "rooms_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 14
+        },
+        "room_size": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "not": {
+            "const": [
+              1,
+              1
+            ]
+          }
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "rooms_count": {
+                "const": 14
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "columns"
+            ],
+            "properties": {
+              "columns": {
+                "minimum": 7
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

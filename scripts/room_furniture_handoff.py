@@ -13,7 +13,7 @@ import json
 from furniture_allocation import Guard, idle
 from furniture_handoff import Handoff
 from furniture_plan import canonical, integer, require, unique
-from room_provisioning import MAX_PLAN_BYTES, RoomPlan
+from room_provisioning import PRIVATE_ROOM_TEMPLATES, MAX_PLAN_BYTES, RoomPlan
 
 SCHEMA = 'dfmcp.room-furniture-handoff/1'
 MAX_BYTES = 96 * 1024
@@ -121,7 +121,7 @@ class RoomFurnitureHandoff:
         kinds = {area['name']: area['template']['kind'] for area in value['intent']['areas']}
         for area in value['areas']:
             guard()
-            if kinds[area['name']] != 'bedroom_cluster':
+            if kinds[area['name']] not in PRIVATE_ROOM_TEMPLATES:
                 continue
             for unit in area['units']:
                 guard()
@@ -130,7 +130,7 @@ class RoomFurnitureHandoff:
                 require(0 <= x - 1 and x + width < dimensions[0]
                         and 0 <= y - 1 and y + height < dimensions[1]
                         and 0 <= z < dimensions[2],
-                        'original required bedroom wall lies outside native map')
+                        'original required private-room wall lies outside native map')
         guard()
 
     def compact(self) -> dict:

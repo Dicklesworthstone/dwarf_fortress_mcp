@@ -13,7 +13,7 @@ import struct
 
 from furniture_allocation import Candidate, Guard, idle
 from furniture_plan import canonical, integer, require, unique
-from room_provisioning import MAX_PLAN_BYTES, RoomPlan
+from room_provisioning import PRIVATE_ROOM_TEMPLATES, MAX_PLAN_BYTES, RoomPlan
 import route_furniture_allocation as routes
 import route_furniture_review as reviews
 
@@ -83,7 +83,7 @@ def _requirements(value: dict, guard: Guard) -> dict[tuple[int, int, int], int]:
                     cells[xx, yy, zz] = 3
     kinds = {area['name']: area['template']['kind'] for area in value['intent']['areas']}
     for area in value['areas']:
-        if kinds[area['name']] != 'bedroom_cluster':
+        if kinds[area['name']] not in PRIVATE_ROOM_TEMPLATES:
             continue
         for unit in area['units']:
             x, y, z = unit['origin']

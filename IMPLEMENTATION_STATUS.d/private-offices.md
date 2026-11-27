@@ -1,0 +1,1 @@
+Private office clusters use the existing Python room compiler, layout search, terrain survey and exact furniture allocation handoff. Regression tests exercised rotated rooms, wall loss, a fourteen-office layout and the allocation CLI on a loopback operations peer. Native office designation and citizen assignment remain open.
