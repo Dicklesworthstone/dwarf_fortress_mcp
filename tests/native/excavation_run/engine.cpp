@@ -184,6 +184,63 @@ static void limits_and_pause_precede_goal() {
         CHECK(h.record().run->reason == reasons[mode]);
     }
 }
+static void terrain_clock_stop_requires_fresh_verification() {
+    ++scenarios;
+    for (unsigned mode = 0; mode < 4; ++mode) {
+        Harness h; h.run(); h.floors();
+        // The first clock read is running. The independent terrain capture
+        // either hits the tick limit or observes a modal/UI pause.
+        const auto capture = [&](er::Region region) {
+            auto result = h.capture()(region);
+            result.source.clock.tick = mode == 0 ? 200 : 101;
+            result.source.clock.paused = mode != 0;
+            h.value.clock.tick = result.source.clock.tick;
+            return result;
+        };
+        const auto setter = [&](const er::Identity &identity, bool paused) {
+            CHECK(paused);
+            h.writer()(identity, paused);
+            if (mode == 1) ++h.value.identity.site;
+            if (mode == 2) h.broken_source = true;
+            if (mode == 3) h.value.clock.paused = false;
+        };
+        h.engine.service(h.now, h.source(), capture, setter);
+        const auto &r = h.record();
+        CHECK(h.unpauses == 1 && h.pauses == 1 && !r.sample);
+        if (mode == 0) {
+            CHECK(!h.engine.active() && r.run->phase == br::Phase::Stopped);
+            CHECK(r.run->reason == br::Reason::TickLimit && r.run->pause_verified);
+            CHECK(r.run->tick_known && r.run->observed_tick == 200);
+        } else if (mode == 1) {
+            CHECK(!h.engine.active() && r.run->phase == br::Phase::SourceLost);
+            CHECK(r.trigger == er::Trigger::SourceChanged && !r.run->pause_verified);
+        } else {
+            CHECK(h.engine.active() && r.run->phase == br::Phase::Stopping);
+            CHECK(r.run->reason == br::Reason::ExternalPause && !r.run->pause_verified);
+            h.broken_source = false;
+            h.step(102);
+            CHECK(!h.engine.active() && r.run->pause_verified);
+            CHECK(h.pauses == 2 && h.unpauses == 1);
+        }
+    }
+}
+static void terrain_tick_advances_clock_regression_floor() {
+    ++scenarios;
+    Harness h; h.run(); h.floors();
+    const auto capture = [&](er::Region region) {
+        auto result = h.capture()(region);
+        result.source.clock.tick = 105;
+        return result;
+    };
+    h.engine.service(h.now, h.source(), capture, h.writer());
+    CHECK(h.record().stable_samples == 1 && h.record().run->observed_tick == 105);
+    const auto reads = h.reads;
+    h.step(103);
+    CHECK(h.reads == reads && !h.engine.active() && h.record().run->pause_verified);
+    CHECK(h.record().run->reason == br::Reason::ClockRegression);
+    CHECK(h.record().sample->source.clock.tick == 105);
+    CHECK(h.record().trigger == er::Trigger::None && h.unpauses == 1 && h.pauses == 1);
+}
 static void cancellation_and_shutdown() {
     ++scenarios;
     Harness h; h.prepare(); h.engine.cancel("mine", h.plan, h.now, h.source(), h.writer());
@@ -256,6 +313,7 @@ int main() {
         predicate_matrix(); stable_goal_and_replays(); contradictory_samples_reset(); sample_gaps_reset();
         visibility_and_water_stop(); capture_failure_does_not_disable_pause(); failed_pause_keeps_owner_and_trigger();
         source_substitution_never_pauses_replacement(); stale_before_and_lifetime(); limits_and_pause_precede_goal();
+        terrain_clock_stop_requires_fresh_verification(); terrain_tick_advances_clock_regression_floor();
         cancellation_and_shutdown(); ambiguous_unpause_and_invalid_clock(); source_events_retire_preparations();
         already_true_unknown_and_bounds_refused(); conflict_and_capacity(); bounded_sample_window_exhaustive();
         std::cout << "{\"scenarios\":" << scenarios << ",\"assertions\":" << assertions << "}\n";

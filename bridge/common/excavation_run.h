@@ -212,11 +212,17 @@ public:
             auto current = observe(record.before.region, capture);
             if (!(current.source.identity == record.before.source.identity)) { source_changed(); return; }
             const auto tick = current.source.clock.tick;
-            // A second read may contradict the clock check. Defer to clock safety
-            // before interpreting terrain, even within this serialized callback.
-            if (tick < record.last_tick || tick < record.run->observed_tick
-                || current.source.clock.paused || tick >= run->before.tick + run->spec.game_ticks) {
-                clock_.service(now, [&] { return current.source.clock; }, setter); return;
+            // Register any later terrain tick with the clock owner too. This
+            // preserves the monotonic floor across the next update. A terrain
+            // capture can trigger a stop, but it predates the safety setter
+            // and cannot verify the pause or its fortress identity afterwards.
+            if (tick != run->observed_tick || current.source.clock.paused) {
+                clock_.service(now, [&] {
+                    if (run->phase == clock::Phase::Running) return current.source.clock;
+                    return read();
+                }, setter);
+                if (run->phase == clock::Phase::SourceLost) record.trigger = Trigger::SourceChanged;
+                if (run->phase != clock::Phase::Running) return;
             }
             Trigger trigger = Trigger::None;
             for (std::size_t i = 0; i < current.region.size(); ++i) {
