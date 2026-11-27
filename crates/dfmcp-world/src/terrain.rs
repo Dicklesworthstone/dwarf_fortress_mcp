@@ -188,6 +188,21 @@ impl WorldSnapshot {
     /// Returns whether the tile changed. The chunk revision advances on change;
     /// the caller remains responsible for the snapshot cursor and hash.
     pub fn set_tile_code(&mut self, coord: MapCoord, code: u32) -> Result<bool> {
+        self.set_tile_code_checked(coord, code, |_| Ok(()))
+    }
+
+    /// Validate the actual observed source and replace it using one bounded
+    /// chunk decode. The check runs before any write, even for an otherwise
+    /// unchanged target. Refusal preserves the complete chunk and its revision.
+    /// Malformed chunks and unobserved source cells are rejected before the
+    /// caller's check runs. This carries no authority beyond the existing
+    /// terrain writer; an effect owner supplies its semantic transition rule.
+    pub fn set_tile_code_checked(
+        &mut self,
+        coord: MapCoord,
+        code: u32,
+        check: impl FnOnce(u32) -> Result<()>,
+    ) -> Result<bool> {
         let slot = tile_slot(coord);
         let chunk = self.graph.chunks.get_mut(&slot.chunk).ok_or_else(|| {
             DfmcpError::new(
@@ -214,6 +229,7 @@ impl WorldSnapshot {
                 format!("terrain at {coord:?} has not been observed"),
             ));
         }
+        check(*current)?;
         if *current == code {
             return Ok(false);
         }
@@ -305,6 +321,77 @@ mod tests {
         let chunk = &s.graph.chunks[&ChunkCoord { x: 0, y: 0, z: 5 }];
         assert_eq!(chunk.terrain_runs.len(), 1);
         assert_eq!(chunk.encoded_tile_count(), Some(256));
+        Ok(())
+    }
+
+    #[test]
+    fn checked_tile_replacement_validates_current_source_before_any_write() -> Result<()> {
+        let mut source = snapshot();
+        let at = MapCoord::new(3, 2, 5);
+        let key = tile_slot(at).chunk;
+        for target in [tile_codes::SOLID_WALL, tile_codes::FLOOR] {
+            let before = source.clone();
+            let mut calls = 0;
+            let refused = source.set_tile_code_checked(at, target, |observed| {
+                calls += 1;
+                assert_eq!(observed, tile_codes::SOLID_WALL);
+                Err(DfmcpError::new(
+                    ErrorCode::PreconditionsFailed,
+                    "test transition is refused",
+                ))
+            });
+            assert_eq!(calls, 1);
+            assert!(refused.is_err_and(|error| error.code == ErrorCode::PreconditionsFailed));
+            assert_eq!(source, before);
+        }
+        let revision = source.graph.chunks[&key].revision;
+        assert!(
+            source.set_tile_code_checked(at, tile_codes::FLOOR, |observed| {
+                assert_eq!(observed, tile_codes::SOLID_WALL);
+                Ok(())
+            })?
+        );
+        assert_eq!(source.tile_code_at(at), Some(tile_codes::FLOOR));
+        assert_eq!(source.graph.chunks[&key].revision, revision + 1);
+        assert!(
+            !source.set_tile_code_checked(at, tile_codes::FLOOR, |observed| {
+                assert_eq!(observed, tile_codes::FLOOR);
+                Ok(())
+            })?
+        );
+        assert_eq!(source.graph.chunks[&key].revision, revision + 1);
+        Ok(())
+    }
+
+    #[test]
+    fn checked_tile_replacement_never_promotes_unknown_or_malformed_source() -> Result<()> {
+        let at = MapCoord::new(3, 2, 5);
+        let key = tile_slot(at).chunk;
+        for variant in 0..14 {
+            let mut source = snapshot();
+            if variant < 12 {
+                let chunk = source.graph.chunks.get_mut(&key).ok_or_else(|| {
+                    DfmcpError::new(ErrorCode::InternalInvariantViolation, "test chunk missing")
+                })?;
+                corrupt_chunk(chunk, variant);
+            } else if variant == 12 {
+                source.set_tile_code(at, tile_codes::UNKNOWN)?;
+            } else {
+                source.graph.chunks.remove(&key);
+            }
+            let before = source.clone();
+            let mut calls = 0;
+            assert!(
+                source
+                    .set_tile_code_checked(at, tile_codes::FLOOR, |_| {
+                        calls += 1;
+                        Ok(())
+                    })
+                    .is_err_and(|error| error.code == ErrorCode::PreconditionsFailed)
+            );
+            assert_eq!(calls, 0, "variant {variant}");
+            assert_eq!(source, before, "variant {variant}");
+        }
         Ok(())
     }
 

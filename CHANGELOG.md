@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Keep excavation and room plans grounded in observed terrain
+
+- Reject excavation that would create ground from void or erase unsupported,
+  hazardous or tree terrain, including retained and overlapping work.
+- Check room and workshop sites against the same executable terrain rules; keep
+  valid mining, channeling, existing-target no-ops and exact moat perimeters.
+- Add physical-engine and public blueprint regressions for source changes,
+  conflicting jobs, valid mixed rooms and cancellation/retry.
+
 ## Unreleased — Excavation recovery and finite order-run review
 
 - Verify excavation safety pauses from a fresh read, retain pending stops for QueryRun, and allow finite production to stop safely when the game date is unavailable.

@@ -38,6 +38,8 @@ mod compensation;
 mod construction_materials;
 #[path = "effects_excavation_occupancy.rs"]
 mod excavation_occupancy;
+#[path = "effects_excavation_terrain.rs"]
+mod excavation_terrain;
 #[path = "effects_furniture.rs"]
 mod furniture;
 #[path = "effects_harvest.rs"]
@@ -100,6 +102,7 @@ pub use furniture::{
 
 pub use compensation::default_compensation_with_evidence;
 pub(crate) use compensation::{setters_overlap, source_bound_compensation};
+pub use excavation_terrain::{dig_transition_allowed, validate_dig_terrain};
 pub use inventory::{INVENTORY_LEDGER_FIELD, INVENTORY_LEDGER_GENERATION_FIELD};
 
 /// Validate the original identity and material custody behind a terminal action.
@@ -1032,12 +1035,7 @@ fn apply_effect_inner(
         }
         Action::DesignateDig { area, mode } => {
             let tiles = validate_region(*area)?;
-            if let Some(unknown) = region_tiles(*area).find(|c| snapshot.tile_code_at(*c).is_none())
-            {
-                return Err(precondition(format!(
-                    "excavation region includes unobserved terrain at {unknown:?}"
-                )));
-            }
+            validate_dig_terrain(snapshot, *area, *mode)?;
             let target = dig_target_tile_code(*mode);
             let remaining = count_remaining(snapshot, *area, target);
             if remaining != 0 {
@@ -1574,6 +1572,7 @@ struct TimelineOrder {
 
 struct TimelineDig {
     area: MapCuboid,
+    mode: DigMode,
     target: u32,
     // Coordinate tuples preserve canonical z/y/x excavation order. These sets
     // are built once, then updated for intersecting designations after a tile
@@ -1651,7 +1650,7 @@ pub(crate) fn validate_excavation_progress(
 /// A retained target must agree with its qualified registered mode, both for
 /// progress and for deciding whether construction can share its footprint.
 /// Binding that pair to a sealed original action remains the adapter's duty.
-fn designation_target(record: &EntityRecord, tick: GameTick) -> Result<u32> {
+fn designation_mode(record: &EntityRecord, tick: GameTick) -> Result<DigMode> {
     let mode = match field_text(record, "mode", tick) {
         Some("mine") => DigMode::Mine,
         Some("channel") => DigMode::Channel,
@@ -1672,7 +1671,11 @@ fn designation_target(record: &EntityRecord, tick: GameTick) -> Result<u32> {
             "dig designation target disagrees with its retained excavation mode",
         ));
     }
-    Ok(target)
+    Ok(mode)
+}
+
+fn designation_target(record: &EntityRecord, tick: GameTick) -> Result<u32> {
+    Ok(dig_target_tile_code(designation_mode(record, tick)?))
 }
 
 impl EffectTimeline {
@@ -1797,12 +1800,11 @@ impl EffectTimeline {
                     let tiles = validate_region(area)?;
                     validate_excavation_progress(record, tiles, snapshot.tick)?;
                     budget.charge(tiles)?;
-                    let target = designation_target(record, snapshot.tick)?;
+                    let mode = designation_mode(record, snapshot.tick)?;
+                    let target = dig_target_tile_code(mode);
                     let mut pending = BTreeSet::new();
                     for coord in region_tiles(area) {
-                        let code = snapshot.tile_code_at(coord).ok_or_else(|| {
-                            precondition("active dig designation includes unobserved terrain")
-                        })?;
+                        let code = excavation_terrain::validate_tile(snapshot, coord, mode)?;
                         if code != target {
                             pending.insert((coord.z, coord.y, coord.x));
                         }
@@ -1824,6 +1826,7 @@ impl EffectTimeline {
                         record.id,
                         TimelineDig {
                             area,
+                            mode,
                             target,
                             pending,
                         },
@@ -2063,17 +2066,22 @@ impl EffectTimeline {
             if work < DIG_TICKS_PER_TILE {
                 continue;
             }
-            let Some((coord, target)) = self.digs.get(&id).and_then(|dig| {
+            let Some((coord, mode, target)) = self.digs.get(&id).and_then(|dig| {
                 dig.pending
                     .first()
-                    .map(|(z, y, x)| (MapCoord::new(*x, *y, *z), dig.target))
+                    .map(|(z, y, x)| (MapCoord::new(*x, *y, *z), dig.mode, dig.target))
             }) else {
                 continue;
             };
-            // Tile replacement decodes a bounded 256-tile chunk. Every active
-            // overlapping designation sees the resulting terrain at this tick.
+            // Another designation can change this cell inside the very same
+            // event. Validate its actual source inside the one bounded chunk
+            // decode, before replacement: a channel cannot supply empty space
+            // for a later mine or staircase to fill. No second scan or decode
+            // is needed to retain the original per-changed-tile work bound.
             budget.charge(self.digs.len() as u64 + 256)?;
-            changed |= snapshot.set_tile_code(coord, target)?;
+            changed |= snapshot.set_tile_code_checked(coord, target, |source| {
+                excavation_terrain::validate_source(coord, mode, source)
+            })?;
             for dig in self.digs.values_mut() {
                 if dig.area.contains(coord) {
                     let key = (coord.z, coord.y, coord.x);
@@ -2827,6 +2835,10 @@ mod excavation_occupancy_tests;
 #[cfg(test)]
 #[path = "effects_excavation_identity_tests.rs"]
 mod excavation_identity_tests;
+
+#[cfg(test)]
+#[path = "effects_excavation_terrain_tests.rs"]
+mod excavation_terrain_tests;
 
 #[cfg(test)]
 #[path = "effects_timeline_tests.rs"]

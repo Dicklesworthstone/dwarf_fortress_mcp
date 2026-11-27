@@ -156,15 +156,23 @@ impl BlueprintPlanner {
         spatial_index: &ChunkSpatialIndex,
         deadline: Option<GameTick>,
     ) -> Result<Intent> {
-        // Sum the *actual* repeated halo work, not just unique excavated tiles.
+        // Sum the actual repeated halo and source-transition visits, not just
+        // unique excavated tiles. Admission precedes every materialized scan.
         let mut scan_tiles = 0_u64;
         for part in layout.excavations() {
-            let count = hazard_halo(&part.area)?.tile_count().ok_or_else(|| {
-                DfmcpError::new(
-                    ErrorCode::BudgetExceeded,
-                    "blueprint hazard tile count overflow",
-                )
-            })?;
+            let count = hazard_halo(&part.area)?
+                .tile_count()
+                .and_then(|halo| {
+                    part.area
+                        .tile_count()
+                        .and_then(|area| halo.checked_add(area))
+                })
+                .ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "blueprint terrain preflight tile count overflow",
+                    )
+                })?;
             scan_tiles = scan_tiles.checked_add(count).ok_or_else(|| {
                 DfmcpError::new(
                     ErrorCode::BudgetExceeded,
@@ -174,12 +182,13 @@ impl BlueprintPlanner {
             if scan_tiles > MAX_HAZARD_TILES {
                 return Err(DfmcpError::new(
                     ErrorCode::BudgetExceeded,
-                    "blueprint hazard scans exceed 131072 tile visits",
+                    "blueprint terrain preflight exceeds 131072 tile visits",
                 ));
             }
         }
         for part in layout.excavations() {
             self.require_safe(layout.summary(), &part.area, spatial_index)?;
+            require_diggable(layout.summary(), part, spatial_index)?;
         }
         Ok(Intent {
             id: intent_id,
@@ -228,6 +237,48 @@ impl BlueprintPlanner {
 }
 
 const MAX_HAZARD_TILES: u64 = 131_072;
+
+/// A complete hazard halo does not establish that the selected material can
+/// become the requested shape. In particular, a fully observed void is not a
+/// room floor. The index's Pillar class is also the fallback for unregistered
+/// codes, so it cannot establish an executable source transition.
+fn require_diggable(
+    label: &str,
+    part: &BlueprintExcavation,
+    spatial_index: &ChunkSpatialIndex,
+) -> Result<()> {
+    use dfmcp_world::terrain::{region_tiles, tile_codes};
+    for at in region_tiles(part.area) {
+        let properties = spatial_index.get_tile(at).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                format!("{label} excavation terrain at {at:?} is not observed"),
+            )
+        })?;
+        let source = match properties.tile_type {
+            TileType::OpenSpace => tile_codes::OPEN_SPACE,
+            TileType::Floor => tile_codes::FLOOR,
+            TileType::SolidWall => tile_codes::SOLID_WALL,
+            TileType::Stair => tile_codes::STAIR,
+            TileType::Ramp => tile_codes::RAMP,
+            TileType::Fortification => tile_codes::FORTIFICATION,
+            TileType::Tree => tile_codes::TREE,
+            TileType::MagmaWall => tile_codes::MAGMA_WALL,
+            TileType::Chasm => tile_codes::CHASM,
+            TileType::Pillar => tile_codes::UNKNOWN,
+        };
+        if !crate::effects::dig_transition_allowed(part.mode, source) {
+            return Err(DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                format!(
+                    "{label} cannot excavate {:?} at {at:?} with {:?}",
+                    properties.tile_type, part.mode,
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
 
 impl BlueprintPlanner {
     /// Validate the workshop list without inspecting terrain or constructing actions.

@@ -1,5 +1,12 @@
 # Implementation Status
 
+## Unreleased — Preserve real terrain through excavation and room planning
+
+Excavation and blueprint compilation share a closed source-to-target rule,
+preventing floors, stairs and ramps from being manufactured from void and
+catching conflicting designations during physical progress. See
+[implementation and verification scope](IMPLEMENTATION_STATUS.d/lab-excavation-terrain-conservation.md).
+
 ## Unreleased — Excavation, work custody and finite production reviews
 
 See [excavation stopping](IMPLEMENTATION_STATUS.d/excavation-clock-readback.md), [pending pause queries](IMPLEMENTATION_STATUS.d/excavation-external-pause-query.md), [production clock recovery](IMPLEMENTATION_STATUS.d/order-run-invalid-date-stop.md), [predicate timing](IMPLEMENTATION_STATUS.d/order-run-predicate-window.md), [excavation proof](IMPLEMENTATION_STATUS.d/lab-original-excavation-proof.md), [ordinary cancellation](IMPLEMENTATION_STATUS.d/lab-ordinary-cancel-custody.md) and [historical aggregates](IMPLEMENTATION_STATUS.d/aggregate-source-time-absence.md) for implementation and verification scope.
