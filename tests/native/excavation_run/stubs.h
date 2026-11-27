@@ -10,7 +10,7 @@
 namespace fake {
 inline int suspension = 0, suspension_entries = 0, shape_reads = 0, tile_reads = 0;
 inline int pauses = 0, unpauses = 0;
-inline bool loaded = true, map_loaded = true, fortress = true, paused = true;
+inline bool loaded = true, map_loaded = true, fortress = true, paused = true, modal_pause = false;
 inline bool fail_capture = false, fail_pause = false, noop_pause = false, fail_unpause = false, throw_reply = false;
 inline std::int64_t year = 0, tick = 100;
 inline std::int32_t site = 2, sx = 64, sy = 64, sz = 8;
@@ -71,7 +71,7 @@ namespace World {
 inline bool isFortressMode() { fake::suspended(); return fake::fortress; }
 inline std::int32_t GetCurrentSiteId() { fake::suspended(); return fake::site; }
 inline std::string ReadWorldFolder() { fake::suspended(); return fake::folder; }
-inline bool ReadPauseState() { fake::suspended(); return fake::paused; }
+inline bool ReadPauseState() { fake::suspended(); return fake::paused || fake::modal_pause; }
 inline std::int64_t ReadCurrentYear() { fake::suspended(); return fake::year; }
 inline std::int64_t ReadCurrentTick() { fake::suspended(); return fake::tick; }
 inline void SetPauseState(bool paused) {

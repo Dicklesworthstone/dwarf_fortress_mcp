@@ -89,8 +89,8 @@ inline void validate_record(const Record &record) {
         && run.pause_verified == (phase == 3) && (!run.tick_known || run.observed_tick <= MAX_TICK), 5);
     if (phase == 0) require(reason == 0 && !run.tick_known, 5);
     if (phase == 1) require(reason == 0 && run.tick_known && run.observed_tick >= run.before.tick, 5);
-    if (phase == 2 || phase == 3) require(reason == 1 || reason == 2 || reason == 3 || reason == 5
-        || reason == 6 || reason == 8 || (phase == 3 && reason == 4), 5);
+    if (phase == 2 || phase == 3) require(reason == 1 || reason == 2 || reason == 3 || reason == 4
+        || reason == 5 || reason == 6 || reason == 8, 5);
     if (phase == 4) require((reason == 3 || reason == 7 || reason == 9) && !run.tick_known, 5);
     if (phase == 5) require(reason == 7 && !run.tick_known, 5);
     require(record.stable_samples <= record.goal.samples && record.last_tick >= run.before.tick

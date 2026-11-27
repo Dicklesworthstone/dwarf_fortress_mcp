@@ -23,7 +23,7 @@ static void setup() {
     fake::year = 0; fake::tick = 100; fake::site = 2; fake::folder = "region1";
     fake::sx = fake::sy = 64; fake::sz = 8;
     fake::fail_capture = fake::fail_pause = fake::noop_pause = fake::fail_unpause = fake::throw_reply = false;
-    fake::setter_hook = {}; fake::terrain(false);
+    fake::modal_pause = false; fake::setter_hook = {}; fake::terrain(false);
     gate.store(Gate::Idle); drain_requested.store(false);
     CHECK(plugin_onstatechange(output, SC_MAP_LOADED) == CR_OK);
     CHECK(setenv("DFMCP_ALLOW_UNADMITTED_EXCAVATION_RUN_V1_18", "1", 1) == 0);
@@ -174,6 +174,28 @@ static void failed_pause_drain_and_limits() {
     { CoreSuspender suspend; service(p.record().run->deadline); }
     CHECK(!engine.active()); CHECK(fake::paused); CHECK(p.record().run->reason == run::clock::Reason::WallLimit);
 }
+static void external_pause_pending_and_verified_records() {
+    ++scenarios; setup();
+    const auto p = start(); const auto unpauses = fake::unpauses;
+    fake::modal_pause = true; fake::noop_pause = true; update(101);
+    CHECK(!fake::paused && engine.active());
+    CHECK(p.record().run->phase == run::clock::Phase::Stopping);
+    CHECK(p.record().run->reason == run::clock::Reason::ExternalPause && !p.record().run->pause_verified);
+    const auto pending = call(QueryRun, p.keyed(false));
+    CHECK(pending.owner_active() && pending.has_effect_record());
+    CHECK(pending.effect_record() == run::encode_record(p.record()));
+    const auto pauses = fake::pauses;
+    CHECK(call(QueryRun, p.keyed(false)).effect_record() == pending.effect_record());
+    CHECK(fake::pauses == pauses && fake::unpauses == unpauses);
+
+    fake::noop_pause = false; update(102); fake::modal_pause = false;
+    CHECK(fake::paused && !engine.active() && p.record().run->pause_verified);
+    CHECK(p.record().run->phase == run::clock::Phase::Stopped);
+    CHECK(p.record().run->reason == run::clock::Reason::ExternalPause);
+    const auto terminal = call(QueryRun, p.keyed(false));
+    CHECK(!terminal.owner_active() && terminal.effect_record() == run::encode_record(p.record()));
+    CHECK(terminal.effect_record() != pending.effect_record() && fake::unpauses == unpauses);
+}
 static void source_changes_and_writer_fence() {
     ++scenarios;
     for (int mode = 0; mode < 4; ++mode) {
@@ -289,7 +311,8 @@ int main() {
     try {
         authentication_and_inventory(); shape_and_capture_contract(); hidden_noninterference(); native_run_and_client_disconnect();
         ambiguous_reply_keeps_stop_owner(); failed_capture_pause_and_clock(); partial_visibility_and_liquid();
-        failed_pause_drain_and_limits(); source_changes_and_writer_fence(); clock_permission_and_stale_preparation();
+        failed_pause_drain_and_limits(); external_pause_pending_and_verified_records();
+        source_changes_and_writer_fence(); clock_permission_and_stale_preparation();
         unload_veto_during_unpause(); vectors_and_maximum_size();
     } catch (const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
 }
