@@ -404,3 +404,32 @@ while the target is still paused. Across a complete traversal, each following
 `examples_skipped` equals the number of examples read so far, and the final
 sum of page lengths equals `new_item_count`. A material check can return
 unknown, including on a complete traversal.
+
+### Assess a minimum new plant-wood inventory
+
+For an explicit numerical goal, supply the page pairs in traversal order:
+
+```bash
+python scripts/verify_furniture_goal.py --minimum 3 \
+  --page arrivals-1.json materials-1.json \
+  --page arrivals-2.json materials-2.json
+```
+
+Start at the original item allocator frontier. The verifier checks each
+continuation against the next page, including the first matching ID, skipped
+count, kind, filter and original record references. It also checks both
+source digests, journal identity, profile, anchor lineage and full counts.
+A later append to the journal can coexist with unchanged selected records.
+A missing middle inventory page, repetition, substitution or conflicting
+material classification refuses the assessment. Pass `-` for a page's
+missing material observation, including an empty inventory page. A missing
+tail leaves a partial result with the next query.
+
+`met` requires at least the requested number of independently verified new
+plant-wood items. `insufficient` requires complete arrival coverage and
+fewer possible qualifying items than the requested minimum, even if every
+unresolved item qualified. Other cases return `unknown`. Counts distinguish
+verified wood, verified other materials, selected items without a resolved
+material and unseen arrivals. The command reads at most 8,192 pages and
+256 MiB across all inputs. It assesses the supplied historical inventory
+evidence and carries no current-game authority or original-order attribution.

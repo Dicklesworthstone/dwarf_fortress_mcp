@@ -24,7 +24,7 @@ def load(path):
     return json.loads(data)
 
 
-def selected(arrivals):
+def selected(arrivals, *, allow_empty=False):
     require(arrivals["ok"] is True and arrivals["kind"] == "historical_furniture_arrivals",
             "expected a successful decoded historical_furniture_arrivals response")
     source = arrivals["target_source"]
@@ -32,10 +32,10 @@ def selected(arrivals):
     rows = arrivals["new_item_examples"]
     count = arrivals["new_item_count"]
     skipped = arrivals.get("examples_skipped", 0)
-    require(integer(count, 1, 65536) and integer(skipped, 0, count) and isinstance(rows, list)
+    require(integer(count, 0 if allow_empty else 1, 65536) and integer(skipped, 0, count) and isinstance(rows, list)
             and len(rows) == min(count - skipped, 8) and arrivals["examples_truncated"] is (count > len(rows)),
             "inconsistent arrival example page")
-    require(rows, "this page has no selected furniture examples")
+    require(allow_empty or rows, "this page has no selected furniture examples")
     before, after = arrivals["before_next_item_id"], arrivals["after_next_item_id"]
     require(integer(before, 0, 2**31-1) and integer(after, before, 2**31-1), "invalid item frontier")
     floor = arrivals.get("examples_from_item_id", before)
