@@ -359,6 +359,9 @@ fn exact_reserve_handoff_batches_only_outstanding_current_originals() {
     assert_eq!(after["arguments"]["plan_digests"], tips);
     assert_eq!(after["reserve_capture"]["past_endpoints_missing"], 2);
     assert_eq!(after["reserve_capture"]["ticks_until_next_endpoint"], 9);
+    assert_eq!(after["arguments"]["max_game_ticks"], 9);
+    assert!(after["reserve_evidence_warning"].as_str().is_some());
+    assert_eq!(after["arguments"]["plan_digests"], tips);
 }
 
 #[test]
@@ -376,6 +379,8 @@ fn public_forecast_handoff_captures_actual_reserve_and_moves_to_next_frontier() 
     assert_eq!(before["ok"], true, "{before}");
     let distance = before["next_step"]["reserve_capture"]["ticks_until_next_endpoint"]
         .as_u64().ok_or("first reserve frontier missing")?;
+    assert_eq!(before["next_step"]["arguments"]["max_game_ticks"], distance);
+    assert!(before["next_step"]["reserve_evidence_warning"].is_null());
     let advanced = parsed(&facade::fortress_wait(Some(owner.0.clone()), Some(distance)))?;
     assert_eq!(advanced["game_tick"], 1_234, "{advanced}");
     let at = complete_query(&owner, &originals, 0)?;
@@ -395,5 +400,6 @@ fn public_forecast_handoff_captures_actual_reserve_and_moves_to_next_frontier() 
     assert_eq!(next["ok"], true, "{next}");
     assert_eq!(next["next_step"]["reserve_capture"]["next_endpoint_tick"], 1_511);
     assert_eq!(next["next_step"]["reserve_capture"]["past_endpoints_missing"], 0);
+    assert_eq!(next["next_step"]["arguments"]["max_game_ticks"], 1_511 - 1_234);
     Ok(())
 }
