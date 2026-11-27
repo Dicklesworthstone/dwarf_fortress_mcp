@@ -7301,8 +7301,9 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.restore", &error),
     };
-    with_session(
+    with_explicit_publication(
         &session,
+        true,
         || mutex_poisoned_payload("fortress.restore"),
         |guard| {
             if let Err(error) = durability_gate(guard) {
@@ -7368,18 +7369,36 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
                         guard.durable_plans.clear();
                         guard.carried.clear();
                     }
-                    json!({
-                    "ok": true,
-                    "session_id": format!("{}", guard.session_id),
-                    "checkpoint_id": format!("{}", receipt.checkpoint_id),
-                    "prior_anchor": anchor_json(&receipt.prior_anchor),
-                    "restored_anchor": anchor_json(&receipt.restored_anchor),
-                    "content_digest": receipt.content_digest.to_string(),
-                    "note": "new observation epoch; pending plans and action handles were invalidated",
-                    "objectives": objectives_json(guard),
-                    "untracked_work": untracked_work_json(guard),
-                })
-                .to_string()
+                    // Save the new epoch and retirement of prior work in one publication.
+                    // The caller must receive its outcome before it decides how to recover.
+                    persist_durable_head(guard);
+                    remember_version(guard);
+                    let mut response = json!({
+                        "ok": true,
+                        "durable": guard.durable_scenario.is_some(),
+                        "session_id": format!("{}", guard.session_id),
+                        "checkpoint_id": format!("{}", receipt.checkpoint_id),
+                        "prior_anchor": anchor_json(&receipt.prior_anchor),
+                        "restored_anchor": anchor_json(&receipt.restored_anchor),
+                        "content_digest": receipt.content_digest.to_string(),
+                        "note": "new observation epoch; pending plans and action handles were invalidated",
+                        "objectives": objectives_json(guard),
+                        "untracked_work": untracked_work_json(guard),
+                    });
+                    if let Some(fault) = &guard.durability_fault {
+                        response["ok"] = json!(false);
+                        response["durable"] = serde_json::Value::Null;
+                        response["error"] = json!({
+                            "operation": "fortress.restore",
+                            "code": ErrorCode::EffectIndeterminate.as_str(),
+                            "retryable": false,
+                            "details": [],
+                            "message": format!(
+                                "restored in memory; durable publication is unconfirmed ({fault}). Inspect the durable head before requesting another restore"
+                            )
+                        });
+                    }
+                    response.to_string()
                 }
                 Err(error) => dfmcp_error_payload("fortress.restore", &error),
             }

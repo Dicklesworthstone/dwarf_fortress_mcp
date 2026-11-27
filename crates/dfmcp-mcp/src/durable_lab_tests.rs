@@ -853,10 +853,23 @@ fn restore_world_and_commit_retirement_share_one_crash_boundary() -> TestResult 
         ))?;
         assert_eq!(committed["ok"], true, "{committed}");
         crate::server::inject_durable_crash_after(budget);
-        parsed(&fortress_restore(
+        let restored = parsed(&fortress_restore(
             Some(first),
             id(&checkpoint, "checkpoint_id")?,
         ))?;
+        assert_eq!(restored["checkpoint_id"], checkpoint["checkpoint_id"], "{restored}");
+        assert_ne!(restored["prior_anchor"]["epoch"], restored["restored_anchor"]["epoch"]);
+        if budget == 0 {
+            assert_eq!(restored["ok"], false, "{restored}");
+            assert!(restored["durable"].is_null(), "{restored}");
+            assert_eq!(restored["agent_turn"]["continuity"]["status"], "indeterminate", "{restored}");
+            assert_eq!(restored["agent_turn"]["recommendations"][0]["tool"], "fortress.doctor", "{restored}");
+            assert_eq!(restored["error"]["code"], "effect_indeterminate", "{restored}");
+            assert_eq!(restored["error"]["retryable"], false, "{restored}");
+        } else {
+            assert_eq!(restored["ok"], true, "{restored}");
+            assert_eq!(restored["durable"], true, "{restored}");
+        }
         crate::server::simulate_durable_restart(Some(dir.0.clone()));
         let resumed = open_durable(&selector, None)?;
         assert_eq!(resumed["ok"], true, "{resumed}");

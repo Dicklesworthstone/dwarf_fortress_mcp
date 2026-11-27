@@ -1,0 +1,1 @@
+Durable laboratory restores acknowledge success after the new epoch and retirement of old work reach the journal. On publication failure the response identifies the in-memory restored world and directs the caller to inspect the durable head.

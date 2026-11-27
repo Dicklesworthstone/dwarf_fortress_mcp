@@ -1008,7 +1008,18 @@ fn routine_recommendations(
                 false,
                 json!({}),
             )],
-            "indeterminate_effect" | "indeterminate" => vec![recommendation(
+            "effect_indeterminate" if has_unconfirmed_restore(payload) => vec![recommendation(
+                "inspect-restored-head",
+                "fortress.doctor",
+                "check whether the restored epoch reached the durable store",
+                "critical",
+                "high",
+                "read_only",
+                "not_applicable",
+                false,
+                json!({"session_id": payload["session_id"]}),
+            )],
+            "effect_indeterminate" | "indeterminate_effect" | "indeterminate" => vec![recommendation(
                 "recover-reconcile",
                 "fortress.wait",
                 "blind retry could duplicate an effect; reconcile first",
@@ -1671,7 +1682,7 @@ fn recovery_class(payload: &Value) -> RecoveryClass {
     match error_code(payload) {
         "cursor_gap" | "stale_anchor" => RecoveryClass::RefreshAndRetry,
         "invalid_plan" | "conflict" => RecoveryClass::RebaseRequired,
-        "indeterminate_effect" | "indeterminate" => RecoveryClass::ReconciliationRequired,
+        "effect_indeterminate" | "indeterminate_effect" | "indeterminate" => RecoveryClass::ReconciliationRequired,
         "budget_exceeded" | "session_not_found" | "invalid_request" => {
             RecoveryClass::NeverUnchanged
         }
@@ -1694,6 +1705,10 @@ fn attach_recovery(payload: &mut Value) {
         RecoveryClass::RebaseRequired => (
             Some("fortress.plan"),
             "recompile intent against the current anchor",
+        ),
+        RecoveryClass::ReconciliationRequired if has_unconfirmed_restore(payload) => (
+            Some("fortress.doctor"),
+            "compare the current epoch and persisted anchor before another restore",
         ),
         RecoveryClass::ReconciliationRequired => (
             Some("fortress.wait"),
@@ -1728,7 +1743,7 @@ fn continuity_status(
     if !ok {
         return if matches!(
             error_code(payload),
-            "indeterminate_effect" | "indeterminate"
+            "effect_indeterminate" | "indeterminate_effect" | "indeterminate"
         ) {
             ContinuityStatus::Indeterminate
         } else if previous_anchor.is_some() {
@@ -1805,6 +1820,12 @@ fn has_drain_observation(operation: &str, payload: &Value) -> bool {
         && payload.get("drain_progress").is_some_and(Value::is_object)
 }
 
+fn has_unconfirmed_restore(payload: &Value) -> bool {
+    payload["error"]["operation"] == "fortress.restore"
+        && error_code(payload) == "effect_indeterminate"
+        && payload["restored_anchor"].is_object()
+}
+
 fn has_wait_observation(operation: &str, payload: &Value) -> bool {
     operation == "fortress.wait"
         && payload.get("observed_anchor").is_some_and(Value::is_object)
@@ -1873,6 +1894,7 @@ fn presentation_state_registered(
             if is_ok(payload)
                 || has_drain_observation(operation, payload)
                 || has_wait_observation(operation, payload)
+                || has_unconfirmed_restore(payload)
             {
                 update_orientation(operation, payload, existing);
             } else if let Some(next) = resource_replan_step(payload) {
