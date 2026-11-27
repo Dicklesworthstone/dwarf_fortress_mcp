@@ -207,6 +207,31 @@ impl ObligationRuntime {
         self.observation_anchors.get(&action_id).copied()
     }
 
+    /// Earliest eligible positive sample for an active original obligation.
+    ///
+    /// An intervening read does not move the cadence floor. In particular,
+    /// splitting a wait must not postpone a sample by another whole interval.
+    /// The exact original deadline remains a final eligible sample, including
+    /// when adding the interval would overflow the game-tick domain. This is
+    /// scheduling metadata only: callers still supply current evidence and
+    /// authority, and must observe a due or overdue frontier before advancing.
+    #[must_use]
+    pub fn next_observation_tick(&self, action_id: ActionId) -> Option<GameTick> {
+        let obligation = self.obligations.get(&action_id)?;
+        if !matches!(obligation.status, ObligationStatus::Active { .. }) {
+            return None;
+        }
+        let basis = obligation
+            .last_evaluated_tick
+            .map_or(obligation.registered_tick, |tick| tick);
+        Some(GameTick(
+            basis
+                .0
+                .saturating_add(obligation.spec.poll_interval_ticks)
+                .min(obligation.spec.deadline_tick.0),
+        ))
+    }
+
     /// Evaluate supplied evidence atomically across all active obligations.
     ///
     /// Poll cadence limits positive stability samples, not the failure evidence
@@ -398,6 +423,68 @@ mod tests {
             paused,
             WorldGraph::default(),
         )
+    }
+
+    #[test]
+    fn eligible_sample_schedule_survives_early_reads_and_clips_to_the_original_deadline()
+    -> Result<()> {
+        let action = ActionId::new(801);
+        let mut runtime = ObligationRuntime::new();
+        runtime.register_obligation_at(
+            action,
+            ObligationSpec {
+                terminal: Predicate::Paused(false),
+                failure: None,
+                deadline_tick: GameTick(25),
+                poll_interval_ticks: 10,
+                stable_for_observations: 3,
+            },
+            &sample_snapshot(0, false),
+        )?;
+        assert_eq!(runtime.next_observation_tick(action), Some(GameTick(10)));
+        assert_eq!(runtime.next_observation_tick(ActionId::new(802)), None);
+        for tick in [0, 7, 9] {
+            runtime.step_tick_laboratory(&sample_snapshot(tick, false))?;
+            assert_eq!(runtime.next_observation_tick(action), Some(GameTick(10)));
+        }
+        runtime.step_tick_laboratory(&sample_snapshot(10, false))?;
+        assert_eq!(runtime.next_observation_tick(action), Some(GameTick(20)));
+        runtime.step_tick_laboratory(&sample_snapshot(17, false))?;
+        assert_eq!(runtime.next_observation_tick(action), Some(GameTick(20)));
+        runtime.step_tick_laboratory(&sample_snapshot(20, false))?;
+        assert_eq!(runtime.next_observation_tick(action), Some(GameTick(25)));
+        runtime.step_tick_laboratory(&sample_snapshot(25, false))?;
+        assert!(matches!(runtime.get_status(action), Some(ObligationStatus::Fulfilled {
+            fulfilled_at_tick: GameTick(25), ..
+        })));
+        assert_eq!(runtime.next_observation_tick(action), None);
+        Ok(())
+    }
+
+    #[test]
+    fn eligible_sample_schedule_does_not_wrap_ticks_or_renew_interrupted_stability()
+    -> Result<()> {
+        let action = ActionId::new(803);
+        let mut runtime = ObligationRuntime::new();
+        runtime.register_obligation_at(
+            action,
+            ObligationSpec {
+                terminal: Predicate::Paused(false),
+                failure: None,
+                deadline_tick: GameTick(u64::MAX),
+                poll_interval_ticks: 10,
+                stable_for_observations: 2,
+            },
+            &sample_snapshot(u64::MAX - 5, false),
+        )?;
+        assert_eq!(runtime.next_observation_tick(action), Some(GameTick(u64::MAX)));
+        runtime.step_tick_laboratory(&sample_snapshot(u64::MAX - 1, false))?;
+        runtime.observation_interrupted(action)?;
+        assert_eq!(runtime.next_observation_tick(action), Some(GameTick(u64::MAX)));
+        runtime.step_tick_laboratory(&sample_snapshot(u64::MAX, false))?;
+        assert!(matches!(runtime.get_status(action), Some(ObligationStatus::Failed { .. })));
+        assert_eq!(runtime.next_observation_tick(action), None);
+        Ok(())
     }
 
     #[test]

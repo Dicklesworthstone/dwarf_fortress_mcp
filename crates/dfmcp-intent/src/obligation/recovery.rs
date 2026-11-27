@@ -131,6 +131,14 @@ impl RecoveredObligation {
         self.runtime.last_observation_anchor(self.action_id)
     }
 
+    /// The retained monitor's next eligible sample, capped by its unchanged
+    /// original deadline. Off-cadence observations do not renew this interval.
+    /// This reveals no dispatch handle or clock authority.
+    #[must_use]
+    pub fn next_observation_tick(&self) -> Option<GameTick> {
+        self.runtime.next_observation_tick(self.action_id)
+    }
+
     /// Check an existing monitor's sealed identity without exposing its proof
     /// identifier as an adapter handle or constructing a replacement runtime.
     #[must_use]
@@ -241,6 +249,33 @@ mod tests {
             poll_interval_ticks: cadence,
             stable_for_observations: stable,
         }
+    }
+
+    #[test]
+    fn recovered_next_sample_keeps_its_floor_across_reads_but_resets_after_a_real_restart()
+    -> Result<()> {
+        let original = spec(35, 10, 3);
+        let mut monitor = RecoveredObligation::new_laboratory(
+            ActionId::new(31), original.clone(), GameTick(0), &snapshot(10, 2, 1, false),
+        )?;
+        assert_eq!(monitor.next_observation_tick(), Some(GameTick(20)));
+        monitor.observe_laboratory(&snapshot(17, 2, 2, false))?;
+        assert_eq!(monitor.last_observation_anchor().map(|anchor| anchor.tick), Some(GameTick(17)));
+        assert_eq!(monitor.next_observation_tick(), Some(GameTick(20)));
+        let restarted = monitor.after_restart_laboratory(&snapshot(17, 3, 1, false))?;
+        assert_eq!(restarted.next_observation_tick(), Some(GameTick(27)));
+        monitor.observe_laboratory(&snapshot(20, 2, 3, false))?;
+        monitor.observe_laboratory(&snapshot(27, 2, 4, false))?;
+        assert_eq!(monitor.next_observation_tick(), Some(GameTick(30)));
+        monitor.observe_laboratory(&snapshot(30, 2, 5, false))?;
+        assert_eq!(monitor.next_observation_tick(), Some(GameTick(35)));
+        assert!(monitor.matches_original(ActionId::new(31), &original, GameTick(0)));
+        monitor.observe_laboratory(&snapshot(35, 2, 6, false))?;
+        assert!(matches!(monitor.status(), Some(ObligationStatus::Fulfilled {
+            fulfilled_at_tick: GameTick(35), ..
+        })));
+        assert_eq!(monitor.next_observation_tick(), None);
+        Ok(())
     }
 
     #[test]

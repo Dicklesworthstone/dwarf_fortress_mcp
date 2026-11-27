@@ -916,7 +916,22 @@ fn forecast_metered(
                         "joint forecast original has zero observation cadence",
                     ));
                 }
-                interval = interval.min(obligation.poll_interval_ticks);
+                if receipt.state == CommitState::AppliedAwaitingVerification {
+                    let next = fork.action_next_observation_tick(*id)?.ok_or_else(|| {
+                        error(
+                            ErrorCode::InternalInvariantViolation,
+                            "active forecast original lost its observation schedule",
+                        )
+                    })?;
+                    // The fork retains the original monitor, including its
+                    // last eligible sample. Short waits and another original's
+                    // reserve frontier must not restart that sampling clock.
+                    // A due sample is polled at the current tick before time
+                    // can move again.
+                    interval = interval.min(next.0.saturating_sub(now));
+                } else {
+                    interval = interval.min(obligation.poll_interval_ticks);
+                }
                 if obligation.deadline_tick.0 > now {
                     interval = interval.min(obligation.deadline_tick.0 - now);
                 }

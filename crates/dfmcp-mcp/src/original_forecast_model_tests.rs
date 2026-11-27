@@ -183,6 +183,89 @@ fn original_stability_samples_and_deadlines_survive_the_fork() -> Result<()> {
     Ok(())
 }
 
+fn cadence_original(adapter: &MemoryAdapter, id: u128) -> Result<PreparedPlan> {
+    let terminal = Predicate::FieldCompare {
+        entity_id: dfmcp_core::EntityId::new(1007),
+        field: "labor.BREW".to_owned(),
+        op: CompareOp::Eq,
+        value: WorldValue::Bool(true),
+    };
+    let step = RequestedAction {
+        action: Action::SetLabor {
+            units: vec![dfmcp_core::EntityId::new(1007)],
+            labor: "BREW".to_owned(),
+            enabled: true,
+        },
+        preconditions: Vec::new(),
+        postconditions: vec![terminal.clone()],
+        compensation: None,
+        obligation: Some(ObligationSpec {
+            terminal,
+            failure: None,
+            deadline_tick: GameTick(adapter.snapshot().tick.0 + 25),
+            poll_interval_ticks: 10,
+            stable_for_observations: 3,
+        }),
+        depends_on: Vec::new(),
+    };
+    prepare(adapter, id, vec![step], 25)
+}
+
+#[test]
+fn short_prior_wait_cannot_postpone_original_forecast_samples_past_the_deadline() -> Result<()> {
+    let mut adapter = fixture()?;
+    let plan = cadence_original(&adapter, 22)?;
+    let original = commit(&mut adapter, &plan)?;
+    let tracked = original.actions.clone();
+    let uninterrupted = predict(
+        &adapter, &[&plan], &[original.clone()], &tracked, 25, &context(&adapter),
+    )?;
+    assert_eq!(uninterrupted["all_complete"], true, "{uninterrupted}");
+
+    adapter.advance_ticks(7)?;
+    let early = adapter.poll_action(tracked[0], &context(&adapter))?;
+    assert_eq!(early.state, CommitState::AppliedAwaitingVerification);
+    let before = format!("{adapter:?}");
+    let resumed = predict(
+        &adapter, &[&plan], &[original], &tracked, 18, &context(&adapter),
+    )?;
+    assert_eq!(resumed["all_complete"], true, "{resumed}");
+    assert_eq!(resumed["predicted_frontier_tick"], uninterrupted["predicted_frontier_tick"]);
+    assert_eq!(resumed["originals"][0]["steps"][0]["predicted_state"], "Verified");
+    assert_eq!(format!("{adapter:?}"), before);
+    Ok(())
+}
+
+#[test]
+fn another_originals_exact_reserve_frontier_cannot_move_the_sampling_clock() -> Result<()> {
+    let mut adapter = fixture()?;
+    let first_plan = cadence_original(&adapter, 23)?;
+    let first = commit(&mut adapter, &first_plan)?;
+    let second_plan = prepare(
+        &adapter,
+        24,
+        vec![requested(Action::SetLabor {
+            units: vec![dfmcp_core::EntityId::new(1006)],
+            labor: "BREW".to_owned(),
+            enabled: true,
+        }, Vec::new())],
+        25,
+    )?;
+    let mut second = commit(&mut adapter, &second_plan)?;
+    second.reserve_until = Some(adapter.snapshot().tick.0 + 7);
+    let tracked = first.actions.iter().chain(&second.actions).copied().collect::<Vec<_>>();
+    let before = format!("{adapter:?}");
+    let result = predict(
+        &adapter, &[&first_plan, &second_plan], &[first, second], &tracked, 25, &context(&adapter),
+    )?;
+    assert_eq!(result["all_complete"], true, "{result}");
+    assert_eq!(result["predicted_frontier_tick"], adapter.snapshot().tick.0 + 25);
+    assert_eq!(result["originals"][1]["reserve_frontier_truth"], "true");
+    assert_eq!(result["originals"][0]["steps"][0]["predicted_state"], "Verified");
+    assert_eq!(format!("{adapter:?}"), before);
+    Ok(())
+}
+
 fn ready_pause(resume: bool) -> Result<(MemoryAdapter, PreparedPlan, Original, Vec<ActionId>)> {
     let mut adapter=fixture()?;
     let mut actions=vec![order("competitor",1),requested(Action::Pause {paused:true},vec![0])];

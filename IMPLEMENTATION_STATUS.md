@@ -1,5 +1,42 @@
 # Implementation Status
 
+## Unreleased — Preserve original proof cadence across waits and forecasts
+
+Foreground waits, recovered-step progression and forecasts of committed plans now
+schedule each temporal observation from its retained last eligible sample or
+original registration. An intervening short wait, watch ceiling or another
+original's exact reserve frontier no longer restarts a whole polling interval.
+An original registered at tick 1 with cadence 10, three required observations and
+deadline 26 therefore retains samples at 11, 21 and 26 after a wait ends at 8.
+
+Read-only next-observation metadata is shared by the obligation runtime,
+recovered monitor and laboratory adapter. An active temporal action with missing
+or inactive monitor custody refuses instead of inventing a replacement schedule.
+Already-due live observations run before further clock advancement; recovered
+owners retain their positive ceiling and initial-observation contract. Tick
+arithmetic saturates and the final eligible sample remains clipped to the
+unchanged original deadline. Genuine recovery still resets unfinished stability
+as before. Plan/action encodings, original identity and effect authority are
+unchanged.
+
+Eleven new regression functions cover early reads, exact deadlines, overflow,
+real restart boundaries, split waits, owner ceilings, due-now progression,
+recovered deadlines, public MCP mining proof timing and private original
+forecasts with short prior waits or competing reserve frontiers. Independent
+source review caught and corrected an already-satisfied planner fixture before
+publication; all final blobs were recovered and read back through GitHub.
+
+The earlier world/intent run reported 822 passing tests, but it did not establish
+a stable final-source result. The combined final intent/laboratory run started
+before the execution host disconnected, and its result was not observed. The
+eleven new cadence regressions, final compilation, formatting, full repository
+verification and qualification remain unexecuted or unobserved. No native/live
+qualification or compatibility admission is claimed.
+
+Owners: `df-lab-selected-plan-wait-s4q`,
+`df-predicate-evidence-authority-r7m` and
+`df-lab-joint-original-forecast-c2s` (broader acceptance remains in progress).
+
 ## Unreleased — Keep workforce planning consistent with physical execution
 
 Workforce reports, remaining-service estimates and synthesized plans now admit

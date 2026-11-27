@@ -197,8 +197,12 @@ does not admit recovered selections into `current_stage`.
 An initial zero-time polling round can release already-ready original
 dependencies. Subsequent slices follow the laboratory foreground wait policy:
 a nominal 100-tick interval clipped to remaining horizon, each active original
-obligation's cadence and deadline, every unfinished carried monitor's cadence
-and deadline, and each selected exact reserve endpoint. Carried observations
+obligation's next eligible observation and deadline, every unfinished carried
+monitor's next eligible observation and deadline, and each selected exact
+reserve endpoint. The next eligible tick comes from the retained monitor's
+last cadence-eligible sample, not from the most recent read or query start.
+A short earlier wait or another original's reserve endpoint therefore cannot
+postpone the remaining stability observations. Carried observations
 use the same pure transition and cadence ceiling as real foreground waiting.
 The model also observes them after hypothetical commits at the same tick, so
 new effects cannot escape current failure and identity checks. Repeated reads
@@ -460,7 +464,8 @@ reuses the existing complete-project compilers for explicitly hypothetical
 successor stages, separating their receipts from live originals.
 
 The model regression file exercises real finite worker and wood contention,
-retained stability at a deadline, unselected ready deferred pause, pause/resume
+retained stability at a deadline, interrupted waits and off-cadence reserve
+frontiers, unselected ready deferred pause, pause/resume
 rounds, zero horizon, authority, reserve invalidation by consumption, retained
 false/unknown/missed endpoints and live-adapter isolation. The facade regression
 file covers original/alias custody, pending review and history preservation,

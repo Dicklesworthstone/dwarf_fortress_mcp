@@ -177,6 +177,34 @@ fn a_deferred_pause_stops_time_inside_the_wait() -> TestResult {
 }
 
 #[test]
+fn public_short_wait_preserves_the_same_original_mining_proof_tick() -> TestResult {
+    let uninterrupted = open("7855110", false)?;
+    let split = open("7855111", false)?;
+    let request = json!([
+        {"action":{"kind":"designate_dig","mode":"mine","min":[0,3,10],"max":[0,3,10]}}
+    ]);
+    submit(&uninterrupted, Some(request.clone()), None)?;
+    submit(&split, Some(request), None)?;
+    let completed = parsed(&facade::fortress_wait(Some(uninterrupted), Some(100)))?;
+    let early = parsed(&facade::fortress_wait(Some(split.clone()), Some(7)))?;
+    assert_eq!(early["ok"], true, "{early}");
+    assert_eq!(early["open_actions_remaining"], 1, "{early}");
+    let resumed = parsed(&facade::fortress_wait(Some(split), Some(93)))?;
+    for outcome in [&completed, &resumed] {
+        assert_eq!(outcome["ok"], true, "{outcome}");
+        assert_eq!(outcome["open_actions_remaining"], 0, "{outcome}");
+        assert_eq!(outcome["polled_actions"][0]["state"], "Verified", "{outcome}");
+    }
+    assert_eq!(
+        completed["polled_actions"][0]["observed_anchor"]["game_tick"],
+        resumed["polled_actions"][0]["observed_anchor"]["game_tick"],
+        "a short foreground wait must not renew the retained mining cadence",
+    );
+    assert_eq!(completed["observed_anchor"]["game_tick"], resumed["observed_anchor"]["game_tick"]);
+    Ok(())
+}
+
+#[test]
 fn wait_retains_achievement_before_later_consumption_and_durable_reopen() -> TestResult {
     let _serial = serialized_durable_tests();
     let directory = StateDir::new("achievement");

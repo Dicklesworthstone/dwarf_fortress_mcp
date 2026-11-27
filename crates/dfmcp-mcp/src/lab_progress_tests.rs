@@ -253,6 +253,91 @@ fn temporal_order(
     }
 }
 
+fn stable_labor_plan(adapter: &MemoryAdapter, deadline: u64) -> Result<PreparedPlan> {
+    let unit = dfmcp_core::EntityId::new(1007);
+    let terminal = Predicate::FieldCompare {
+        entity_id: unit,
+        field: format!("{}BREW", effects::LABOR_FIELD_PREFIX),
+        op: CompareOp::Eq,
+        value: Value::Bool(true),
+    };
+    plan(adapter, vec![RequestedAction {
+        action: Action::SetLabor {
+            units: vec![unit],
+            labor: "BREW".to_owned(),
+            enabled: true,
+        },
+        preconditions: Vec::new(),
+        postconditions: vec![terminal.clone()],
+        compensation: None,
+        obligation: Some(ObligationSpec {
+            terminal,
+            failure: None,
+            deadline_tick: GameTick(deadline),
+            poll_interval_ticks: 10,
+            stable_for_observations: 3,
+        }),
+        depends_on: Vec::new(),
+    }])
+}
+
+#[test]
+fn short_waits_and_owner_ceilings_preserve_the_original_eligible_samples() -> Result<()> {
+    let mut uninterrupted = new_adapter()?;
+    let sealed = stable_labor_plan(&uninterrupted, 26)?;
+    let actions = commit(&mut uninterrupted, &sealed)?;
+    let mut split = uninterrupted.clone();
+    let mut clipped = uninterrupted.clone();
+    run(&mut uninterrupted, &actions, 25)?;
+    run(&mut split, &actions, 7)?;
+    assert_eq!(split.snapshot().tick, GameTick(8));
+    assert_eq!(split.action_next_observation_tick(actions[0])?, Some(GameTick(11)));
+    run(&mut split, &actions, 18)?;
+
+    let mut progress = ForegroundProgress::new(&clipped, 25, &context(&clipped))?;
+    let mut observed = Vec::new();
+    while let Some(slice) = take_slice(&mut progress, &mut clipped, &actions, Some(7))? {
+        observed.push(clipped.snapshot().tick.0);
+        if slice.finished {
+            break;
+        }
+    }
+    assert_eq!(observed, vec![1, 8, 11, 18, 21, 26]);
+    for adapter in [&uninterrupted, &split, &clipped] {
+        let receipt = adapter.action_receipt(actions[0]).ok_or_else(|| {
+            refusal(ErrorCode::InvalidRequest, "original labor proof disappeared")
+        })?;
+        assert_eq!(receipt.state, CommitState::Verified);
+        assert_eq!(receipt.observed_anchor.tick, GameTick(26));
+        assert_eq!(adapter.action_step(actions[0]), Some(&sealed.steps[0]));
+    }
+    Ok(())
+}
+
+#[test]
+fn an_already_due_live_monitor_is_observed_before_time_and_cannot_loop_at_zero() -> Result<()> {
+    let mut adapter = new_adapter()?;
+    let sealed = stable_labor_plan(&adapter, 31)?;
+    let actions = commit(&mut adapter, &sealed)?;
+    adapter.advance_ticks(10)?;
+    assert_eq!(adapter.action_next_observation_tick(actions[0])?, Some(GameTick(11)));
+    let mut progress = ForegroundProgress::new(&adapter, 20, &context(&adapter))?;
+    let first = take_slice(&mut progress, &mut adapter, &actions, None)?
+        .ok_or_else(|| refusal(ErrorCode::InvalidRequest, "initial proof observation missing"))?;
+    assert!(!first.finished);
+    assert_eq!(progress.advanced_game_ticks(), 0);
+    assert_eq!(adapter.action_next_observation_tick(actions[0])?, Some(GameTick(21)));
+    while let Some(slice) = take_slice(&mut progress, &mut adapter, &actions, None)? {
+        if slice.finished {
+            break;
+        }
+    }
+    assert_eq!(progress.slices(), 3);
+    assert_eq!(progress.advanced_game_ticks(), 20);
+    assert_eq!(adapter.action_receipt(actions[0]).map(|receipt| receipt.state), Some(CommitState::Verified));
+    Ok(())
+}
+
 #[test]
 fn deadline_clipping_and_original_cadence_create_only_distinct_real_samples() -> Result<()> {
     let mut adapter = new_adapter()?;

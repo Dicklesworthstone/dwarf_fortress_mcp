@@ -347,6 +347,39 @@ impl MemoryAdapter {
         self.actions.get(&action_id).map(|action| &action.receipt)
     }
 
+    /// Next eligible sample for an already-dispatched active temporal proof.
+    /// This is a read-only scheduling hint, not a poll or clock grant. Deferred
+    /// actions have no monitor until their actual authorized dispatch, while
+    /// terminal receipts retain no further sampling requirement.
+    pub fn action_next_observation_tick(&self, action_id: ActionId) -> Result<Option<GameTick>> {
+        let action = self.actions.get(&action_id).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                format!("unknown action {action_id}"),
+            )
+        })?;
+        if action.receipt.state != CommitState::AppliedAwaitingVerification
+            || action.step.obligation.is_none()
+        {
+            return Ok(None);
+        }
+        let runtime = action.obligation_runtime.as_ref().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "dispatched temporal action has no retained proof monitor",
+            )
+        })?;
+        runtime
+            .next_observation_tick(action_id)
+            .map(Some)
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "active temporal action lost its active original proof monitor",
+                )
+            })
+    }
+
     /// Complete retained action identities for bounded owner-lifetime checks.
     /// Reading this index never polls, dispatches, or changes historical proof.
     pub fn retained_action_ids(&self) -> impl Iterator<Item = ActionId> + '_ {
@@ -2589,6 +2622,33 @@ mod tests {
             adapter.poll_action(action_id, &context(adapter.snapshot(), 11))?,
             terminal
         );
+        Ok(())
+    }
+
+    #[test]
+    fn retained_action_schedule_keeps_short_waits_from_postponing_timely_proof() -> Result<()> {
+        let (mut adapter, action) = cadence_adapter(10, 3, 26)?;
+        let original = adapter.action_step(action).cloned();
+        assert_eq!(adapter.action_next_observation_tick(action)?, Some(GameTick(11)));
+        assert_eq!(
+            adapter.action_next_observation_tick(ActionId::NIL).err().map(|error| error.code),
+            Some(ErrorCode::InvalidRequest),
+        );
+        adapter.advance_ticks(7)?;
+        adapter.poll_action(action, &context(adapter.snapshot(), 9))?;
+        assert_eq!(adapter.action_next_observation_tick(action)?, Some(GameTick(11)));
+        for tick in [11, 21, 26] {
+            assert_eq!(adapter.action_next_observation_tick(action)?, Some(GameTick(tick)));
+            adapter.advance_ticks(tick - adapter.snapshot().tick.0)?;
+            adapter.poll_action(action, &context(adapter.snapshot(), 10))?;
+        }
+        let receipt = adapter.action_receipt(action).ok_or_else(|| {
+            DfmcpError::new(ErrorCode::InvalidRequest, "original proof receipt disappeared")
+        })?;
+        assert_eq!(receipt.state, CommitState::Verified);
+        assert_eq!(receipt.observed_anchor.tick, GameTick(26));
+        assert_eq!(adapter.action_next_observation_tick(action)?, None);
+        assert_eq!(adapter.action_step(action), original.as_ref());
         Ok(())
     }
 

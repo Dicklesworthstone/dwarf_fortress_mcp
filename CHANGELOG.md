@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Keep timely proof stable across split waits and forecasts
+
+- Expose read-only next-observation ticks from retained obligation monitors.
+- Use the remaining interval to that tick in foreground and recovered waits,
+  and in forecasts of original plans, including competing reserve boundaries.
+- Preserve original deadlines, distinct-observation counts and real restart
+  boundaries; observe already-due live samples before advancing time.
+- Refuse active temporal receipts whose original proof monitor is missing or
+  inactive instead of inventing replacement cadence.
+- Add eleven regression functions spanning core, recovery, laboratory, public
+  MCP and original-forecast behavior. Independent source review completed;
+  final Rust execution and formatting remain unverified after host loss.
+
 ## Unreleased — Align workforce plans with executable source identities
 
 - Share complete, budgeted entity/edge identity admission between physical

@@ -16,10 +16,18 @@ the only work eligible to dispatch.
 
 The first round observes the current frontier without advancing time. This
 allows already eligible successors to begin before the requested time is
-consumed. Later rounds advance by at most 100 ticks, shortened by any active
-step's sealed poll interval, exact remaining deadline, recovered obligation
-interval, or remaining requested time. The reference default obligation cadence
+consumed. Later rounds advance by at most 100 ticks, shortened by each active
+monitor's next eligible sample, exact remaining deadline, recovered obligation
+sample, or remaining requested time. The reference default obligation cadence
 is 10 ticks; 100 is only the outer ceiling and quiet-world interval.
+
+The next sample is measured from the retained monitor's last eligible sample
+or registration. An earlier read, short wait, another watch's stop, or a reserve
+frontier does not restart a whole interval. For example, a cadence of 10 ticks
+with a sample due at tick 11 still resumes there after a wait ends at tick 8.
+This preserves the observations available before the original deadline.
+Recovered monitors use the same rule after their explicit restart cadence floor;
+an ordinary read never creates a new recovery or restores a lost stability streak.
 
 Each round polls retained owned actions in their original commit order, with
 prerequisites before dependents. Multiple earlier plans remain included when

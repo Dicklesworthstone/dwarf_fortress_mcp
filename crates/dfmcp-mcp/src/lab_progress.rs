@@ -281,7 +281,14 @@ impl ForegroundProgress {
                         "foreground obligation has zero cadence",
                     ));
                 }
-                interval = interval.min(obligation.poll_interval_ticks);
+                if let Some(due) = adapter.action_next_observation_tick(*action_id)? {
+                    // Use the retained eligible-sample floor, not the latest
+                    // read or a new whole interval from this request's start.
+                    // An overdue original is observed without consuming time.
+                    interval = interval.min(due.0.saturating_sub(now));
+                } else {
+                    interval = interval.min(obligation.poll_interval_ticks);
+                }
                 if obligation.deadline_tick.0 > now {
                     interval = interval.min(obligation.deadline_tick.0 - now);
                 }
