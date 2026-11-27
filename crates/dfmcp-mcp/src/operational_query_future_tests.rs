@@ -217,7 +217,7 @@ fn source_tick_is_local_to_each_selected_snapshot() -> Result<()> {
 #[test]
 fn future_mask_does_not_replace_other_unavailable_or_contradicted_states() {
     for (presence_state, expected) in [
-        (FactPresence::Absent, "absent"),
+        (FactPresence::Absent, "future"),
         (FactPresence::Unknown("unread".to_owned()), "unknown"),
         (FactPresence::Unsupported("version".to_owned()), "unsupported"),
         (FactPresence::Omitted("projection".to_owned()), "omitted"),
@@ -242,4 +242,65 @@ fn future_mask_does_not_replace_other_unavailable_or_contradicted_states() {
             ("known", Some(&WorldValue::U64(3)))
         );
     }
+}
+
+#[test]
+fn selected_absence_groups_and_metric_exclusions_follow_the_source_tick() -> Result<()> {
+    let (mut retained, mut context) = fixture();
+    retained
+        .graph
+        .entities
+        .retain(|id, _| *id == EntityId::new(1));
+    let stock = retained
+        .graph
+        .entities
+        .get_mut(&EntityId::new(1))
+        .and_then(|entity| entity.fields.get_mut("stock"))
+        .ok_or_else(|| invalid("missing stock fixture"))?;
+    stock.presence = Some(FactPresence::Absent);
+    retained.refresh_hash();
+    let mut current = retained.clone();
+    current.tick = GameTick(11);
+    current.cursor.sequence += 1;
+    current.refresh_hash();
+    context.anchor = current.anchor();
+
+    for group_by in [
+        json!({"kind":"field","field":"stock"}),
+        json!({"kind":"fields","fields":["stock","bucket"]}),
+    ] {
+        for (source, expected) in [(&retained, "future"), (&current, "absent")] {
+            let mut request = aggregate();
+            request["expected_anchor"] = anchor_json(source.anchor());
+            request["query"]["where"] = json!({"op":"presence","field":"stock","state":expected});
+            request["query"]["group_by"] = group_by.clone();
+            let result = if expected == "future" {
+                execute_retained_with_output_budget(
+                    source,
+                    &context,
+                    &request,
+                    8192,
+                    Instant::now(),
+                )?
+            } else {
+                execute(source, &context, &request)?
+            };
+            assert_eq!(result["anchor"], anchor_json(source.anchor()));
+            assert_eq!(result["matched"], 1);
+            let group = &result["groups"][0];
+            let key = &group["key"];
+            let component = if group_by["kind"] == "field" {
+                key
+            } else {
+                &key["fields"][0]
+            };
+            assert_eq!(component["presence"], expected);
+            assert!(component["value"].is_null());
+            let metric = &group["metrics"]["stock"];
+            assert_eq!(metric["samples"], 0);
+            assert!(metric["sum"].is_null());
+            assert_eq!(metric["excluded"][expected], 1);
+        }
+    }
+    Ok(())
 }

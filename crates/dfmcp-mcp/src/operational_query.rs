@@ -9,8 +9,10 @@ use dfmcp_core::{
     Capability, DfmcpError, Digest32, EntityId, ErrorCode, OperationContext, Result, RiskTier,
     StateAnchor,
 };
+#[cfg(test)]
+use dfmcp_world::FactPresence;
 use dfmcp_world::{
-    EntityKind, EntityRecord, Fact, FactPresence, FactSource, Predicate, PredicateTruth,
+    EntityKind, EntityRecord, Fact, FactSource, FieldPresenceState, Predicate, PredicateTruth,
     Value as WorldValue, WorldSnapshot, evaluate_truth_for,
 };
 use serde::Deserialize;
@@ -225,25 +227,13 @@ fn presence(
     fact: Option<&Fact>,
     source_tick: dfmcp_core::GameTick,
 ) -> (&'static str, Option<&WorldValue>) {
-    let Some(fact) = fact else {
-        return ("unobserved", None);
+    let state = FieldPresenceState::of_fact(fact, source_tick);
+    let value = if state == FieldPresenceState::Known {
+        fact.map(|fact| &fact.value)
+    } else {
+        None
     };
-    // Retain unavailable/contradictory classifications and never expose their
-    // backing values. A consistent Known value still needs source-time validity.
-    if fact.observed_at > source_tick && fact.known_value().is_some() {
-        return ("future", None);
-    }
-    match &fact.presence {
-        None => ("known", Some(&fact.value)),
-        Some(FactPresence::Known(value)) if value == &fact.value => ("known", Some(value)),
-        Some(FactPresence::Known(_)) => ("contradicted", None),
-        Some(FactPresence::Absent) => ("absent", None),
-        Some(FactPresence::Unknown(_)) => ("unknown", None),
-        Some(FactPresence::Unsupported(_)) => ("unsupported", None),
-        Some(FactPresence::Omitted(_)) => ("omitted", None),
-        Some(FactPresence::Redacted(_)) => ("redacted", None),
-        Some(FactPresence::Stale(_)) => ("stale", None),
-    }
+    (state.as_str(), value)
 }
 
 fn scalar(value: &WorldValue) -> Result<Value> {

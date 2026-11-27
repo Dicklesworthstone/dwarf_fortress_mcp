@@ -119,9 +119,11 @@ not the current session tick. A consistently Known fact observed at that tick
 or earlier remains eligible; this rule does not impose an additional age limit.
 
 Aggregate grouping and numeric metrics apply the same time boundary before
-using a Known value. Future-dated grouping facts produce an unavailable
-`future` key with no backing value. Future numeric samples increment
-`excluded.future`; they do not increment sample counts or become zero.
+using a value or reporting explicit absence. A Known or Absent fact dated
+later than the selected snapshot produces a `future` grouping key with no
+backing value. At its observation tick the Absent marker groups as `absent`.
+A numeric metric excludes both kinds of future fact under
+`excluded.future`. Neither contributes a sample or a zero.
 Metric totals, extrema and means therefore depend only on temporally eligible
 samples. Existing unavailable and contradictory values remain masked.
 
@@ -310,7 +312,7 @@ null and unavailable states remain distinct. Groups sort lexicographically by
 the components in requested order under the canonical typed-value ordering.
 Unavailable components retain their presence category and a null value; hidden
 payloads and explanatory strings do not participate in the key. A future Known
-component uses `presence: "future"` without its value. An unavailable grouping
+or Absent component uses `presence: "future"` without its value. An unavailable grouping
 field still belongs to an explicit group: it does not make an otherwise known
 entity membership Unknown. Unavailable metric samples remain independent.
 

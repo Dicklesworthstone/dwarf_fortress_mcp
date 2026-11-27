@@ -83,7 +83,9 @@ impl FieldPresenceState {
         }
     }
 
-    fn of_fact(fact: Option<&Fact>, tick: GameTick) -> Self {
+    /// Classify a field as of the tick of the snapshot being queried.
+    #[must_use]
+    pub fn of_fact(fact: Option<&Fact>, tick: GameTick) -> Self {
         let Some(fact) = fact else {
             return Self::Unobserved;
         };
