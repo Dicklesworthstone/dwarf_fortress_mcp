@@ -152,10 +152,14 @@ class Candidate:
                 'material': list(self.material), 'subtype': self.subtype}
 
 
+def compatible_item(slot: Slot, item: Candidate) -> bool:
+    return (slot.kind == item.kind and slot.target[2] == item.position[2]
+            and (slot.material is None or slot.material == item.material)
+            and (slot.subtype is None or slot.subtype == item.subtype))
+
+
 def distance(slot: Slot, item: Candidate) -> int | None:
-    if (slot.kind != item.kind or slot.target[2] != item.position[2]
-            or (slot.material is not None and slot.material != item.material)
-            or (slot.subtype is not None and slot.subtype != item.subtype)):
+    if not compatible_item(slot, item):
         return None
     value = abs(slot.target[0] - item.position[0]) + abs(slot.target[1] - item.position[1])
     return value if value <= slot.max_distance else None

@@ -11,6 +11,7 @@ import hashlib
 import json
 from typing import Callable
 
+from furniture_allocation import Slot
 from furniture_plan import canonical, integer, require
 from room_site_mask import SiteMask
 from room_access import Access
@@ -108,7 +109,7 @@ class _Profile:
     low: Point
     high: Point
     parts: int
-    slots: int
+    furnishings: tuple[Slot, ...]
     variants: tuple[_Profile, ...] = ()
 
 
@@ -152,7 +153,8 @@ def _profile(area: dict, folder: str, site: int, level: int, work: _Work) -> _Pr
                     relative(tuple(body['areas'][0]['entry_point'])),
                     tuple(min(p[i] for p in cells) for i in range(3)),
                     tuple(max(p[i] for p in cells) for i in range(3)),
-                    len(body['excavation_blueprint']['parts']), body['furniture_count'])
+                    len(body['excavation_blueprint']['parts']),
+                    tuple(Slot.from_json(slot) for slot in body['furniture_request']['slots']))
 
 
 def _oriented_profile(area: dict, folder: str, site: int, level: int, work: _Work) -> _Profile:
@@ -178,7 +180,8 @@ def _oriented_profile(area: dict, folder: str, site: int, level: int, work: _Wor
     first = variants[0]
     if len(variants) == 1:
         return first
-    require(all((len(v.floors), v.parts, v.slots) == (len(first.floors), first.parts, first.slots)
+    require(all((len(v.floors), v.parts, len(v.furnishings)) ==
+                (len(first.floors), first.parts, len(first.furnishings))
                 for v in variants), 'rotation changed complete template cardinality')
     normalized = json.loads(first.area)
     normalized.pop('rotation', None)
@@ -269,7 +272,7 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
     require(len({a['name'] for a in normalized_areas}) == len(profiles), 'duplicate layout area name')
     require(sum(min(len(v.floors) for v in p.variants or (p,)) for p in profiles) <= MAX_TILES
             and sum(min(v.parts for v in p.variants or (p,)) for p in profiles) <= MAX_PARTS
-            and sum(p.slots for p in profiles) <= 32,
+            and sum(len(p.furnishings) for p in profiles) <= 32,
             'complete layout exceeds existing floor, part or furnishing limits')
     exclusions = value.get('excluded_regions', [])
     require(type(exclusions) is list and len(exclusions) <= 32, 'too many layout exclusions')

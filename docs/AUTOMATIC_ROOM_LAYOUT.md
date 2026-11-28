@@ -197,3 +197,11 @@ The census observes furniture at its capture tick. Terrain and hauling routes
 need separate observation, and the existing placement workflow must still review
 the selected items. Positive vertical hauling distances belong to the
 route-aware allocation workflow.
+
+A shortage that applies to the entire site produces `inventory_shortage_in_domain`
+before the first placement is tried. The `domain_supply.shortage` witness names
+the competing slots, every eligible item ID they can share in the relaxed domain,
+and a lower bound on the additional eligible items needed. This check lets each
+slot occupy any tile in the region, retaining the level, material, subtype,
+exclusion and maximum haul distance constraints. A successful relaxed match
+still requires the complete spatial search and an exact assignment.

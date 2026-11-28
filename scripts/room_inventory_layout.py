@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from construction_receipt import Manifest, decode_operations
 import furniture_inventory as inventory
-from furniture_allocation import allocate
+from furniture_allocation import _maximum_matching, allocate, compatible_item
 from furniture_plan import canonical, require
 import room_layout as layout
 from room_furniture_handoff import RoomFurnitureHandoff
@@ -20,6 +20,35 @@ def prepare(raw: bytes, guard: layout.Guard):
             require(not constraint.get('max_vertical_distance'),
                     'cross-level item movement requires the observed route allocator')
     return request, profiles, work
+
+
+def _domain_supply(request, profiles, candidates, work):
+    """Prove unavoidable shortages with a relaxation of every possible placement."""
+    slots = [slot for profile in profiles for slot in profile.furnishings]
+    (x, y, _), (width, height, _) = request['region']['origin'], request['region']['size']
+    edges = [{} for slot in slots]
+    for item in candidates:
+        work()
+        px, py, _ = item.position
+        # Even the nearest tile in this rectangle may be unusable for a real
+        # slot. Ignoring that geometry can only increase apparent supply.
+        nearest = max(x - px, px - (x + width - 1), 0) + max(y - py, py - (y + height - 1), 0)
+        for slot, possible in zip(slots, edges):
+            work()
+            if len(possible) < len(slots) and nearest <= slot.max_distance and compatible_item(slot, item):
+                possible[item.id] = 0
+    # For N slots, retaining N neighbors per slot preserves the existence of
+    # a full matching. Every deficient subset has fewer than N neighbors, so
+    # its reported neighbor IDs cover that subset's entire eligible census.
+    owners, deficiency = _maximum_matching(tuple(edges), work)
+    witness = None
+    if deficiency is not None:
+        witness = {'slots': [slots[index].name for index in deficiency['rows']],
+                   'candidate_items': deficiency['candidate_items'],
+                   'missing_at_least': deficiency['missing']}
+    return {'scope': 'all_targets_anywhere_in_the_declared_same_level_region',
+            'requested_slots': len(slots), 'maximum_assignable_in_relaxed_domain': len(owners),
+            'shortage': witness}
 
 
 def evaluate(prepared, capture: bytes, manifest: Manifest, address: str) -> dict:
@@ -42,7 +71,14 @@ def evaluate(prepared, capture: bytes, manifest: Manifest, address: str) -> dict
         require(allocation['status'] == 'allocated', 'unrecognized allocation outcome')
         return True
 
-    result = layout._search(request, profiles, work, has_stock)
+    supply = _domain_supply(request, profiles, candidates, work)
+    if supply['shortage'] is None:
+        result = layout._search(request, profiles, work, has_stock)
+    else:
+        result = {'status': 'inventory_shortage_in_domain',
+                  'search': {'nodes_visited': 0, 'domain_exhausted': False,
+                             'stop_reason': 'insufficient_distinct_furniture_for_any_layout',
+                             'work_limit': work.maximum, 'node_limit': request['search']['max_nodes']}}
     handoff = None
     if result['status'] == 'layout_found':
         plan = RoomPlan.decode(canonical(result['room_plan']), work)
@@ -56,7 +92,7 @@ def evaluate(prepared, capture: bytes, manifest: Manifest, address: str) -> dict
               'native_generation': manifest.generation, 'df_version': manifest.df_version,
               'dfhack_version': manifest.dfhack_version}
     report = {'schema': SCHEMA, 'request': request, 'source': source,
-              'projection': inventory.projection_summary(observed, counts),
+              'projection': inventory.projection_summary(observed, counts), 'domain_supply': supply,
               'status': result['status'], 'search': result['search'],
               'complete_layouts_checked_for_inventory': tested,
               'layouts_rejected_for_inventory_shortage': shortages,

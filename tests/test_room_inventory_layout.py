@@ -63,20 +63,63 @@ class InventoryLayoutTests(unittest.TestCase):
                 self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
                 self.assertEqual(RoomFurnitureHandoff.decode(run.stdout).room_plan, selected.room_plan)
 
-    def test_shortage_exhausts_domain_and_node_limit_remains_inconclusive(self):
+    def test_proven_domain_shortage_and_node_limit_with_sufficient_stock(self):
         document = project()
         wanted = stock(document)
         raw = capture(wanted, omit=[wanted.slots[1].name])
         report = evaluate(document, raw)
-        self.assertEqual(report['status'], 'no_layout_in_domain')
+        self.assertEqual(report['status'], 'inventory_shortage_in_domain')
         self.assertIsNone(report['room_handoff'])
-        self.assertEqual(report['layouts_rejected_for_inventory_shortage'],
-                         report['complete_layouts_checked_for_inventory'])
+        self.assertEqual(report['domain_supply']['shortage'],
+                         {'slots': [s.name for s in wanted.slots],
+                          'candidate_items': [1], 'missing_at_least': 1})
+        self.assertEqual(report['search']['nodes_visited'], 0)
         document['search'] = {'max_nodes': 2}
-        limited = evaluate(document, raw)
+        limited = evaluate(document, capture(wanted))
         self.assertEqual(limited['status'], 'search_limit_reached')
         self.assertFalse(limited['search']['domain_exhausted'])
         self.assertIsNone(limited['room_handoff'])
+
+    def test_material_competition_is_proven_even_with_enough_beds_in_total(self):
+        from dataclasses import replace
+        from furniture_allocation import Request
+        def sleeping(name, count, material):
+            return {'name': name, 'template': {'kind': 'dormitory', 'bed_count': count},
+                    'item_constraints': {'bed': {'material': material}}}
+        document = request(sleeping('east', 2, [7, -1]), sleeping('west', 1, [8, -1]),
+                           size=(22, 16, 1), search={'max_nodes': 1})
+        source = solve(request(sleeping('stock', 3, [8, -1]), size=(8, 5, 1))).room_plan().request()
+        slots = list(source.slots)
+        slots[0] = replace(slots[0], material=(7, -1))
+        report = evaluate(document, capture(Request(source.folder, source.site, tuple(slots))))
+        supply = report['domain_supply']
+        self.assertEqual(report['status'], 'inventory_shortage_in_domain')
+        self.assertEqual(report['search']['nodes_visited'], 0)
+        self.assertEqual(supply['maximum_assignable_in_relaxed_domain'], 2)
+        self.assertEqual(supply['shortage'], {'slots': ['east.001.bed', 'east.002.bed'],
+                         'candidate_items': [1], 'missing_at_least': 1})
+        self.assertIsNone(report['room_handoff'])
+
+    def test_rectangle_haul_distance_is_a_lower_bound_never_a_placement(self):
+        from dataclasses import replace
+        from furniture_allocation import Request
+        document = request({'name': 'sleep', 'template': {'kind': 'dormitory', 'bed_count': 1},
+                            'item_constraints': {'bed': {'max_distance': 1}}}, size=(2, 2, 1))
+        source = solve(document).room_plan().request()
+        def at(point):
+            return capture(Request(source.folder, source.site, (replace(source.slots[0], target=point),)))
+        for point in ((13, 11, 2), (11, 11, 3)):
+            report = evaluate(document, at(point))
+            self.assertEqual(report['status'], 'inventory_shortage_in_domain')
+            self.assertEqual(report['domain_supply']['shortage']['candidate_items'], [])
+        feasible = evaluate(document, at((12, 11, 2)))
+        self.assertIsNone(feasible['domain_supply']['shortage'])
+        self.assertIsNotNone(feasible['room_handoff'])
+        # The closest tile to this item is in the region, but cannot host this bed.
+        blocked = evaluate(document, at((9, 10, 2)))
+        self.assertIsNone(blocked['domain_supply']['shortage'])
+        self.assertEqual(blocked['status'], 'no_layout_in_domain')
+        self.assertIsNone(blocked['room_handoff'])
 
     def test_ranking_only_considers_complete_inventory_feasible_layouts(self):
         document = project()
