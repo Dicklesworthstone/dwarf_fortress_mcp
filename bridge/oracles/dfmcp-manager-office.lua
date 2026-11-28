@@ -1,7 +1,26 @@
 -- Read the fortress Manager, assigned office zones, and installed chairs at one paused tick.
--- Run from the DFHack console: dfmcp-manager-office
+-- Usage: dfmcp-manager-office [--workshop=ID] [ORDER_ID ...]
 local json = require('json')
-if select('#', ...) ~= 0 then qerror('expected no arguments') end
+local order_ids, requested, workshop_id = {}, {}, nil
+local function native_id(arg)
+    if not arg:match('^%d+$') or #arg > 10 or tonumber(arg) > 2147483647 then
+        qerror('expected a nonnegative native ID')
+    end
+    return tonumber(arg)
+end
+for _, arg in ipairs({...}) do
+    local workshop = arg:match('^%-%-workshop=(.*)$')
+    if workshop then
+        if workshop_id then qerror('select at most one workshop') end
+        workshop_id = native_id(workshop)
+    else
+        local id = native_id(arg)
+        if requested[id] or #order_ids == 8 then qerror('select at most eight distinct work orders') end
+        requested[id] = true
+        table.insert(order_ids, id)
+    end
+end
+table.sort(order_ids)
 
 local function bounded(vector, maximum, name)
     if #vector > maximum then qerror(name..' exceeds observation limit') end
@@ -125,6 +144,86 @@ local function offices_at(unit, report)
             or 'assigned_office_with_completed_chair_unconfirmed'
 end
 
+-- Work-order IDs, the owning building, and queue membership are separate native facts.
+local function capture_production(report)
+    local world = df.global.world
+    local orders = {}
+    for _, id in ipairs(order_ids) do orders[id] = {id=id, present=false} end
+    if #order_ids > 0 then
+        for _, o in ipairs(bounded(world.manager_orders.all, 8192, 'work orders')) do
+            local row = orders[o.id]
+            if row then
+                if row.present then qerror('duplicate selected work order ID') end
+                row.present, row.job_type, row.type_key = true, o.job_type, df.job_type[o.job_type]
+                row.validated, row.active = o.status.validated, o.status.active
+                row.amount_left, row.amount_total = o.amount_left, o.amount_total
+                row.frequency, row.workshop_id, row.max_workshops = o.frequency, o.workshop_id, o.max_workshops
+                row.finished_year, row.finished_year_tick = o.finished_year, o.finished_year_tick
+                row.item_type, row.item_subtype = o.item_type, o.item_subtype
+                row.material, row.material_category = {o.mat_type, o.mat_index}, o.material_category.whole
+                row.requires_wood_log, row.has_item_requirements = o.material_category.wood, not df.isnull(o.items)
+                row.item_conditions, row.order_conditions = #o.item_conditions, #o.order_conditions
+            end
+        end
+    end
+    local production = {orders={}, jobs={}}
+    report.production = production
+    for _, id in ipairs(order_ids) do table.insert(production.orders, orders[id]) end
+    local queued, queue_position = {}, {}
+    if workshop_id then
+        local b = df.building.find(workshop_id)
+        if not b or b:getType() ~= df.building_type.Workshop
+                or not dfhack.maps.isTileVisible(b.centerx, b.centery, b.z) then
+            qerror('selected visible workshop unavailable')
+        end
+        local queue = bounded(b.jobs, 256, 'workshop queue')
+        production.workshop = {id=b.id, type_key=df.workshop_type[b:getSubtype()],
+            build_stage=b:getBuildStage(), max_build_stage=b:getMaxBuildStage(), queue_size=#queue}
+        local index = 0
+        for _, job in ipairs(queue) do
+            if queued[job.id] then qerror('duplicate workshop job ID') end
+            queued[job.id], queue_position[job.id] = job, index
+            index = index + 1
+        end
+    end
+    local function add_job(job, in_world)
+        if #production.jobs >= 256 then qerror('selected jobs exceed observation limit') end
+        local row = {id=job.id, job_type=job.job_type, type_key=df.job_type[job.job_type],
+            order_id=job.order_id, listed_in_world=in_world, selected_workshop_queue_index=queue_position[job.id],
+            suspended=job.flags.suspend, working=job.flags.working, repeating=job.flags['repeat']}
+        -- Read the native reference IDs without invoking cache-updating unit/building resolvers.
+        for _, ref in ipairs(bounded(job.general_refs, 128, 'selected job references')) do
+            local t = ref:getType()
+            if t == df.general_ref_type.BUILDING_HOLDER then
+                if row.holder_building_id then qerror('ambiguous job building holder') end
+                row.holder_building_id = ref.building_id
+            elseif t == df.general_ref_type.UNIT_WORKER then
+                if row.worker_unit_id then qerror('ambiguous job worker') end
+                row.worker_unit_id = ref.unit_id
+            end
+        end
+        table.insert(production.jobs, row)
+    end
+    local seen, visited = {}, 0
+    local link = world.jobs.list.next
+    while link do
+        visited = visited + 1
+        if visited > 16384 then qerror('world job list exceeds observation limit') end
+        local job = link.item
+        if not job or seen[job.id] then qerror('invalid world job list') end
+        seen[job.id] = true
+        if requested[job.order_id] or queued[job.id] then
+            if queued[job.id] and queued[job.id] ~= job then qerror('conflicting native job ID') end
+            add_job(job, true)
+        end
+        link = link.next
+    end
+    for id, job in pairs(queued) do
+        if not seen[id] then add_job(job, false) end
+    end
+    table.sort(production.jobs, by_id)
+end
+
 local function observe()
     local world = dfhack.world
     if dfhack.getDFHackVersion() ~= '53.16-r1.1'
@@ -145,6 +244,7 @@ local function observe()
         manager_cooldown=plot.nobles.manager_cooldown, manager_timer=plot.manager_timer}
     local unit = manager_at(group, report)
     if unit then offices_at(unit, report) end
+    if workshop_id or #order_ids > 0 then capture_production(report) end
     return report
 end
 

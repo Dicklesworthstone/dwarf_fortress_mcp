@@ -133,3 +133,77 @@ for _, modify in ipairs({
     assert(not pcall(script) and report==nil and not suspended)
 end
 reset(); assert(not pcall(script,'unrecognized'))
+
+local function job(id, order_id, holder, worker)
+    local refs={}
+    if holder then table.insert(refs, {getType=const(2), building_id=holder}) end
+    if worker then table.insert(refs, {getType=const(3), unit_id=worker}) end
+    return {id=id, order_id=order_id, job_type=30, general_refs=refs,
+        flags={suspend=false, working=true, ['repeat']=false}}
+end
+local function order(id, approved)
+    return {id=id, job_type=30,status={active=approved,validated=approved},
+        amount_total=2,amount_left=approved and 1 or 2,frequency=0,workshop_id=-1,
+        max_workshops=1,finished_year=-1,finished_year_tick=-1,item_type=-1,item_subtype=-1,
+        mat_type=-1,mat_index=-1,material_category={whole=2,wood=true},
+        item_conditions={},order_conditions={},items=approved and {} or nil}
+end
+local shop, orders, job1, direct, queue_only, different_shop, missing_order
+local function production_fixture()
+    reset()
+    df.building_type.Workshop=7; df.workshop_type={[4]='Carpenters'}
+    df.general_ref_type={BUILDING_HOLDER=2,UNIT_WORKER=3}; df.job_type[30]='ConstructBed'
+    orders={order(12,false),order(14,true)}
+    df.global.world.manager_orders={all=orders}
+    job1=job(104,14,9,256)
+    direct=job(102,-1,9)
+    queue_only=job(99,-1,9)
+    different_shop=job(103,14,10)
+    missing_order=job(108,15,10)
+    local list={}
+    for _,j in ipairs({missing_order,job1,job(109,19,11),different_shop,direct}) do
+        list.next={next=list.next,item=j}
+    end
+    df.global.world.jobs={list=list}
+    shop={id=9,centerx=5,centery=6,z=2,getType=const(7),getSubtype=const(4),
+        getBuildStage=const(3),getMaxBuildStage=const(3),jobs={direct,job1,queue_only}}
+    df.building={find=guarded(function(id) if id==9 then return shop end end)}
+end
+production_fixture()
+script('15','--workshop=9','14','12')
+local prod=report.production
+assert(report.outcome==pass and prod.workshop.id==9 and prod.workshop.type_key=='Carpenters')
+assert(prod.workshop.queue_size==3 and prod.workshop.build_stage==3)
+assert(#prod.orders==3 and prod.orders[1].id==12 and not prod.orders[1].validated)
+assert(not prod.orders[1].has_item_requirements and prod.orders[2].has_item_requirements)
+assert(prod.orders[2].active and prod.orders[2].amount_left==1 and prod.orders[2].requires_wood_log)
+assert(not prod.orders[3].present)
+assert(#prod.jobs==5)
+assert(prod.jobs[1].id==99 and not prod.jobs[1].listed_in_world and prod.jobs[1].selected_workshop_queue_index==2)
+assert(prod.jobs[2].order_id==-1 and prod.jobs[2].selected_workshop_queue_index==0)
+assert(prod.jobs[3].holder_building_id==10 and prod.jobs[3].selected_workshop_queue_index==nil)
+assert(prod.jobs[4].order_id==14 and prod.jobs[4].holder_building_id==9 and prod.jobs[4].worker_unit_id==256)
+assert(prod.jobs[4].selected_workshop_queue_index==1 and prod.jobs[4].listed_in_world)
+assert(prod.jobs[5].order_id==15 and prod.jobs[5].id==108)
+production_fixture(); profile.histfig=-1; script('12')
+assert(report.outcome=='manager_position_vacant' and #report.production.jobs==0)
+production_fixture(); script('--workshop=9')
+assert(#report.production.jobs==3 and #report.production.orders==0)
+production_fixture(); script('14')
+assert(#report.production.jobs==2 and report.production.workshop==nil)
+for _, modify in ipairs({
+    function() shop.getType=const(1) end,
+    function() shop.centerx=8 end,
+    function() shop.jobs[4]=job1 end,
+    function() orders[3]=order(12,true) end,
+    function() df.global.world.jobs.list.next.next=df.global.world.jobs.list.next end,
+    function() job1.general_refs[3]={getType=const(2),building_id=10} end,
+    function() shop.jobs[2]=job(job1.id,14,9,256) end,
+}) do
+    production_fixture(); modify()
+    assert(not pcall(script, '--workshop=9','12','14') and report==nil)
+end
+for _, args in ipairs({{'12','12'},{'--workshop=9','--workshop=9'},{'--workshop=-1'},
+                        {'--workshop=8'},{'1','2','3','4','5','6','7','8','9'},{'2147483648'}}) do
+    production_fixture(); assert(not pcall(script, table.unpack(args)) and report==nil)
+end

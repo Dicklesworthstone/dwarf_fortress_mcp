@@ -180,3 +180,31 @@ office or change its owner, simulation clock, or work orders.
 
 The implementation follows the [pinned DFHack Buildings module](https://github.com/DFHack/dfhack/blob/b638b59d0876d9bdf8b5f97e52714206ab7f3266/library/modules/Buildings.cpp)
 and the [pinned building structures](https://github.com/DFHack/df-structures/blob/1dd01aad64219afa0578f1328cf15bd0c6006d5a/df.building.xml).
+
+### Compare selected work orders and the workshop’s actual queue
+
+In the same read, supply up to eight native work-order IDs. Optionally select
+one visible workshop by its building ID. For example, this compares work
+orders 0 and 2 with workshop building 1 at the exact tick of the office read.
+
+```text
+dfmcp-manager-office --workshop=1 0 2
+```
+
+`production.orders` records each requested ID, including a missing-record
+result. Present rows include validation and activation, demand and remainder,
+material and item constraints, frequency, forced workshop ID, maximum shops,
+condition counts, presence of native item requirements and the native
+next-check fields. Use the IDs from independently recorded UI and native order
+creation. The game records shown here do not identify which client created them.
+
+`production.jobs` includes every current global job with a selected
+`job.order_id` and every entry of the selected workshop’s native queue. Each
+row includes its native job ID and type, raw order ID, building-holder and
+worker references when present, job flags, global-list membership and its
+zero-based position in the selected queue when present. A queue entry with
+`order_id = -1` has no native work-order association. A job at another
+workshop can still match a selected order. A queue-only entry and a missing
+order with surviving matching jobs remain visible. The report describes the
+current queue and cannot reconstruct work that ended between paused reads
+or attribute a finished item to a job.
