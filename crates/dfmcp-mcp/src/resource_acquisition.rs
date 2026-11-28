@@ -39,6 +39,7 @@ pub(super) fn is_request(raw: &str) -> bool {
 pub(super) struct ResourceAcquisitionRequest {
     quotas: BTreeMap<HarvestResource, u64>,
     assign_labor: bool,
+    cover_queued_inputs: bool,
 }
 
 #[derive(Deserialize)]
@@ -57,6 +58,8 @@ struct Request {
     quotas: Vec<Quota>,
     #[serde(default)]
     assign_labor: bool,
+    #[serde(default)]
+    cover_queued_inputs: bool,
 }
 
 /// Nested retained sources must consume this typed grammar directly. A Value
@@ -129,19 +132,23 @@ impl ResourceAcquisitionRequest {
         Ok(Self {
             quotas,
             assign_labor: request.assign_labor,
+            cover_queued_inputs: request.cover_queued_inputs,
         })
     }
 
     pub(super) fn canonical_json(&self) -> String {
-        json!({
+        let mut canonical = json!({
             "template": "resource_acquisition",
             "planner": PLANNER,
             "quotas": self.quotas.iter().map(|(resource, minimum)| {
                 json!({"resource": resource.as_str(), "minimum": minimum})
             }).collect::<Vec<_>>(),
             "assign_labor": self.assign_labor,
-        })
-        .to_string()
+        });
+        if self.cover_queued_inputs {
+            canonical["cover_queued_inputs"] = json!(true);
+        }
+        canonical.to_string()
     }
 
     pub(super) fn compile(
@@ -223,7 +230,15 @@ impl ResourceAcquisitionRequest {
                 minimum: *minimum,
             })
             .collect::<Vec<_>>();
-        let compiled = ResourceAcquisitionPlan::compile(snapshot, &targets, self.assign_labor)?;
+        let compiled = if self.cover_queued_inputs {
+            ResourceAcquisitionPlan::compile_with_queue_allowance(
+                snapshot,
+                &targets,
+                self.assign_labor,
+            )
+        } else {
+            ResourceAcquisitionPlan::compile(snapshot, &targets, self.assign_labor)
+        }?;
         if compiled.requested_actions.is_empty() {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidIntent,
@@ -255,13 +270,19 @@ impl ResourceAcquisitionRequest {
                 .map_err(|error| invalid(error.to_string()))?,
             "ledger_entity_id": compiled.ledger.to_string(),
             "ledger_generation": compiled.ledger_generation,
-            "requirements": compiled.requirements.iter().map(|row| json!({
+            "requirements": compiled.requirements.iter().map(|row| { let mut result = json!({
                 "resource": row.resource.as_str(),
                 "minimum": row.minimum,
                 "observed": row.observed,
                 "deficit": row.deficit,
                 "available_source_units": row.available_source_units,
-            })).collect::<Vec<_>>(),
+            });
+                if self.cover_queued_inputs {
+                    result["queued_input_units"] = json!(row.queued_input_units);
+                    result["harvest_units"] = json!(row.harvest_units);
+                }
+                result
+            }).collect::<Vec<_>>(),
             "allocations": compiled.allocations.iter().map(|row| json!({
                 "resource": row.resource.as_str(),
                 "source_entity_id": row.source.to_string(),

@@ -103,6 +103,7 @@ pub use furniture::{
 pub use compensation::default_compensation_with_evidence;
 pub(crate) use compensation::{setters_overlap, source_bound_compensation};
 pub use excavation_terrain::{dig_transition_allowed, validate_dig_terrain};
+pub(crate) use carpentry::queued_carpentry_logs;
 pub use inventory::{INVENTORY_LEDGER_FIELD, INVENTORY_LEDGER_GENERATION_FIELD};
 
 /// Validate the original identity and material custody behind a terminal action.

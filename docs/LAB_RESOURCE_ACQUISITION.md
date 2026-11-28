@@ -81,13 +81,28 @@ acquisition for that resource. Observe its result or explicitly stop its future
 work before preparing another stock goal. Pending harvests never count as
 inventory, including when their predicted yield would satisfy the target.
 
-When acquisition is needed, this first compiler also refuses known active
+By default, an acquisition refuses known active
 production that will consume any requested resource, including an already-met
 companion target. It does not guess an additional material reserve for that
 queue. Observe or drain the original consuming work before requesting the
 acquisition. Already-held workshop materials have already been debited from
 available stock and are not counted twice. Unrelated queued work still
 participates in the ordinary shared-worker horizon.
+
+Set `"cover_queued_inputs": true` to refill stock while existing finite
+carpentry, cooking, or brewing orders continue. For example, with three
+plants on hand, a minimum of six and four uncompleted brew batches, the
+planner gathers seven plants. After those batches consume four, six remain.
+The review shows each target's current deficit, the outstanding inputs, and
+the total harvest. Existing work contributes its remaining service to the
+deadline. A partly completed order contributes only its unfinished batches.
+
+The allowance applies to all requested materials, including a minimum already
+met while the other target is short. A stock goal whose minima all hold is
+already satisfied. A constrained or cancelled order can leave extra stock.
+An active harvest of a material that needs gathering still has to settle
+before it can be sized again. Each new review recomputes the allowance from
+the original request and current orders.
 
 WOOD requires `WOODCUTTING`; PLANT requires `PLANT_GATHERING`. Selected workers
 must have qualified living status and a known relevant labor value. Selection

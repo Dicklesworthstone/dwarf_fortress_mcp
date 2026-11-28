@@ -9,6 +9,7 @@
   "properties": {
     "template": {"const": "resource_acquisition"},
     "planner": {"const": "resource_acquisition_v1"},
+    "cover_queued_inputs": {"type": "boolean", "default": false, "description": "When a requested stock is short, size the harvest to leave each original minimum after qualified unfinished carpentry and provisions orders consume their remaining inputs."},
     "assign_labor": {"type": "boolean", "default": false},
     "quotas": {
       "type": "array",

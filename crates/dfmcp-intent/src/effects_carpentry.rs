@@ -46,6 +46,30 @@ pub(super) fn inventory_owner(
     Ok(owner)
 }
 
+/// Remaining logs owed by an active, finite carpentry order to its original
+/// ledger. Historical unbound orders cannot authorize extra harvesting.
+pub(crate) fn queued_carpentry_logs(
+    snapshot: &WorldSnapshot,
+    order: &EntityRecord,
+    ledger: EntityId,
+) -> Result<u64> {
+    let remaining = field_u64(order, AMOUNT_REMAINING_FIELD, snapshot.tick)?;
+    let total = field_u64(order, "amount_total", snapshot.tick)?;
+    if order.generation != 1
+        || remaining == 0
+        || remaining > total
+        || total > u64::from(u32::MAX)
+        || field_text(order, WORK_ORDER_PRODUCTION_MODEL_FIELD, snapshot.tick)
+            != Some(CARPENTRY_PRODUCTION_MODEL)
+        || inventory_owner(snapshot, order)?.id != ledger
+    {
+        return Err(precondition(
+            "queued carpentry demand requires the original finite order and inventory ledger",
+        ));
+    }
+    Ok(remaining)
+}
+
 /// Refuse a lost or replaced positive custodian before any timeline event.
 /// Fully unbound historical orders remain blocked, without inventing ownership.
 pub(super) fn validate_active_inventory(

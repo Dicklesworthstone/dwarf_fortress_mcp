@@ -34,6 +34,10 @@ pub struct ResourceAcquisitionRequirement {
     pub minimum: u64,
     pub observed: u64,
     pub deficit: u64,
+    /// Remaining original-order inputs considered when sizing this harvest.
+    pub queued_input_units: u64,
+    /// Includes any replenishment needed for consumers of a companion quota.
+    pub harvest_units: u64,
     /// Complete finite source supply after existing demand, not inventory.
     pub available_source_units: u64,
 }
@@ -93,6 +97,25 @@ impl ResourceAcquisitionPlan {
         snapshot: &WorldSnapshot,
         targets: &[ResourceStockTarget],
         assign_labor: bool,
+    ) -> Result<Self> {
+        Self::compile_for_queue(snapshot, targets, assign_labor, false)
+    }
+
+    /// Refill the original minima while allowing known finite production to
+    /// consume its remaining inputs. A fully met stock goal still needs no work.
+    pub fn compile_with_queue_allowance(
+        snapshot: &WorldSnapshot,
+        targets: &[ResourceStockTarget],
+        assign_labor: bool,
+    ) -> Result<Self> {
+        Self::compile_for_queue(snapshot, targets, assign_labor, true)
+    }
+
+    fn compile_for_queue(
+        snapshot: &WorldSnapshot,
+        targets: &[ResourceStockTarget],
+        assign_labor: bool,
+        cover_queued_inputs: bool,
     ) -> Result<Self> {
         if targets.is_empty()
             || targets.len() > MAX_RESOURCE_ACQUISITION_TARGETS
@@ -180,6 +203,8 @@ impl ResourceAcquisitionPlan {
                 minimum: target.minimum,
                 observed,
                 deficit,
+                queued_input_units: 0,
+                harvest_units: deficit,
                 available_source_units,
             });
         }
@@ -213,9 +238,37 @@ impl ResourceAcquisitionPlan {
         })?;
         plan.queued_activities = workforce.queued_activities;
         plan.queued_service_ticks = workforce.queued_service_ticks;
-        refuse_competing_consumers(snapshot, &plan.requirements)?;
+        for row in &mut plan.requirements {
+            row.queued_input_units =
+                queued_inputs(snapshot, row.resource, report.ledger, cover_queued_inputs)?;
+            row.harvest_units = row
+                .minimum
+                .checked_add(row.queued_input_units)
+                .ok_or_else(bounded)?
+                .saturating_sub(row.observed);
+            if row.harvest_units > row.available_source_units {
+                return Err(refused(format!(
+                    "{} needs {} harvest units to cover its original minimum and {} queued inputs; qualified sources provide only {}",
+                    row.resource.as_str(),
+                    row.harvest_units,
+                    row.queued_input_units,
+                    row.available_source_units,
+                )));
+            }
+            if row.harvest_units > row.deficit
+                && report
+                    .sources
+                    .iter()
+                    .any(|source| source.resource == row.resource && source.active_demand != 0)
+            {
+                return Err(refused(format!(
+                    "original {} harvest remains active; observe its completed yield before funding queued inputs",
+                    row.resource.as_str()
+                )));
+            }
+        }
         for requirement in &plan.requirements {
-            if requirement.deficit == 0 {
+            if requirement.harvest_units == 0 {
                 continue;
             }
             let (worker, previously_enabled) =
@@ -252,7 +305,7 @@ impl ResourceAcquisitionPlan {
         }
 
         for requirement in &plan.requirements {
-            if requirement.deficit == 0 {
+            if requirement.harvest_units == 0 {
                 continue;
             }
             let staffing = plan
@@ -271,7 +324,7 @@ impl ResourceAcquisitionPlan {
                     )
                 })
                 .collect();
-            let mut remaining = requirement.deficit;
+            let mut remaining = requirement.harvest_units;
             while remaining != 0 {
                 let action_index = next_action_index(&plan.requested_actions)?;
                 let mut selected: Option<(usize, u64, EntityId)> = None;
@@ -337,17 +390,14 @@ impl ResourceAcquisitionPlan {
     }
 }
 
-fn refuse_competing_consumers(
+fn queued_inputs(
     snapshot: &WorldSnapshot,
-    requirements: &[ResourceAcquisitionRequirement],
-) -> Result<()> {
-    // A companion quota that is currently met remains part of the original
-    // goal while other resources are harvested. Preserve it too. A complete
-    // no-op returns before this check because it schedules no future interval.
-    if requirements
-        .iter()
-        .any(|requirement| requirement.resource == HarvestResource::Wood)
-    {
+    resource: HarvestResource,
+    ledger: EntityId,
+    cover: bool,
+) -> Result<u64> {
+    if resource == HarvestResource::Wood {
+        let mut demand = 0u64;
         for order in snapshot.graph.entities.values() {
             if order.kind != EntityKind::WorkOrder {
                 continue;
@@ -374,23 +424,27 @@ fn refuse_competing_consumers(
             if effects::work_order_material(job)
                 .is_some_and(|(field, amount)| field == effects::STOCK_WOOD_FIELD && amount != 0)
             {
+                if cover {
+                    demand = demand
+                        .checked_add(effects::queued_carpentry_logs(snapshot, order, ledger)?)
+                        .ok_or_else(bounded)?;
+                    continue;
+                }
                 return Err(refused(
                     "original WOOD-consuming production remains active; observe its completion or explicitly stop its original work before acquiring a stock minimum",
                 ));
             }
         }
+        return Ok(demand);
     }
-    if requirements
-        .iter()
-        .any(|requirement| requirement.resource == HarvestResource::Plant)
-        && effects::provisions_report(snapshot)?
-            .is_some_and(|report| report.remaining_demand_plants != 0)
-    {
+    let demand =
+        effects::provisions_report(snapshot)?.map_or(0, |report| report.remaining_demand_plants);
+    if demand != 0 && !cover {
         return Err(refused(
             "original PLANT-consuming production remains active; observe its completion or explicitly stop its original work before acquiring a stock minimum",
         ));
     }
-    Ok(())
+    Ok(demand)
 }
 
 fn stock_field(resource: HarvestResource) -> &'static str {

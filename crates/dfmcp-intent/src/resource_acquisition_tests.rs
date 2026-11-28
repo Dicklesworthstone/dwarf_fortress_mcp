@@ -799,3 +799,115 @@ fn split_waits_and_shared_worker_service_preserve_the_same_resource_outcome() ->
     assert_eq!(totals.get(&HarvestResource::Plant), Some(&4));
     Ok(())
 }
+
+#[test]
+fn queue_aware_refill_finishes_original_orders_and_keeps_both_minima() -> Result<()> {
+    let mut snapshot = world(40);
+    for resource in [HarvestResource::Wood, HarvestResource::Plant] {
+        set(&mut snapshot, LEDGER, stock_field(resource), Value::U64(3))?;
+    }
+    for job in ["BREW_DRINK", "CONSTRUCT_BED"] {
+        apply(
+            &mut snapshot,
+            &Action::CreateWorkOrder {
+                name: job.to_owned(),
+                job_token: job.to_owned(),
+                amount: 4,
+                conditions: Vec::new(),
+            },
+            job,
+        )?;
+    }
+    // One physical batch completes before planning. Its input is already
+    // debited and must not be charged again.
+    advance(&mut snapshot, effects::WORK_ORDER_TICKS_PER_UNIT)?;
+    let targets = [
+        target(HarvestResource::Wood, 3),
+        target(HarvestResource::Plant, 6),
+    ];
+    let before = snapshot.clone();
+    let refill = ResourceAcquisitionPlan::compile_with_queue_allowance(&snapshot, &targets, false)?;
+    assert_eq!(snapshot, before);
+    assert_eq!(
+        refill
+            .requirements
+            .iter()
+            .map(|r| r.queued_input_units)
+            .sum::<u64>(),
+        7
+    );
+    assert_eq!(
+        refill
+            .allocations
+            .iter()
+            .map(|a| a.amount)
+            .collect::<Vec<_>>(),
+        vec![4, 7]
+    );
+    let plan = prepare(&snapshot, &refill)?;
+    for step in &plan.steps {
+        apply(&mut snapshot, &step.action, &step.idempotency_key)?;
+    }
+    advance(
+        &mut snapshot,
+        refill.queued_service_ticks + refill.requested_service_ticks,
+    )?;
+    for (job, output, produced) in [
+        ("BREW_DRINK", effects::STOCK_DRINK_FIELD, 10_020),
+        ("CONSTRUCT_BED", effects::STOCK_BED_FIELD, 4),
+    ] {
+        let order = &snapshot.graph.entities[&effects::created_entity_id(job, 0)];
+        assert_eq!(
+            value(order, effects::STATUS_FIELD, snapshot.tick),
+            Some(&Value::Text(effects::STATUS_COMPLETE.into()))
+        );
+        let ledger = &snapshot.graph.entities[&LEDGER];
+        assert_eq!(
+            value(ledger, output, snapshot.tick),
+            Some(&Value::U64(produced))
+        );
+    }
+    assert_eq!(stock(&snapshot, HarvestResource::Wood)?, 3);
+    assert_eq!(stock(&snapshot, HarvestResource::Plant)?, 6);
+    assert!(PredicateEvidence::laboratory(&snapshot)?.establishes(&plan.terminal_condition)?);
+    Ok(())
+}
+
+#[test]
+fn queued_allowance_refuses_unfunded_sources_and_unowned_carpentry() -> Result<()> {
+    let mut snapshot = world(5);
+    apply(
+        &mut snapshot,
+        &Action::CreateWorkOrder {
+            name: "existing beds".into(),
+            job_token: "CONSTRUCT_BED".into(),
+            amount: 3,
+            conditions: Vec::new(),
+        },
+        "beds",
+    )?;
+    let target = [target(HarvestResource::Wood, 3)];
+    let compile = |world: &WorldSnapshot| {
+        ResourceAcquisitionPlan::compile_with_queue_allowance(world, &target, false)
+    };
+    assert!(
+        compile(&snapshot).is_err(),
+        "six logs required from a five-log source"
+    );
+    set(
+        &mut snapshot,
+        LEDGER,
+        effects::STOCK_WOOD_FIELD,
+        Value::U64(1),
+    )?;
+    assert_eq!(compile(&snapshot)?.allocations[0].amount, 5);
+    let order = effects::created_entity_id("beds", 0);
+    set(
+        &mut snapshot,
+        order,
+        effects::INVENTORY_LEDGER_GENERATION_FIELD,
+        Value::U64(2),
+    )?;
+    assert!(compile(&snapshot).is_err());
+    Ok(())
+}

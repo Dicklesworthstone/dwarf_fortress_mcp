@@ -322,3 +322,30 @@ fn original_source_seal_respects_the_summary_bound() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn queued_input_allowance_is_sealed_replayed_and_inspectable() -> Result<()> {
+    let old = ResourceAcquisitionRequest::parse_current(&raw(false))?;
+    let mut source: Value =
+        serde_json::from_str(&old.canonical_json()).map_err(|e| invalid(e.to_string()))?;
+    source["cover_queued_inputs"] = json!(true);
+    let request = ResourceAcquisitionRequest::parse_current(&source.to_string())?;
+    assert_ne!(old.source_digest(), request.source_digest());
+    assert_eq!(
+        ResourceAcquisitionRequest::parse(&request.canonical_json())?,
+        request
+    );
+    let (_, analysis) = request.compile(IntentId::new(1), &world(), "refill raw stock")?;
+    assert_eq!(analysis["requirements"][0]["queued_input_units"], 0);
+    assert_eq!(analysis["requirements"][0]["harvest_units"], 2);
+    for malformed in [Value::Null, json!("true"), json!(1)] {
+        source["cover_queued_inputs"] = malformed;
+        assert!(ResourceAcquisitionRequest::parse_current(&source.to_string()).is_err());
+    }
+    source["cover_queued_inputs"] = json!(false);
+    assert_eq!(
+        ResourceAcquisitionRequest::parse_current(&source.to_string())?.canonical_json(),
+        old.canonical_json()
+    );
+    Ok(())
+}
