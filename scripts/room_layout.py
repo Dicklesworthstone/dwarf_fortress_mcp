@@ -17,7 +17,7 @@ from room_access import Access
 from room_connections import WorkLimit as ConnectionWorkLimit
 from room_orientation import ROTATIONS, rotation
 from room_provisioning import (
-    PRIVATE_ROOM_TEMPLATES, INTENT_SCHEMA, MAX_AREAS, MAX_CAPTURE_VOLUME, MAX_PARTS, MAX_PLAN_BYTES,
+    GeometryCapacityError, PRIVATE_ROOM_TEMPLATES, INTENT_SCHEMA, MAX_AREAS, MAX_CAPTURE_VOLUME, MAX_PARTS, MAX_PLAN_BYTES,
     MAX_TILES, RoomPlan, _json, _object, _vector,
 )
 
@@ -155,7 +155,7 @@ def _profile(area: dict, folder: str, site: int, level: int, work: _Work) -> _Pr
                     len(body['excavation_blueprint']['parts']), body['furniture_count'])
 
 
-def _layout_profile(area: dict, folder: str, site: int, level: int, work: _Work) -> _Profile:
+def _oriented_profile(area: dict, folder: str, site: int, level: int, work: _Work) -> _Profile:
     """One variable per area, with at most four actual compiler-derived shapes."""
     require(not ('rotation' in area and 'rotations' in area),
             'choose a fixed rotation or allowed rotations, not both')
@@ -184,6 +184,38 @@ def _layout_profile(area: dict, folder: str, site: int, level: int, work: _Work)
     normalized.pop('rotation', None)
     normalized['rotations'] = list(angles)
     return replace(first, area=canonical(normalized), variants=variants)
+
+
+def _layout_profile(area: dict, folder: str, site: int, level: int, work: _Work) -> _Profile:
+    template = area['template']
+    if type(template) is not dict or type(template.get('columns')) is not list:
+        return _oriented_profile(area, folder, site, level, work)
+    maximum = 4 if template.get('kind') == 'dining_hall' else 8
+    choices = template['columns']
+    require(1 <= len(choices) <= maximum, 'invalid number of room column choices')
+    widths = sorted(integer(width, 1, maximum) for width in choices)
+    require(len(set(widths)) == len(widths), 'duplicate room column choice')
+    if len(widths) == 1:
+        return _oriented_profile({**area, 'template': {**template, 'columns': widths[0]}},
+                                 folder, site, level, work)
+
+    variants = []
+    normalized = None
+    for width in widths:
+        work()
+        try:
+            shaped = _oriented_profile({**area, 'template': {**template, 'columns': width}},
+                                       folder, site, level, work)
+        except GeometryCapacityError:
+            if work.interrupted:
+                raise
+            continue
+        if normalized is None:
+            normalized = json.loads(shaped.area)
+        variants.extend(shaped.variants or (shaped,))
+    require(normalized is not None, 'all requested room widths exceed compiler capacity')
+    normalized['template']['columns'] = widths
+    return replace(variants[0], area=canonical(normalized), variants=tuple(variants))
 
 
 def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
@@ -235,8 +267,8 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
     profiles.sort(key=lambda p: json.loads(p.area)['name'])
     normalized_areas = [json.loads(p.area) for p in profiles]
     require(len({a['name'] for a in normalized_areas}) == len(profiles), 'duplicate layout area name')
-    require(sum(len(p.floors) for p in profiles) <= MAX_TILES
-            and sum(p.parts for p in profiles) <= MAX_PARTS
+    require(sum(min(len(v.floors) for v in p.variants or (p,)) for p in profiles) <= MAX_TILES
+            and sum(min(v.parts for v in p.variants or (p,)) for p in profiles) <= MAX_PARTS
             and sum(p.slots for p in profiles) <= 32,
             'complete layout exceeds existing floor, part or furnishing limits')
     exclusions = value.get('excluded_regions', [])
@@ -291,6 +323,7 @@ class _Candidate:
     floors: int
     walls: int
     rotation: int = 0
+    columns: int = 4
 
 
 def _candidates(profile: _Profile, request: dict, forbidden: int, work: _Work,
@@ -303,15 +336,16 @@ def _candidates(profile: _Profile, request: dict, forbidden: int, work: _Work,
         entries = {}
         for variant in profile.variants:
             work()
-            entries[json.loads(variant.area).get('rotation', 0)] = variant.entry
+            area = json.loads(variant.area)
+            entries[area['template'].get('columns', 4), area.get('rotation', 0)] = variant.entry
             candidates.extend(_candidates(variant, request, forbidden, work, wall_forbidden))
-        require(len(candidates) <= len(ROTATIONS) * MAX_CAPTURE_VOLUME,
-                'oriented room candidate inventory exceeds bound')
+        require(len(candidates) <= MAX_CANDIDATES,
+                'room shape candidate inventory exceeds bound')
         def score(candidate: _Candidate):
             work()
-            entry = entries[candidate.rotation]
+            entry = entries[candidate.columns, candidate.rotation]
             distance = sum(abs(candidate.origin[i] + entry[i] - request['focus'][i]) for i in range(3))
-            return distance, candidate.origin[1], candidate.origin[0], candidate.origin[2], candidate.rotation
+            return distance, candidate.origin[1], candidate.origin[0], candidate.origin[2], candidate.rotation, candidate.columns
         candidates.sort(key=score)
         return tuple(candidates)
     low, size = _region(request['region'], domain=True)
@@ -343,7 +377,8 @@ def _candidates(profile: _Profile, request: dict, forbidden: int, work: _Work,
             shift = (y + profile.low[1] - low[1]) * width + x + profile.low[0] - low[0]
             floors = floor_bits << shift
             if not (floors & forbidden or (wall_bits << shift) & wall_forbidden):
-                candidates.append(_Candidate(origin, floors, wall_bits << shift, area.get('rotation', 0)))
+                candidates.append(_Candidate(origin, floors, wall_bits << shift, area.get('rotation', 0),
+                                             area['template'].get('columns', 4)))
     focus = request['focus']
     candidates.sort(key=lambda c: (sum(abs(c.origin[i] + profile.entry[i] - focus[i]) for i in range(3)),
                                     c.origin[1], c.origin[0], c.origin[2]))
@@ -423,8 +458,10 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
         # A retained bedroom wall cannot consume the selected entrance. Furniture
         # collision and whole-route feasibility are checked by the real compiler.
         wall_forbidden |= 1 << ((y - low[1]) * size[0] + x - low[0])
-    domains = tuple(_candidates(p, request, forbidden, work, wall_forbidden) for p in profiles)
-    require(sum(map(len, domains)) <= MAX_CANDIDATES, 'layout candidate inventory exceeds bound')
+    domains = []
+    for profile in profiles:
+        domains.append(_candidates(profile, request, forbidden, work, wall_forbidden))
+        require(sum(map(len, domains)) <= MAX_CANDIDATES, 'layout candidate inventory exceeds bound')
     nodes, leaves, rejected, backtracks = 0, 0, 0, 0
     capacity_tested = capacity_refused = 0
     trace = hashlib.sha256(b'dfmcp-room-layout-search/1\0')
@@ -461,6 +498,8 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
                 area.pop('rotation', None)
                 if chosen[index].rotation:
                     area['rotation'] = chosen[index].rotation
+                if type(area['template'].get('columns')) is list:
+                    area['template']['columns'] = chosen[index].columns
                 area['origin'] = list(chosen[index].origin)
                 areas.append(area)
             lowered = {'schema': INTENT_SCHEMA, 'world_folder': request['world_folder'],
@@ -529,6 +568,8 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
             event = ['try', index, candidate.origin]
             if candidate.rotation:
                 event.append(candidate.rotation)
+            if type(request['areas'][index]['template'].get('columns')) is list:
+                event.append(['columns', candidate.columns])
             trace.update(canonical(event))
             chosen[index] = candidate
             plan = search_tree(floors | candidate.floors, walls | candidate.walls)

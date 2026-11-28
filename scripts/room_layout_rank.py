@@ -26,13 +26,16 @@ class Ranking:
                  work: Callable[[], None]):
         self.work = work
         self.focus = tuple(focus)
-        self.base_tiles = sum(len(profile.floors) for profile in profiles)
+        self.base_tiles = sum(min(len(v.floors) for v in p.variants or (p,)) for p in profiles)
         self.names = tuple(json.loads(profile.area)['name'] for profile in profiles)
         self.entries = []
         for profile in profiles:
             work()
-            self.entries.append({json.loads(v.area).get('rotation', 0): v.entry
-                                 for v in profile.variants or (profile,)})
+            entries = {}
+            for variant in profile.variants or (profile,):
+                area = json.loads(variant.area)
+                entries[area['template'].get('columns', 4), area.get('rotation', 0)] = variant.entry
+            self.entries.append(entries)
         self.best: RoomPlan | None = None
         self.best_score: Score | None = None
         self.first_score: Score | None = None
@@ -41,7 +44,7 @@ class Ranking:
 
     def candidate_score(self, index: int, candidate: _Candidate) -> tuple[int, Placement]:
         self.work()
-        entry = self.entries[index][candidate.rotation]
+        entry = self.entries[index][candidate.columns, candidate.rotation]
         distance = sum(abs(p + offset - focus) for p, offset, focus in
                        zip(candidate.origin, entry, self.focus))
         x, y, z = candidate.origin
@@ -50,8 +53,8 @@ class Ranking:
     def lower_bound(self, chosen: dict[int, _Candidate], available: list) -> Score:
         """Relax mutual conflicts and corridor costs, never relax the real plan.
 
-        Every shape has a rotation-invariant tile count. Disjoint complete areas
-        therefore need at least base_tiles, even before corridors/access. Each
+        Each area needs at least the floor count of its smallest allowed shape.
+        Disjoint complete areas therefore need at least base_tiles, even before corridors/access. Each
         still-available area's independent minimum entry distance is a lower
         bound on its contribution. Its independent minimum placement tuple is
         also a lower bound when the summed distance happens to tie. Those minima

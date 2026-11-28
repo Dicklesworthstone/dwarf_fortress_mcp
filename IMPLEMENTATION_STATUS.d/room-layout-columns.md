@@ -1,0 +1,1 @@
+The Python layout solver accepts bounded column choices and lowers each selected area into the existing fixed RoomPlan. Component tests exercise finite whole-project selection, both objectives, map capture replay, material preservation and search limits. The change concerns planning geometry and grants no game mutation capability.

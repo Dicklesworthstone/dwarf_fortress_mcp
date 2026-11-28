@@ -30,6 +30,10 @@ MAX_CAPTURE_VOLUME = 1024
 Point = tuple[int, int, int]
 
 
+class GeometryCapacityError(ValueError):
+    """A complete, concrete template exceeds the supported spatial capacity."""
+
+
 def _object(value: object, required: set[str], optional: set[str] = frozenset()) -> dict:
     require(type(value) is dict and required <= set(value) <= required | optional,
             'unknown or missing room-provisioning fields')
@@ -166,7 +170,8 @@ def _area(value: object, guard: Guard) -> tuple[dict, list[_Rect], list[dict], l
         count = integer(template['rooms_count'], 1, 14 if single_item else 10)
         rows = (count + columns - 1) // columns
         # Each room needs an interior and a door, plus one corridor per row and a spine.
-        require(2 * count + rows + 1 <= MAX_PARTS, 'private room rows exceed excavation part limit')
+        if 2 * count + rows + 1 > MAX_PARTS:
+            raise GeometryCapacityError('private room rows exceed excavation part limit')
         size = template['room_size']
         require(type(size) is list and len(size) == 2, 'private room interior requires width and height')
         width, height = (integer(n, 1 if single_item else 3, 7) for n in size)
@@ -323,13 +328,13 @@ class RoomPlan:
         require(len({a[0]['name'] for a in compiled}) == len(compiled), 'duplicate area name')
         compiled.sort(key=lambda a: a[0]['name'])
         parts = [part for _, group, _, _, _ in compiled for part in group]
-        require(len(parts) <= MAX_PARTS and sum(p.volume for p in parts) <= MAX_TILES,
-                'complete excavation exceeds existing 32-part/512-target bounds')
+        if len(parts) > MAX_PARTS or sum(p.volume for p in parts) > MAX_TILES:
+            raise GeometryCapacityError('complete excavation exceeds existing 32-part/512-target bounds')
         low = tuple(min(p.origin[i] for p in parts) for i in range(3))
         high = tuple(max(p.end[i] for p in parts) for i in range(3))
         extent = tuple(b - a for a, b in zip(low, high))
-        require(max(extent) <= 128 and extent[0] * extent[1] * extent[2] <= MAX_CAPTURE_VOLUME,
-                'complete excavation exceeds one existing coherent capture')
+        if max(extent) > 128 or extent[0] * extent[1] * extent[2] > MAX_CAPTURE_VOLUME:
+            raise GeometryCapacityError('complete excavation exceeds one existing coherent capture')
         for index, part in enumerate(parts):
             for other in parts[:index] + forbidden:
                 guard()

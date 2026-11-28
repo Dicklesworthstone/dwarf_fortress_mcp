@@ -154,3 +154,23 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts:tests python3 -m unittest \
 These tests execute real Python modules, not isolated source bodies or synthetic
 compiler implementations. The native inventory CLI/TCP, excavation execution,
 room monitoring, Rust/MCP and full-repository/live qualification were not run.
+
+## Fit the room shape to the site
+
+A layout request may give `template.columns` as a list of allowed row widths.
+For example, `"template": {"kind":"bedroom_cluster","rooms_count":7,"room_size":[1,2],"furnishings":"bed_only","columns":[1,2,4]}`
+lets seven private bedrooms use a single-file corridor on a narrow site. Dining
+halls accept widths 1–4. Dormitories, private bedrooms and offices accept 1–8.
+The solver chooses widths, origins and any allowed rotations for the entire
+project together. The lowered room plan fixes one width per area and preserves
+the requested unit count, item constraints, walls and access.
+
+Widths must be distinct. A singleton has the same canonical result as its
+integer form. For multiple widths, the retained request lists every choice in
+ascending order, including individual shapes that exceed the compiler's spatial
+capacity. At least one shape per area must be representable. The full search
+shares one work budget, node limit and 32,768-candidate project ceiling.
+Equal-distance candidates at the same origin are tried by angle then width.
+The tile and excavation objectives compare complete connected projects across
+the permitted widths. The observed excavation objective can select a different
+width to reuse existing floor.
