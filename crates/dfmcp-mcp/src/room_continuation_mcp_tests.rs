@@ -527,3 +527,56 @@ fn durable_room_reopen_preserves_original_history_and_new_pursuit_proof_separate
     assert_eq!(duplicate["error"]["code"], "invalid_intent");
     Ok(())
 }
+
+#[test]
+fn site_search_publishes_one_fixed_room_and_refused_search_preserves_it() -> TestResult {
+    let _serial = serialized_durable_tests();
+    let session = open("963319", false, false)?;
+    let mut search = json!({"template":"site_provisioned_room", "version":1, "origin_grid":[2,1],
+    "room":{"template":"provisioned_room", "layout":{
+        "template":"dormitory", "origin":[2,6,10], "bed_count":1
+    }}});
+    let plan = |request: &Json| {
+        parsed(&facade::fortress_plan(
+            Some(session.clone()),
+            None,
+            None,
+            None,
+            Some(request.to_string()),
+        ))
+    };
+    let before = effects_before(&session)?;
+    let selected = plan(&search)?;
+    assert_eq!(selected["ok"], true, "{selected}");
+    assert_eq!(selected["schema"], "dfmcp.room-site/1");
+    assert_eq!(selected["room_site"]["origins_examined"], 2);
+    crate::sealed_plan_review::validate(&selected)?;
+    assert_eq!(effects_before(&session)?, before);
+    let chosen = &selected["room_site"]["selected_room"];
+    let digest = identity(&selected, "plan_digest")?;
+    search["room"]["layout"]["origin"] = json!([200, 200, 10]);
+    let refused = plan(&search)?;
+    assert_eq!(
+        refused["error"]["code"], "preconditions_failed",
+        "{refused}"
+    );
+    in_session(&session, |guard| {
+        let pending = guard
+            .pending
+            .as_ref()
+            .ok_or_else(|| fixture_error("room site lost its plan"))?;
+        assert_eq!(pending.digest, digest);
+        let PlanSource::Blueprint { raw, .. } = &pending.source else {
+            return Err(fixture_error("room siting must retain a fixed blueprint"));
+        };
+        assert_eq!(*raw, chosen.to_string());
+        Ok(())
+    })?;
+    commit_ok(&session, &selected)?;
+    wait(&session, 1_000)?;
+    let finished = goal(&session, &digest)?;
+    assert_eq!(finished["predicate_truth"], "true", "{finished}");
+    assert_eq!(finished["physical_quiescent"], true);
+    assert_eq!(finished["original_source"]["request"], *chosen);
+    Ok(())
+}

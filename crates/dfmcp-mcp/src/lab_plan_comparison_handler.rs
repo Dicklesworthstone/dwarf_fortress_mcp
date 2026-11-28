@@ -163,6 +163,66 @@ fn execute_original_source(
     kind: &str,
     started: Instant,
 ) -> Result<String> {
+    execute_source_selection(session_id, started, |session, rid, current, source_work| {
+        prepare_source(session, source, rid, current, source_work, kind, started)
+    })
+}
+
+pub(super) fn execute_room_site(
+    session_id: Option<String>,
+    summary: Option<String>,
+    raw: &str,
+    started: Instant,
+) -> Result<String> {
+    let request = room_provisioning::siting::Request::parse(raw)?;
+    let summary = summary.unwrap_or_default();
+    if summary.len() > MAX_SUMMARY_BYTES {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "room site summary exceeds its byte bound",
+        ));
+    }
+    execute_source_selection(session_id, started, |session, rid, current, source_work| {
+        let ((mut payload, pending), site) = request.select(
+            session.adapter.snapshot(),
+            || check(current, started),
+            |room| {
+                let source = PlanSource::Blueprint {
+                    summary: summary.clone(),
+                    raw: room.canonical_json(),
+                };
+                prepare_source(
+                    session,
+                    source,
+                    rid,
+                    current,
+                    source_work.clone(),
+                    "site_provisioned_room",
+                    started,
+                )
+            },
+        )?;
+        if !pending.source.is_resource_aware_room() {
+            payload["room"] = payload["production"].take();
+            crate::sealed_plan_review::apply(&mut payload, &pending.plan)?;
+        }
+        payload["schema"] = json!("dfmcp.room-site/1");
+        payload["version"] = json!(1);
+        payload["room_site"] = site;
+        Ok((payload, pending))
+    })
+}
+
+fn execute_source_selection(
+    session_id: Option<String>,
+    started: Instant,
+    select: impl FnOnce(
+        &LabSession,
+        u128,
+        &OperationContext,
+        serde_json::Value,
+    ) -> Result<(serde_json::Value, PendingPlan)>,
+) -> Result<String> {
     let session = resolve_session(session_id)?;
     let _admission = LAB_ADMISSION.read().map_err(|_| {
         DfmcpError::new(
@@ -186,7 +246,7 @@ fn execute_original_source(
             let source_work =
                 query_budget::admit_sources(&[snapshot], &remaining(&current, started)?)?;
             let (mut payload, pending) =
-                prepare_source(session, source, rid, &current, source_work, kind, started)?;
+                select(session, rid, &current, source_work)?;
             let forecast = pending.source.forecast(
                 &session.adapter,
                 &pending.plan,
@@ -455,7 +515,8 @@ fn publish_owned(
         plan_comparison_response::pending_plan_entry(
             &pending.plan,
             session.session_id,
-            pending.source.requires_complete_source_review(),
+            pending.source.requires_complete_source_review()
+                || payload["kind"] == "site_provisioned_room",
         )
     });
     let output =

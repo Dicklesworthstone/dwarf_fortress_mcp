@@ -728,3 +728,99 @@ fn bounded_room_grammar_keeps_the_fixed_compiler_and_distinct_interior_targets()
     execute(source, &intent)?;
     Ok(())
 }
+
+#[test]
+fn room_siting_uses_observed_excavation_cost_and_seals_the_selected_room() -> Result<()> {
+    let mut source = source()?;
+    for y in 6..=7 {
+        for x in 2..=5 {
+            source.set_tile_code(
+                MapCoord::new(x, y, 10),
+                if x >= 4 {
+                    tile_codes::FLOOR
+                } else {
+                    tile_codes::SOLID_WALL
+                },
+            )?;
+        }
+    }
+    source.refresh_hash();
+    let before = source.clone();
+    let candidate = json!({"template":"site_provisioned_room", "version":1, "origin_grid":[3,1],
+    "room":{"template":"provisioned_room", "layout":{
+        "template":"dormitory", "origin":[2,6,10], "bed_count":1
+    }}});
+    let site = siting::Request::parse(&candidate.to_string())?;
+    let (intent, review) = site.select(
+        &source,
+        || Ok(()),
+        |room| {
+            room.compile(IntentId::new(1101), &source, "")
+                .map(|(intent, _)| intent)
+        },
+    )?;
+    assert_eq!(source, before);
+    assert_eq!(review["origins_examined"], 3);
+    assert_eq!(review["tiles_requiring_excavation"], 0);
+    assert_eq!(
+        review["selected_room"]["layout"]["origin"],
+        json!([4, 6, 10])
+    );
+    let fixed = ProvisionedRoomRequest::parse(&review["selected_room"].to_string())?;
+    assert_eq!(fixed.compile(IntentId::new(1101), &source, "")?.0, intent);
+    let (finished, _) = execute(source, &intent)?;
+    assert_eq!(fixed.semantic_goal_truth(&finished)?, PredicateTruth::True);
+    let other = ProvisionedRoomRequest::parse_current(&candidate["room"].to_string())?;
+    assert_eq!(other.semantic_goal_truth(&finished)?, PredicateTruth::False);
+    Ok(())
+}
+
+#[test]
+fn room_siting_rejects_hazardous_halos_and_preserves_hard_failures() -> Result<()> {
+    let mut source = source()?;
+    // Both rooms have equally diggable footprints. Only the western room's
+    // mandatory hazard halo includes the magma wall at x=1.
+    for y in 6..=7 {
+        for x in 2..=4 {
+            source.set_tile_code(MapCoord::new(x, y, 10), tile_codes::SOLID_WALL)?;
+        }
+    }
+    source.set_tile_code(MapCoord::new(1, 6, 10), tile_codes::MAGMA_WALL)?;
+    source.refresh_hash();
+    let base = json!({"template":"site_provisioned_room", "version":1, "origin_grid":[2,1],
+    "room":{"template":"provisioned_room", "layout":{
+        "template":"dormitory", "origin":[2,6,10], "bed_count":1
+    }}});
+    let request = siting::Request::parse(&base.to_string())?;
+    let (_, review) = request.select(
+        &source,
+        || Ok(()),
+        |room| room.compile(IntentId::new(1102), &source, ""),
+    )?;
+    assert_eq!(
+        review["selected_room"]["layout"]["origin"],
+        json!([3, 6, 10])
+    );
+    assert_eq!(review["plans_examined"], 2);
+    let refusal = request.select(
+        &source,
+        || Ok(()),
+        |_| -> Result<()> {
+            Err(DfmcpError::new(
+                ErrorCode::CapabilityDenied,
+                "plan authority revoked",
+            ))
+        },
+    );
+    assert!(matches!(
+        refusal,
+        Err(DfmcpError {
+            code: ErrorCode::CapabilityDenied,
+            ..
+        })
+    ));
+    let mut invalid_grid = base;
+    invalid_grid["origin_grid"] = json!([4, 5]);
+    assert!(siting::Request::parse(&invalid_grid.to_string()).is_err());
+    Ok(())
+}

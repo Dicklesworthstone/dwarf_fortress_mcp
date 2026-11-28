@@ -3920,6 +3920,22 @@ pub(crate) fn plan_request_publication(
 ) -> PlanPublication {
     if let Some(raw) = blueprint
         .as_deref()
+        .filter(|raw| room_provisioning::siting::is_request(raw))
+    {
+        if actions.is_some() || production.is_some() || paused_target.is_some() {
+            return PlanPublication::Pending(coded_error_payload(
+                "fortress.plan",
+                ErrorCode::InvalidRequest,
+                "a room site request must contain its complete original room",
+            ));
+        }
+        return match plan_comparison_handler::execute_room_site(session_id, summary, raw, started) {
+            Ok(output) => PlanPublication::Published(output),
+            Err(error) => PlanPublication::Pending(dfmcp_error_payload("fortress.plan", &error)),
+        };
+    }
+    if let Some(raw) = blueprint
+        .as_deref()
         .filter(|raw| is_resource_aware_room_request(raw))
     {
         if actions.is_some() || production.is_some() || paused_target.is_some() {

@@ -84,7 +84,11 @@ pub(super) fn finish(
     );
     let production_reserve = payload["kind"] == "production_reserve_continuation"
         && payload["schema"] == "dfmcp.production-reserve/1";
-    let selecting = payload["kind"] == "select_candidate"
+    let room_site = payload["kind"] == "site_provisioned_room"
+        && payload["schema"] == "dfmcp.room-site/1"
+        && payload["version"] == 1;
+    let selecting = room_site
+        || payload["kind"] == "select_candidate"
         || acquisition
         || resource_production
         || resource_room
@@ -129,14 +133,13 @@ pub(super) fn finish(
             "candidate publication differs from its owned source or operation",
         ));
     }
-    let shared_predicates = matches!(
-        payload["schema"].as_str(),
-        Some(
-            "dfmcp.resource-production/2" | "dfmcp.resource-room/2" | "dfmcp.production-reserve/1"
-        )
-    );
+    let shared_predicates = room_site
+        || matches!(
+            payload["schema"].as_str(),
+            Some("dfmcp.resource-production/2" | "dfmcp.resource-room/2" | "dfmcp.production-reserve/1")
+        );
     if shared_predicates {
-        if payload["version"] != if production_reserve { 1 } else { 2 } {
+        if payload["version"] != if production_reserve || room_site { 1 } else { 2 } {
             return Err(invariant(
                 "shared plan proof requires its versioned review envelope",
             ));
@@ -190,7 +193,8 @@ pub(super) fn finish(
                 || pending["plan_digest"] != payload["plan_digest"]
                 || steps
                     .is_none_or(|rows| pending["step_count"].as_u64() != Some(rows.len() as u64))
-                || (!production_reserve
+                || (!room_site
+                    && !production_reserve
                     && !payload["resource_acquisition"].is_object()
                     && !payload["production"]["resource_workflow"].is_object()
                     && !payload["room"]["resource_workflow"].is_object())
@@ -212,7 +216,7 @@ pub(super) fn finish(
                 "commit-resource-acquisition"
             } else if resource_production || production_reserve {
                 "commit-production-stage"
-            } else if resource_room {
+            } else if room_site || resource_room {
                 "commit-room-stage"
             } else {
                 "commit-selected-candidate"
@@ -222,7 +226,7 @@ pub(super) fn finish(
                 "Finite plan for the original resource minima."
             } else if resource_production || production_reserve {
                 "Stage uses observed supply for the original goal."
-            } else if resource_room {
+            } else if room_site || resource_room {
                 "Room stage uses observed materials and geometry."
             } else {
                 "Fresh ordinary plan for the selected source."

@@ -24,6 +24,9 @@ use crate::lab_world::{
     ProductionPrerequisitesInput, ProductionRequest, parse_steps, spatial_index,
 };
 
+#[path = "room_siting.rs"]
+pub(crate) mod siting;
+
 const PLANNER: &str = "provisioned_room_v1";
 const RESIDUAL_PLANNER: &str = "provisioned_room_residual_v1";
 const RESOURCE_PLANNER: &str = "provisioned_room_resources_v1";

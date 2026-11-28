@@ -312,3 +312,34 @@ The existing procurement planner produces any shortage. An interior must be at
 least two tiles wide and two deep. In a connected-room request, the path planner
 also keeps the walls intact. An office in this model is a physical room. Native
 office zoning and assignment to a noble are separate operations.
+
+## Select a site for a furnished room
+
+Send this JSON in the ordinary `fortress.plan` blueprint argument to review a
+furnished room at a feasible origin. The nested design can use any provisioned
+room layout, workshop prerequisites and finite resource policy.
+
+```json
+{
+  "template": "site_provisioned_room",
+  "version": 1,
+  "origin_grid": [4, 2],
+  "room": {
+    "template": "provisioned_room",
+    "layout": {"template": "office_cluster", "origin": [2, 6, 10], "rooms": 1, "room_size": [3, 3]}
+  }
+}
+```
+
+Here the eight possible origins run from `[2,6,10]` through `[5,7,10]`.
+The grid limits the origins, so room interiors and corridors can extend beyond
+it. Each request supports up to sixteen origins on one level. The planner
+checks observed terrain, complete building footprints and the required office
+walls. It ranks candidates by the number of tiles that need excavation, then
+by increasing y and x, and prepares the first one that passes the ordinary
+room and plan checks. Workshop sites use their supplied absolute coordinates.
+
+Read `room_site.selected_room` for the chosen fixed source and review the
+sealed steps before committing its plan digest. The retained room goal and any
+continuation use that exact origin. If the search finds no eligible site,
+the previously reviewed plan remains available.
