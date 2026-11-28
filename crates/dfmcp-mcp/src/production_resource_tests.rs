@@ -591,3 +591,45 @@ fn plant_demand_includes_consumption_through_harvest_and_full_production() -> Re
     assert_eq!(stock(adapter.snapshot(), effects::STOCK_FOOD_FIELD)?, 66);
     Ok(())
 }
+
+#[test]
+fn acquire_only_missing_logs_while_existing_tables_run_then_finish_original_beds() -> Result<()> {
+    let mut snapshot = source()?;
+    effects::apply_effect(
+        &mut snapshot,
+        &Action::CreateWorkOrder {
+            name: "earlier tables".into(),
+            job_token: "CONSTRUCT_TABLE".into(),
+            amount: 4,
+            conditions: Vec::new(),
+        },
+        "concurrent-table-order",
+    )?;
+    snapshot.refresh_hash();
+    let request = ProductionRequest::parse_current(
+        &json!({
+            "template":"production", "quotas":[{"item":"BED","minimum":18}],
+            "acquire_resources":{"cover_queued_inputs":true}
+        })
+        .to_string(),
+    )?;
+    let original = ProductionRequest::parse(&request.canonical_json())?;
+    assert_eq!(original, request);
+    let first = original.compile(&snapshot)?;
+    let harvest = first
+        .acquisition
+        .as_ref()
+        .ok_or_else(|| invalid("missing acquisition"))?;
+    assert_eq!(harvest.allocations.len(), 1);
+    assert_eq!(harvest.allocations[0].amount, 2);
+    assert_eq!(harvest.requirements[0].queued_input_units, 4);
+    assert_eq!(harvest.requirements[0].minimum, 18);
+    let stocked = execute(snapshot, &first, 998410)?;
+    let second = original.compile(&stocked)?;
+    assert!(second.acquisition.is_none());
+    let finished = execute(stocked, &second, 998411)?;
+    assert_eq!(stock(&finished, effects::STOCK_BED_FIELD)?, 18);
+    assert_eq!(stock(&finished, effects::STOCK_TABLE_FIELD)?, 4);
+    assert_eq!(stock(&finished, effects::STOCK_WOOD_FIELD)?, 0);
+    Ok(())
+}

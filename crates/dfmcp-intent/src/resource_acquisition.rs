@@ -84,6 +84,13 @@ pub struct ResourceAcquisitionPlan {
     pub deadline_tick: Option<GameTick>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConsumerPolicy {
+    RequireIdle,
+    CoverDuringStockRefill,
+    FundProductionInputs,
+}
+
 impl ResourceAcquisitionPlan {
     /// Compile only from a complete laboratory-adapter-owned snapshot. Matching
     /// producer labels in imported or native data do not grant that ownership.
@@ -98,7 +105,7 @@ impl ResourceAcquisitionPlan {
         targets: &[ResourceStockTarget],
         assign_labor: bool,
     ) -> Result<Self> {
-        Self::compile_for_queue(snapshot, targets, assign_labor, false)
+        Self::compile_for_queue(snapshot, targets, assign_labor, ConsumerPolicy::RequireIdle)
     }
 
     /// Refill the original minima while allowing known finite production to
@@ -108,14 +115,36 @@ impl ResourceAcquisitionPlan {
         targets: &[ResourceStockTarget],
         assign_labor: bool,
     ) -> Result<Self> {
-        Self::compile_for_queue(snapshot, targets, assign_labor, true)
+        Self::compile_for_queue(
+            snapshot,
+            targets,
+            assign_labor,
+            ConsumerPolicy::CoverDuringStockRefill,
+        )
+    }
+
+    /// Acquire the inputs of a separately reviewed output goal. Each target
+    /// includes new recipe and construction costs only. An older physical
+    /// order can leave that project short even when the gross stock equals
+    /// the project's own need. Its remaining demand is added exactly once.
+    pub fn compile_for_production_inputs(
+        snapshot: &WorldSnapshot,
+        targets: &[ResourceStockTarget],
+        assign_labor: bool,
+    ) -> Result<Self> {
+        Self::compile_for_queue(
+            snapshot,
+            targets,
+            assign_labor,
+            ConsumerPolicy::FundProductionInputs,
+        )
     }
 
     fn compile_for_queue(
         snapshot: &WorldSnapshot,
         targets: &[ResourceStockTarget],
         assign_labor: bool,
-        cover_queued_inputs: bool,
+        policy: ConsumerPolicy,
     ) -> Result<Self> {
         if targets.is_empty()
             || targets.len() > MAX_RESOURCE_ACQUISITION_TARGETS
@@ -224,7 +253,9 @@ impl ResourceAcquisitionPlan {
             requested_service_ticks: 0,
             deadline_tick: None,
         };
-        if plan.requirements.iter().all(|row| row.deficit == 0) {
+        if policy != ConsumerPolicy::FundProductionInputs
+            && plan.requirements.iter().all(|row| row.deficit == 0)
+        {
             // No scheduling or worker requirement can create work for an
             // already observed stock goal. The complete harvest census above
             // still prevents unknown custody from becoming a no-op success.
@@ -239,8 +270,12 @@ impl ResourceAcquisitionPlan {
         plan.queued_activities = workforce.queued_activities;
         plan.queued_service_ticks = workforce.queued_service_ticks;
         for row in &mut plan.requirements {
-            row.queued_input_units =
-                queued_inputs(snapshot, row.resource, report.ledger, cover_queued_inputs)?;
+            row.queued_input_units = queued_inputs(
+                snapshot,
+                row.resource,
+                report.ledger,
+                policy != ConsumerPolicy::RequireIdle,
+            )?;
             row.harvest_units = row
                 .minimum
                 .checked_add(row.queued_input_units)
@@ -266,6 +301,9 @@ impl ResourceAcquisitionPlan {
                     row.resource.as_str()
                 )));
             }
+        }
+        if plan.requirements.iter().all(|row| row.harvest_units == 0) {
+            return Ok(plan);
         }
         for requirement in &plan.requirements {
             if requirement.harvest_units == 0 {
@@ -400,6 +438,9 @@ fn queued_inputs(
         let mut demand = 0u64;
         for order in snapshot.graph.entities.values() {
             if order.kind != EntityKind::WorkOrder {
+                if cover && order.kind.as_str() == EntityKind::WorkOrder.as_str() {
+                    return Err(refused("queued WOOD demand contains a noncanonical work-order kind"));
+                }
                 continue;
             }
             match value(order, effects::STATUS_FIELD, snapshot.tick) {

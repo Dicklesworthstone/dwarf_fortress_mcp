@@ -465,14 +465,41 @@ fn compile_program(
                 .iter()
                 .map(|row| ResourceStockTarget {
                     resource: row.resource,
-                    minimum: row.required_stock,
+                    minimum: if policy.cover_queued_inputs {
+                        // requirements() includes old consumers in required_stock.
+                        // The acquisition compiler independently qualifies their
+                        // ownership before adding their outstanding input units.
+                        row.required_stock - row.existing_demand_units
+                    } else {
+                        row.required_stock
+                    },
                 })
                 .collect::<Vec<_>>();
-            Some(ResourceAcquisitionPlan::compile(
-                snapshot,
-                &resource_targets,
-                policy.assign_labor,
-            )?)
+            let plan = if policy.cover_queued_inputs {
+                let plan = ResourceAcquisitionPlan::compile_for_production_inputs(
+                    snapshot,
+                    &resource_targets,
+                    policy.assign_labor,
+                )?;
+                for (budget, actual) in candidate
+                    .resource_requirements
+                    .iter()
+                    .zip(&plan.requirements)
+                {
+                    if budget.resource != actual.resource
+                        || budget.existing_demand_units != actual.queued_input_units
+                        || budget.deficit != actual.harvest_units
+                    {
+                        return Err(production_setup_refusal(
+                            "production and acquisition could not establish the same qualified material demand",
+                        ));
+                    }
+                }
+                plan
+            } else {
+                ResourceAcquisitionPlan::compile(snapshot, &resource_targets, policy.assign_labor)?
+            };
+            Some(plan)
         } else {
             None
         };

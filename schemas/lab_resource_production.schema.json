@@ -28,7 +28,8 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "assign_labor": {"type": "boolean", "default": false}
+        "assign_labor": {"type": "boolean", "default": false},
+        "cover_queued_inputs": {"type": "boolean", "default": false}
       }
     },
     "orders": {"const": "dependency_preserving_v1"},

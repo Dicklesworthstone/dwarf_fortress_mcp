@@ -84,10 +84,21 @@ prediction does not extend the acquisition actions' own deadlines.
 
 Insufficient finite sources, unknown stock, unqualified workers, invalid
 workshop sites or missing setup permission remain refusals. Gathering is not
-proposed as a remedy for an unrelated infeasible production request. Existing
-acquisition overlap rules also apply: unresolved harvests and active consumers
+proposed as a remedy for an unrelated infeasible production request. By default,
+unresolved harvests and active consumers
 of the requested inputs must be observed or explicitly drained before another
 acquisition is prepared. Future work never counts as available inventory.
+
+With `"acquire_resources":{"cover_queued_inputs":true}`, a production quota
+can fund both its own inputs and existing qualified finite orders. For
+example, 20 logs and four unfinished tables leave 16 logs available for a
+goal of 18 beds. The first stage gathers two logs. Once that harvest is
+verified, review `continue_goal` for the original beds. The compiler uses
+current stock and the remaining table demand at that review, regardless of
+which order finished first. The same policy works for the shared plant
+inputs of brewing and cooking, including an explicit reserve deadline.
+An existing producer of the requested output still has to settle before
+planning a second producer for that output.
 
 ## Keep permissions separate
 

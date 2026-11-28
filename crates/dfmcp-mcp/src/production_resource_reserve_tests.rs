@@ -701,3 +701,53 @@ fn workshop_and_recipe_inputs_are_acquired_together_before_any_downstream_effect
     );
     Ok(())
 }
+
+#[test]
+fn brewing_reserve_survives_the_original_deadline_while_existing_kitchen_uses_plants() -> Result<()>
+{
+    let mut snapshot = source(1)?;
+    let key = "kitchen-before-drink-reserve";
+    effects::apply_effect(
+        &mut snapshot,
+        &Action::CreateWorkOrder {
+            name: "existing two meals".into(),
+            job_token: "PREPARE_MEAL".into(),
+            amount: 2,
+            conditions: Vec::new(),
+        },
+        key,
+    )?;
+    snapshot.refresh_hash();
+    let request = ProductionRequest::parse_current(
+        &json!({
+            "template":"production", "reserve_until_tick":2401,
+            "quotas":[{"item":"DRINK","minimum":40}],
+            "acquire_resources":{"cover_queued_inputs":true}
+        })
+        .to_string(),
+    )?;
+    let acquisition = request.compile(&snapshot)?;
+    assert_eq!(
+        request.semantic_goal_truth(&snapshot)?,
+        PredicateTruth::True
+    );
+    assert_eq!(
+        resource_requirement(&acquisition, "PLANT")?["existing_demand_units"],
+        2
+    );
+    let plan = seal(&snapshot, &acquisition, 998812)?;
+    let harvested = execute(snapshot, &plan)?;
+    let canonical = ProductionRequest::parse(&request.canonical_json())?;
+    let production = canonical.compile(harvested.snapshot())?;
+    assert!(production.acquisition.is_none());
+    let plan = seal(harvested.snapshot(), &production, 998813)?;
+    let mut finished = execute(harvested.snapshot().clone(), &plan)?;
+    finished.advance_ticks(2401 - finished.snapshot().tick.0)?;
+    assert!(stock(finished.snapshot(), effects::STOCK_DRINK_FIELD)? >= 40);
+    let order = &finished.snapshot().graph.entities[&effects::created_entity_id(key, 0)];
+    assert_eq!(
+        production_fact(order, effects::STATUS_FIELD, finished.snapshot().tick),
+        Some(&Value::Text(effects::STATUS_COMPLETE.into()))
+    );
+    Ok(())
+}

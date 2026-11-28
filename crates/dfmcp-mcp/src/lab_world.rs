@@ -1577,6 +1577,8 @@ struct ProductionRequestInput {
 struct ProductionResourcePolicy {
     #[serde(default)]
     assign_labor: bool,
+    #[serde(default)]
+    cover_queued_inputs: bool,
 }
 
 fn present_resource_policy<'de, D>(
@@ -1890,6 +1892,9 @@ impl ProductionRequest {
         }
         if let Some(policy) = self.acquire_resources {
             request["acquire_resources"] = json!({"assign_labor": policy.assign_labor});
+            if policy.cover_queued_inputs {
+                request["acquire_resources"]["cover_queued_inputs"] = json!(true);
+            }
         }
         request.to_string()
     }
