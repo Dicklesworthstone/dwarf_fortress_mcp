@@ -1,0 +1,1 @@
+The read-only Python site-and-allocate command joins whole-project spatial search to the existing Operations/1.4 census, matching and handoff. Protocol-peer tests exercise paging, release, rejected sites and downstream handoff decoding. Native game execution and production admission remain separate.

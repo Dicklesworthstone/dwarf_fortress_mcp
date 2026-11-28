@@ -147,21 +147,33 @@ def main(argv: list[str] | None = None) -> int:
         source.add_argument('--plan-file')
         allocate_command.add_argument('--timeout-ms', type=int, default=10000)
         allocate_command.add_argument('--emit', choices=('report', 'room-handoff'), default='report')
+        site_command = commands.add_parser('site-and-allocate',
+            help='choose a complete layout that one observed furniture inventory can supply')
+        site_command.add_argument('--request-file', required=True)
+        site_command.add_argument('--timeout-ms', type=int, default=10000)
+        site_command.add_argument('--emit', choices=('report', 'room-handoff'), default='report')
         args = parser.parse_args(argv)
         operation = args.operation
         budget = inventory.Budget(args.timeout_ms)
         imported = operation == 'allocate' and args.plan_file is not None
-        raw = read_input(args.plan_file if imported else args.request_file,
-                         MAX_PLAN_BYTES if imported else MAX_BYTES, budget)
-        plan = RoomPlan.decode(raw, budget.work) if imported else RoomPlan.from_request(raw, budget.work)
-        if operation == 'allocate':
+        if operation == 'site-and-allocate':
+            from room_inventory_layout import acquire
+            from room_layout import MAX_INPUT
+            raw = read_input(args.request_file, MAX_INPUT, budget)
             authority = inventory.Authority.load()
-            raw = allocate_plan(plan, authority, budget, emit=args.emit)
-        elif args.emit == 'plan':
-            raw = plan.encode()  # Canonical artifact imports intentionally require no trailing newline.
+            raw = acquire(raw, authority, budget, args.emit)
         else:
-            key = 'excavation_blueprint' if args.emit == 'excavation' else 'furniture_request'
-            raw = canonical(plan.json()[key])
+            raw = read_input(args.plan_file if imported else args.request_file,
+                             MAX_PLAN_BYTES if imported else MAX_BYTES, budget)
+            plan = RoomPlan.decode(raw, budget.work) if imported else RoomPlan.from_request(raw, budget.work)
+            if operation == 'allocate':
+                authority = inventory.Authority.load()
+                raw = allocate_plan(plan, authority, budget, emit=args.emit)
+            elif args.emit == 'plan':
+                raw = plan.encode()
+            else:
+                key = 'excavation_blueprint' if args.emit == 'excavation' else 'furniture_request'
+                raw = canonical(plan.json()[key])
         if authority is not None:
             authority.guard()
         budget.remaining()

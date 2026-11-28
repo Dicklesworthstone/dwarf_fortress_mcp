@@ -15,7 +15,7 @@ import struct
 from construction_monitor_rpc import (
     Budget, Client as ReceiptClient, OPERATIONS_TOKEN, PROFILES, decode, encode, endpoint,
 )
-from construction_receipt import Manifest, decode_operations
+from construction_receipt import Manifest, Operations, decode_operations
 from furniture_allocation import Candidate, Guard, Request, allocate
 from furniture_plan import canonical, integer, require
 from furniture_handoff import Handoff, InventorySource, Selected
@@ -115,6 +115,27 @@ def project(request: Request, raw: bytes, guard: Guard,
     observed = decode_operations(raw, guard)
     require((observed.folder, observed.site) == (request.folder, request.site),
             'inventory is not from the requested fortress')
+    candidates, counts = eligible_items(observed, request.excluded_items, guard)
+    result = allocate(request, candidates, guard)
+    result['request'] = request.json()
+    result['source'] = source_reference(observed)
+    result['projection'] = projection_summary(observed, counts)
+    if handoff_binding is not None:
+        result['schema'] = 'dfmcp.furniture-allocation-handoff-result/1'
+        result['handoff'] = None
+        if result['status'] == 'allocated':
+            handoff = bind_allocation(request, result, observed, *handoff_binding, guard)
+            result['handoff'], result['handoff_digest'] = handoff.json(), handoff.digest
+            del result['request'], result['assignments']
+            result['allocation_details_location'] = 'handoff'
+    guard()
+    return result
+
+
+FURNITURE_KINDS = {'BED': 'bed', 'CHAIR': 'chair', 'TABLE': 'table'}
+
+
+def eligible_items(observed: Operations, excluded_items, guard: Guard) -> tuple[tuple[Candidate, ...], dict]:
     linked, containing = set(), set()
     for _, identity, _, _ in observed.attachments:
         guard()
@@ -123,13 +144,12 @@ def project(request: Request, raw: bytes, guard: Guard,
         guard()
         if value.container is not None:
             containing.add(value.container)
-    kinds = {'BED': 'bed', 'CHAIR': 'chair', 'TABLE': 'table'}
     counts = dict.fromkeys(('unsupported_kind', 'projected_flags', 'related_item',
                            'non_singleton', 'unknown_material', 'invalid_position', 'excluded', 'candidate'), 0)
-    candidates, excluded = [], set(request.excluded_items)
+    candidates, excluded = [], set(excluded_items)
     for value in observed.items.values():
         guard()
-        if value.kind not in kinds:
+        if value.kind not in FURNITURE_KINDS:
             reason = 'unsupported_kind'
         # Native field order: forbid, in_job, dump, removed, rotten, trader,
         # on_ground, in_inventory, in_building. Only on_ground may be set.
@@ -148,45 +168,42 @@ def project(request: Request, raw: bytes, guard: Guard,
             reason = 'excluded'
         else:
             reason = 'candidate'
-            candidates.append(Candidate(value.id, kinds[value.kind], value.position,
+            candidates.append(Candidate(value.id, FURNITURE_KINDS[value.kind], value.position,
                                         (value.material, value.material_index), value.subtype))
         counts[reason] += 1
-    result = allocate(request, tuple(candidates), guard)
-    result['request'] = request.json()
-    result['source'] = {'schema': 'dfmcp.operations-capture-reference/1', 'profile': 'operations/1.4',
-                        'capture_sha256': observed.digest, 'capture_bytes': len(raw),
-                        'game_tick': observed.tick, 'paused_at_capture': observed.paused,
-                        'world_folder': observed.folder, 'site': observed.site,
-                        'native_horizons': list(observed.horizons)}
-    result['projection'] = {'policy': POLICY, 'complete_roster_decoded': True,
-                            'jobs': len(observed.jobs), 'buildings': len(observed.buildings),
-                            'items': len(observed.items), 'attachments': len(observed.attachments),
-                            'counts': counts, 'unprojected_item_state': 'unknown',
-                            'terrain_and_map_dimensions': 'not_observed', 'placement_state': 'not_queried'}
-    if handoff_binding is not None:
-        address, manifest = handoff_binding
-        result['schema'] = 'dfmcp.furniture-allocation-handoff-result/1'
-        result['handoff'] = None
-        if result['status'] == 'allocated':
-            source = InventorySource(address, manifest.generation, manifest.df_version,
-                manifest.dfhack_version, observed.digest, len(raw), observed.tick, observed.horizons)
-            selected = []
-            for assignment in result['assignments']:
-                guard()
-                item = observed.items[assignment['item']]
-                selected.append(Selected(assignment['slot'],
-                    Candidate(item.id, kinds[item.kind], item.position,
-                              (item.material, item.material_index), item.subtype), item.native_type))
-            handoff = Handoff(request, source, tuple(selected))
-            require(handoff.plan().json() == result['plan'], 'handoff differs from complete allocation')
-            result['handoff'], result['handoff_digest'] = handoff.json(), handoff.digest
-            # Full request and original selections live in the handoff; do not duplicate
-            # them and consume the output budget needed for the executable plan.
-            del result['request']
-            del result['assignments']
-            result['allocation_details_location'] = 'handoff'
-    guard()
-    return result
+    return tuple(candidates), counts
+
+
+def source_reference(observed: Operations) -> dict:
+    return {'schema': 'dfmcp.operations-capture-reference/1', 'profile': 'operations/1.4',
+            'capture_sha256': observed.digest, 'capture_bytes': len(observed.raw),
+            'game_tick': observed.tick, 'paused_at_capture': observed.paused,
+            'world_folder': observed.folder, 'site': observed.site,
+            'native_horizons': list(observed.horizons)}
+
+
+def projection_summary(observed: Operations, counts: dict) -> dict:
+    return {'policy': POLICY, 'complete_roster_decoded': True,
+            'jobs': len(observed.jobs), 'buildings': len(observed.buildings),
+            'items': len(observed.items), 'attachments': len(observed.attachments),
+            'counts': counts, 'unprojected_item_state': 'unknown',
+            'terrain_and_map_dimensions': 'not_observed', 'placement_state': 'not_queried'}
+
+
+def bind_allocation(request: Request, result: dict, observed: Operations, address: str,
+                    manifest: Manifest, guard: Guard) -> Handoff:
+    source = InventorySource(address, manifest.generation, manifest.df_version,
+        manifest.dfhack_version, observed.digest, len(observed.raw), observed.tick, observed.horizons)
+    selected = []
+    for assignment in result['assignments']:
+        guard()
+        item = observed.items[assignment['item']]
+        selected.append(Selected(assignment['slot'],
+            Candidate(item.id, FURNITURE_KINDS[item.kind], item.position,
+                      (item.material, item.material_index), item.subtype), item.native_type))
+    handoff = Handoff(request, source, tuple(selected))
+    require(handoff.plan().json() == result['plan'], 'handoff differs from complete allocation')
+    return handoff
 
 
 def packet(result: dict | None, error_class: str | None = None) -> dict:

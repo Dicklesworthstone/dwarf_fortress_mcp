@@ -174,3 +174,26 @@ Equal-distance candidates at the same origin are tried by angle then width.
 The tile and excavation objectives compare complete connected projects across
 the permitted widths. The observed excavation objective can select a different
 width to reuse existing floor.
+
+## Choose a site that the observed furniture can supply
+
+`python3 scripts/plan_rooms.py site-and-allocate --request-file layout.json`
+reads one complete Operations/1.4 furniture census using the same isolated
+inventory credentials as `plan_rooms.py allocate`. It releases that capture
+before searching. Each complete connected layout must admit a distinct
+eligible item for every slot, with the original material, subtype, same-level
+distance and exclusion constraints. A shortage at one origin sends the search
+on to another origin, width or orientation. When an objective is requested,
+only layouts with complete assignments compete for it.
+
+The report retains the original normalized layout request, capture digest and
+source, projection counts, search outcome, inventory rejections and selected
+room handoff. Use `--emit room-handoff` for the existing fixed-geometry and
+exact-item artifact. Each successful invocation acquires its own census. A
+search limit with no complete incumbent or an exhausted domain produces no
+handoff. Full-project work and time limits also apply to inventory matching.
+
+The census observes furniture at its capture tick. Terrain and hauling routes
+need separate observation, and the existing placement workflow must still review
+the selected items. Positive vertical hauling distances belong to the
+route-aware allocation workflow.

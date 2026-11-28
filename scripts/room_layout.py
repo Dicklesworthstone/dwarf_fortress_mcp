@@ -427,12 +427,25 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
     inconclusive without a full incumbent; work/cancellation refusal always
     raises without returning any plan. Legacy first-feasible bytes are unchanged.
     """
+    request, profiles, work = prepare_request(raw, guard)
+    result = Layout(canonical(_search(request, profiles, work)))
+    require(len(result.encode()) <= MAX_OUTPUT, 'complete layout result exceeds output bound')
+    guard()
+    return result
+
+
+def prepare_request(raw: bytes, guard: Guard) -> tuple[dict, tuple[_Profile, ...], _Work]:
     value = _json(raw, MAX_INPUT, guard)
     require(type(value) is dict, 'layout request must be an object')
     search = value.get('search', {})
     _object(search, set(), {'max_nodes', 'max_work'})
     work = _Work(search.get('max_work', DEFAULT_WORK), guard)
     request, profiles = _normalize(value, work)
+    return request, profiles, work
+
+
+def _search(request: dict, profiles: tuple[_Profile, ...], work: _Work,
+            approve_plan: Callable[[RoomPlan], bool] | None = None) -> dict:
     low, size = _region(request['region'], domain=True)
     regions = [_region(row) for row in request['excluded_regions']]
     forbidden = 0
@@ -539,6 +552,9 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
                 if not capacity['within_profile_limits']:
                     capacity_refused += 1
                     return None
+            if approve_plan is not None and not approve_plan(plan):
+                trace.update(canonical(['inventory_shortage', plan.digest]))
+                return None
             trace.update(bytes.fromhex(plan.digest))
             if ranking is not None:
                 ranking.consider(plan)
@@ -639,7 +655,4 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
         body['optimization']['scope'] = (
             'declared_origins_rotations_connection_compiler_and_complete_residual_partition')
         body['search']['work_units'] = work.used
-    result = Layout(canonical(body))
-    require(len(result.encode()) <= MAX_OUTPUT, 'complete layout result exceeds output bound')
-    guard()
-    return result
+    return body
