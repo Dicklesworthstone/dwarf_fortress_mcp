@@ -205,3 +205,26 @@ and a lower bound on the additional eligible items needed. This check lets each
 slot occupy any tile in the region, retaining the level, material, subtype,
 exclusion and maximum haul distance constraints. A successful relaxed match
 still requires the complete spatial search and an exact assignment.
+
+To site the project against both terrain and stock, supply the canonical padded
+map compilation from the room layout excavation command:
+
+```sh
+python3 scripts/plan_rooms.py site-and-allocate \
+  --excavation-layout-file original-excavation-layout.json --emit report
+```
+
+This replays the original terrain capture and opens one inventory reader. Both
+observations must identify the same endpoint, paused game tick, fortress and
+DF/DFHack versions. Their plugin generations are recorded independently. The
+search can replace the archive's earlier choice of site. It checks each
+inventory-feasible candidate against the original padded map, including the
+remaining-wall halo, preserved private walls and native excavation part limits.
+
+On success the report's `room_handoff` and any `excavation_handoff` refer to
+the same fixed room plan. The latter contains only observed remaining wall
+targets. When every target is already open, the terrain survey records that
+condition and the furniture handoff remains available. Both artifacts can be
+taken directly from this single report. The two captures have independent
+provenance; matching ticks cannot attest an atomic snapshot or a restore epoch.
+The existing dig and placement workflows still require separate review.

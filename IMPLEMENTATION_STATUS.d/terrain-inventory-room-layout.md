@@ -1,0 +1,1 @@
+The Python inventory siting command can replay a padded map/1.5 compilation and join an Operations/1.4 inventory at a matching paused tick, endpoint, fortress and software version. Each furnished candidate passes the final terrain survey before selection. This is a two-source development proposal without atomic capture or live mutation claims.

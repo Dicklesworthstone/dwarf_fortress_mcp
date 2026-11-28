@@ -448,7 +448,7 @@ def prepare_request(raw: bytes, guard: Guard) -> tuple[dict, tuple[_Profile, ...
 
 
 def _search(request: dict, profiles: tuple[_Profile, ...], work: _Work,
-            approve_plan: Callable[[RoomPlan], bool] | None = None) -> dict:
+            rejection_reason: Callable[[RoomPlan], str | None] | None = None) -> dict:
     low, size = _region(request['region'], domain=True)
     regions = [_region(row) for row in request['excluded_regions']]
     forbidden = 0
@@ -555,9 +555,11 @@ def _search(request: dict, profiles: tuple[_Profile, ...], work: _Work,
                 if not capacity['within_profile_limits']:
                     capacity_refused += 1
                     return None
-            if approve_plan is not None and not approve_plan(plan):
-                trace.update(canonical(['inventory_shortage', plan.digest]))
-                return None
+            if rejection_reason is not None:
+                reason = rejection_reason(plan)
+                if reason is not None:
+                    trace.update(canonical([reason, plan.digest]))
+                    return None
             trace.update(bytes.fromhex(plan.digest))
             if ranking is not None:
                 ranking.consider(plan)

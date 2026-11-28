@@ -149,9 +149,11 @@ def main(argv: list[str] | None = None) -> int:
         allocate_command.add_argument('--emit', choices=('report', 'room-handoff'), default='report')
         site_command = commands.add_parser('site-and-allocate',
             help='choose a complete layout that one observed furniture inventory can supply')
-        site_command.add_argument('--request-file', required=True)
+        site_source = site_command.add_mutually_exclusive_group(required=True)
+        site_source.add_argument('--request-file')
+        site_source.add_argument('--excavation-layout-file', help='replay the original padded map and room request')
         site_command.add_argument('--timeout-ms', type=int, default=10000)
-        site_command.add_argument('--emit', choices=('report', 'room-handoff'), default='report')
+        site_command.add_argument('--emit', choices=('report', 'room-handoff', 'excavation-handoff'), default='report')
         args = parser.parse_args(argv)
         operation = args.operation
         budget = inventory.Budget(args.timeout_ms)
@@ -159,9 +161,12 @@ def main(argv: list[str] | None = None) -> int:
         if operation == 'site-and-allocate':
             from room_inventory_layout import acquire
             from room_layout import MAX_INPUT
-            raw = read_input(args.request_file, MAX_INPUT, budget)
+            from room_layout_excavation import MAX_OUTPUT as MAX_EXCAVATION_LAYOUT
+            archived = args.excavation_layout_file is not None
+            raw = read_input(args.excavation_layout_file if archived else args.request_file,
+                             MAX_EXCAVATION_LAYOUT if archived else MAX_INPUT, budget)
             authority = inventory.Authority.load()
-            raw = acquire(raw, authority, budget, args.emit)
+            raw = acquire(raw, authority, budget, args.emit, terrain_archive=archived)
         else:
             raw = read_input(args.plan_file if imported else args.request_file,
                              MAX_PLAN_BYTES if imported else MAX_BYTES, budget)

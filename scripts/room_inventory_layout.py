@@ -51,35 +51,43 @@ def _domain_supply(request, profiles, candidates, work):
             'shortage': witness}
 
 
-def evaluate(prepared, capture: bytes, manifest: Manifest, address: str) -> dict:
+def evaluate(prepared, capture: bytes, manifest: Manifest, address: str, site=None) -> dict:
     request, profiles, work = prepared
     observed = decode_operations(capture, work)
     require((observed.folder, observed.site) == (request['world_folder'], request['site']),
             'inventory is not from the requested fortress')
     inventory.endpoint(address)
     manifest.encode()
+    if site is not None:
+        require(address == site.address, 'inventory endpoint differs from the replayed map')
+        site.check_census(observed, manifest)
     candidates, counts = inventory.eligible_items(observed, request['excluded_items'], work)
-    tested = shortages = 0
+    tested = shortages = terrain_refusals = 0
 
-    def has_stock(plan: RoomPlan) -> bool:
-        nonlocal tested, shortages
+    def reject_site(plan: RoomPlan) -> str | None:
+        nonlocal tested, shortages, terrain_refusals
         allocation = allocate(plan.request(), candidates, work)
         tested += 1
         if allocation['status'] == 'shortage':
             shortages += 1
-            return False
+            return 'inventory_shortage'
         require(allocation['status'] == 'allocated', 'unrecognized allocation outcome')
-        return True
+        if site is not None:
+            survey, _ = site.survey(plan, work)
+            if survey['status'] == 'blocked':
+                terrain_refusals += 1
+                return 'terrain_blocked'
+        return None
 
     supply = _domain_supply(request, profiles, candidates, work)
     if supply['shortage'] is None:
-        result = layout._search(request, profiles, work, has_stock)
+        result = layout._search(request, profiles, work, reject_site)
     else:
         result = {'status': 'inventory_shortage_in_domain',
                   'search': {'nodes_visited': 0, 'domain_exhausted': False,
                              'stop_reason': 'insufficient_distinct_furniture_for_any_layout',
                              'work_limit': work.maximum, 'node_limit': request['search']['max_nodes']}}
-    handoff = None
+    handoff = survey = dig = None
     if result['status'] == 'layout_found':
         plan = RoomPlan.decode(canonical(result['room_plan']), work)
         slots = plan.request()
@@ -87,6 +95,8 @@ def evaluate(prepared, capture: bytes, manifest: Manifest, address: str) -> dict
         require(selection['status'] == 'allocated', 'selected room lost its complete inventory allocation')
         allocation = inventory.bind_allocation(slots, selection, observed, address, manifest, work)
         handoff = RoomFurnitureHandoff(plan, allocation, checkpoint=work).json()
+        if site is not None:
+            survey, dig = site.summarize(plan, work)
 
     source = {**inventory.source_reference(observed), 'endpoint': address,
               'native_generation': manifest.generation, 'df_version': manifest.df_version,
@@ -103,13 +113,34 @@ def evaluate(prepared, capture: bytes, manifest: Manifest, address: str) -> dict
         report['optimization']['scope'] += '_with_complete_captured_inventory_assignment'
     if 'residual_partition' in result:
         report['residual_partition'] = result['residual_partition']
+    if site is not None:
+        report.update(schema='dfmcp.terrain-inventory-room-layout/1', request=site.original,
+                      constrained_request=request, map_source=site.source,
+                      map_compilation_digest=site.compilation_digest,
+                      map_endpoint=site.address, terrain_observed=True, terrain_survey=survey,
+                      layouts_rejected_by_final_terrain_survey=terrain_refusals,
+                      excavation_handoff=dig, independent_capture_atomicity_proven=False)
+        if 'optimization' in report:
+            optimization = report['optimization']
+            optimization['scope'] += '_and_replayed_padded_terrain'
+            if site.original.get('objective') == 'minimum-observed-excavation/1':
+                optimization['cost_evidence'] = 'replayed_complete_padded_map'
+                if survey is not None:
+                    remaining = survey['target_counts']['remaining_wall']
+                    require(optimization['score']['excavation_cost'] == remaining,
+                            'selected excavation cost differs from observed remaining wall targets')
+                    optimization['observed_wall_targets'] = remaining
+                    optimization['observed_floor_targets'] = survey['target_counts']['observed_floor']
     work()
     report['search']['work_units'] = work.used
-    require(len(canonical(report)) <= MAX_REPORT, 'complete inventory layout report exceeds its byte bound')
+    if site is not None:
+        report['combined_work_units'] = site.work.used
+    require(len(canonical(report)) <= (512 * 1024 if site is not None else MAX_REPORT), 'complete inventory layout report exceeds its byte bound')
     return report
 
 
-def acquire(raw: bytes, authority: inventory.Authority, budget: inventory.Budget, emit: str) -> bytes:
+def acquire(raw: bytes, authority: inventory.Authority, budget: inventory.Budget, emit: str,
+            *, terrain_archive: bool = False) -> bytes:
     authority.guard()
 
     def guard():
@@ -118,14 +149,25 @@ def acquire(raw: bytes, authority: inventory.Authority, budget: inventory.Budget
         # The client checks it at I/O boundaries and again before publication.
         if budget.work_steps % 128 == 0:
             authority.guard()
-    prepared = prepare(raw, guard)
+    address = f'{authority.address[0]}:{authority.address[1]}'
+    site = None
+    if terrain_archive:
+        from room_inventory_terrain import CapturedSite
+        site = CapturedSite.replay(raw, address, guard)
+        prepared = prepare(canonical(site.constrained), site.work)
+    else:
+        require(emit != 'excavation-handoff', 'excavation export requires an archived terrain capture')
+        prepared = prepare(raw, guard)
     with inventory.InventoryClient(authority, budget) as client:
         manifest, capture = client.capture_once()
-    report = evaluate(prepared, capture, manifest, f'{authority.address[0]}:{authority.address[1]}')
+    report = evaluate(prepared, capture, manifest, address, site)
     report.update(native_capture_established=True, capture_release_verified=True)
     if emit == 'room-handoff':
         require(report['room_handoff'] is not None, 'a complete room allocation is required for export')
         result = canonical(report['room_handoff'])
+    elif emit == 'excavation-handoff':
+        require(report['excavation_handoff'] is not None, 'site has no complete residual excavation proposal')
+        result = canonical(report['excavation_handoff'])
     else:
         require(emit == 'report', 'unsupported inventory layout export')
         result = canonical(report)
