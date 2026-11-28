@@ -144,3 +144,39 @@ descriptor, one-read/zero-writer behavior, closed recovery floors, late failures
 ACK damage, legacy/Offline refusal and the public stdio lifecycle. Source review
 completed; compilation and test execution have not completed for this increment.
 Native methods, tool names and production admission remain unchanged.
+
+## Inspect the Manager’s assigned office on a paused fortress
+
+Copy `bridge/oracles/dfmcp-manager-office.lua` into DFHack’s `hack/scripts/`.
+On DFHack 53.16-r1.1, pause the fortress and run `dfmcp-manager-office` in the
+DFHack console. This operator diagnostic reads the game once under suspension
+and emits one JSON object with the site, save folder, year and year tick. It
+requires the release’s pinned df-structures revision.
+
+The report resolves the fortress entity’s current MANAGER position, assignment,
+historical figure, unit and historical position link. It includes the role’s
+raw `required_office`, the Manager’s current job when present, the fortress’s
+`nobles.manager_cooldown` and its separate `manager_timer` quota-check counter.
+Capture these counters at each independently authorized paused observation
+when investigating an unvalidated order.
+
+`assigned_office_with_completed_chair_observed` identifies an active Office
+zone directly assigned to the Manager and reciprocally listed among that
+unit’s owned buildings. A visible, completed chair must also occur in the
+zone’s native contained-building list and on a selected tile on the same
+z-level. A chair awaiting removal cannot satisfy this test. The office and
+chair building IDs and chair position let the operator compare the result
+with a specific furniture placement. Every directly assigned office has its
+own row. Rows distinguish a missing owner backlink, an inactive zone, a
+partial build, a footprint hole and an absent containment link. Hidden tiles
+suppress chair details and set `visibility_limited`. Oversized or inconsistent
+indices fail the read without publishing a partial report.
+
+The reading covers direct ownership and visible installed furniture. Office
+value, access paths, acceptance of an order by the Manager, and finished
+production require independent evidence. The release’s `Buildings::getRoomDescription`
+implementation returns an empty string. This diagnostic does not create an
+office or change its owner, simulation clock, or work orders.
+
+The implementation follows the [pinned DFHack Buildings module](https://github.com/DFHack/dfhack/blob/b638b59d0876d9bdf8b5f97e52714206ab7f3266/library/modules/Buildings.cpp)
+and the [pinned building structures](https://github.com/DFHack/df-structures/blob/1dd01aad64219afa0578f1328cf15bd0c6006d5a/df.building.xml).
